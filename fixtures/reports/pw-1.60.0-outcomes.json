@@ -1,0 +1,636 @@
+{
+  "config": {
+    "configFile": "playwright.config.ts",
+    "rootDir": ".",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {},
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "test-results",
+        "repeatEach": 1,
+        "retries": 2,
+        "metadata": {},
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": ".",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json",
+        {
+          "outputFile": "../reports/pw-1.60.0-outcomes.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.60.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "tests/outcomes.spec.ts",
+      "file": "tests/outcomes.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "always passes",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "f3a6aab211907d139a3d-bbc238e3edd73b2363dc",
+          "file": "tests/outcomes.spec.ts",
+          "line": 7,
+          "column": 1
+        },
+        {
+          "title": "flaky by retry",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 0,
+                  "error": {
+                    "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  getByRole('heading', { name: 'Ready' })\nExpected: \"not ready\"\nReceived: \"Ready\"\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Ready' })\n    1 × locator resolved to <h1>Ready</h1>\n       - unexpected value \"Ready\"\n",
+                    "stack": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  getByRole('heading', { name: 'Ready' })\nExpected: \"not ready\"\nReceived: \"Ready\"\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Ready' })\n    1 × locator resolved to <h1>Ready</h1>\n       - unexpected value \"Ready\"\n\n    at tests/outcomes.spec.ts:15:64",
+                    "location": {
+                      "file": "tests/outcomes.spec.ts",
+                      "column": 64,
+                      "line": 15
+                    },
+                    "snippet": "  13 |   await page.goto(appUrl);\n  14 |   if (testInfo.retry === 0) {\n> 15 |     await expect(page.getByRole('heading', { name: 'Ready' })).toHaveText('not ready');\n     |                                                                ^\n  16 |   } else {\n  17 |     await expect(page.getByRole('heading', { name: 'Ready' })).toHaveText('Ready');\n  18 |   }"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "tests/outcomes.spec.ts",
+                        "column": 64,
+                        "line": 15
+                      },
+                      "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  getByRole('heading', { name: 'Ready' })\nExpected: \"not ready\"\nReceived: \"Ready\"\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Ready' })\n    1 × locator resolved to <h1>Ready</h1>\n       - unexpected value \"Ready\"\n\n\n  13 |   await page.goto(appUrl);\n  14 |   if (testInfo.retry === 0) {\n> 15 |     await expect(page.getByRole('heading', { name: 'Ready' })).toHaveText('not ready');\n     |                                                                ^\n  16 |   } else {\n  17 |     await expect(page.getByRole('heading', { name: 'Ready' })).toHaveText('Ready');\n  18 |   }\n    at tests/outcomes.spec.ts:15:64"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "test-results/tests-outcomes-flaky-by-retry-chromium/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "tests/outcomes.spec.ts",
+                    "column": 64,
+                    "line": 15
+                  }
+                },
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 1,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "flaky"
+            }
+          ],
+          "id": "f3a6aab211907d139a3d-abdd239aef3048bff667",
+          "file": "tests/outcomes.spec.ts",
+          "line": 12,
+          "column": 1
+        },
+        {
+          "title": "always fails",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 0,
+                  "error": {
+                    "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  getByRole('heading', { name: 'Ready' })\nExpected: \"a different heading\"\nReceived: \"Ready\"\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Ready' })\n    1 × locator resolved to <h1>Ready</h1>\n       - unexpected value \"Ready\"\n",
+                    "stack": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  getByRole('heading', { name: 'Ready' })\nExpected: \"a different heading\"\nReceived: \"Ready\"\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Ready' })\n    1 × locator resolved to <h1>Ready</h1>\n       - unexpected value \"Ready\"\n\n    at tests/outcomes.spec.ts:23:62",
+                    "location": {
+                      "file": "tests/outcomes.spec.ts",
+                      "column": 62,
+                      "line": 23
+                    },
+                    "snippet": "  21 | test('always fails', async ({ page }) => {\n  22 |   await page.goto(appUrl);\n> 23 |   await expect(page.getByRole('heading', { name: 'Ready' })).toHaveText('a different heading');\n     |                                                              ^\n  24 | });\n  25 |\n  26 | test('times out', async ({ page }) => {"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "tests/outcomes.spec.ts",
+                        "column": 62,
+                        "line": 23
+                      },
+                      "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  getByRole('heading', { name: 'Ready' })\nExpected: \"a different heading\"\nReceived: \"Ready\"\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Ready' })\n    1 × locator resolved to <h1>Ready</h1>\n       - unexpected value \"Ready\"\n\n\n  21 | test('always fails', async ({ page }) => {\n  22 |   await page.goto(appUrl);\n> 23 |   await expect(page.getByRole('heading', { name: 'Ready' })).toHaveText('a different heading');\n     |                                                              ^\n  24 | });\n  25 |\n  26 | test('times out', async ({ page }) => {\n    at tests/outcomes.spec.ts:23:62"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "test-results/tests-outcomes-always-fails-chromium/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "tests/outcomes.spec.ts",
+                    "column": 62,
+                    "line": 23
+                  }
+                },
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 0,
+                  "error": {
+                    "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  getByRole('heading', { name: 'Ready' })\nExpected: \"a different heading\"\nReceived: \"Ready\"\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Ready' })\n    1 × locator resolved to <h1>Ready</h1>\n       - unexpected value \"Ready\"\n",
+                    "stack": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  getByRole('heading', { name: 'Ready' })\nExpected: \"a different heading\"\nReceived: \"Ready\"\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Ready' })\n    1 × locator resolved to <h1>Ready</h1>\n       - unexpected value \"Ready\"\n\n    at tests/outcomes.spec.ts:23:62",
+                    "location": {
+                      "file": "tests/outcomes.spec.ts",
+                      "column": 62,
+                      "line": 23
+                    },
+                    "snippet": "  21 | test('always fails', async ({ page }) => {\n  22 |   await page.goto(appUrl);\n> 23 |   await expect(page.getByRole('heading', { name: 'Ready' })).toHaveText('a different heading');\n     |                                                              ^\n  24 | });\n  25 |\n  26 | test('times out', async ({ page }) => {"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "tests/outcomes.spec.ts",
+                        "column": 62,
+                        "line": 23
+                      },
+                      "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  getByRole('heading', { name: 'Ready' })\nExpected: \"a different heading\"\nReceived: \"Ready\"\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Ready' })\n    1 × locator resolved to <h1>Ready</h1>\n       - unexpected value \"Ready\"\n\n\n  21 | test('always fails', async ({ page }) => {\n  22 |   await page.goto(appUrl);\n> 23 |   await expect(page.getByRole('heading', { name: 'Ready' })).toHaveText('a different heading');\n     |                                                              ^\n  24 | });\n  25 |\n  26 | test('times out', async ({ page }) => {\n    at tests/outcomes.spec.ts:23:62"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 1,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "test-results/tests-outcomes-always-fails-chromium-retry1/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "tests/outcomes.spec.ts",
+                    "column": 62,
+                    "line": 23
+                  }
+                },
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 0,
+                  "error": {
+                    "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  getByRole('heading', { name: 'Ready' })\nExpected: \"a different heading\"\nReceived: \"Ready\"\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Ready' })\n    1 × locator resolved to <h1>Ready</h1>\n       - unexpected value \"Ready\"\n",
+                    "stack": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  getByRole('heading', { name: 'Ready' })\nExpected: \"a different heading\"\nReceived: \"Ready\"\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Ready' })\n    1 × locator resolved to <h1>Ready</h1>\n       - unexpected value \"Ready\"\n\n    at tests/outcomes.spec.ts:23:62",
+                    "location": {
+                      "file": "tests/outcomes.spec.ts",
+                      "column": 62,
+                      "line": 23
+                    },
+                    "snippet": "  21 | test('always fails', async ({ page }) => {\n  22 |   await page.goto(appUrl);\n> 23 |   await expect(page.getByRole('heading', { name: 'Ready' })).toHaveText('a different heading');\n     |                                                              ^\n  24 | });\n  25 |\n  26 | test('times out', async ({ page }) => {"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "tests/outcomes.spec.ts",
+                        "column": 62,
+                        "line": 23
+                      },
+                      "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  getByRole('heading', { name: 'Ready' })\nExpected: \"a different heading\"\nReceived: \"Ready\"\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Ready' })\n    1 × locator resolved to <h1>Ready</h1>\n       - unexpected value \"Ready\"\n\n\n  21 | test('always fails', async ({ page }) => {\n  22 |   await page.goto(appUrl);\n> 23 |   await expect(page.getByRole('heading', { name: 'Ready' })).toHaveText('a different heading');\n     |                                                              ^\n  24 | });\n  25 |\n  26 | test('times out', async ({ page }) => {\n    at tests/outcomes.spec.ts:23:62"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 2,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "test-results/tests-outcomes-always-fails-chromium-retry2/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "tests/outcomes.spec.ts",
+                    "column": 62,
+                    "line": 23
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "f3a6aab211907d139a3d-cafe45896320d9193d5a",
+          "file": "tests/outcomes.spec.ts",
+          "line": 21,
+          "column": 1
+        },
+        {
+          "title": "times out",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 1000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "timedOut",
+                  "duration": 0,
+                  "error": {
+                    "message": "Test timeout of 1000ms exceeded.",
+                    "stack": "Test timeout of 1000ms exceeded."
+                  },
+                  "errors": [
+                    {
+                      "message": "Test timeout of 1000ms exceeded."
+                    },
+                    {
+                      "location": {
+                        "file": "tests/outcomes.spec.ts",
+                        "column": 61,
+                        "line": 29
+                      },
+                      "message": "Error: locator.waitFor: Test timeout of 1000ms exceeded.\nCall log:\n  - waiting for getByRole('button', { name: 'Never Appears' }) to be visible\n\n\n  27 |   test.setTimeout(1000);\n  28 |   await page.goto(appUrl);\n> 29 |   await page.getByRole('button', { name: 'Never Appears' }).waitFor();\n     |                                                             ^\n  30 | });\n  31 |\n  32 | test.skip('skipped test', async () => {\n    at tests/outcomes.spec.ts:29:61"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "test-results/tests-outcomes-times-out-chromium/error-context.md"
+                    }
+                  ]
+                },
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "timedOut",
+                  "duration": 0,
+                  "error": {
+                    "message": "Test timeout of 1000ms exceeded.",
+                    "stack": "Test timeout of 1000ms exceeded."
+                  },
+                  "errors": [
+                    {
+                      "message": "Test timeout of 1000ms exceeded."
+                    },
+                    {
+                      "location": {
+                        "file": "tests/outcomes.spec.ts",
+                        "column": 61,
+                        "line": 29
+                      },
+                      "message": "Error: locator.waitFor: Test timeout of 1000ms exceeded.\nCall log:\n  - waiting for getByRole('button', { name: 'Never Appears' }) to be visible\n\n\n  27 |   test.setTimeout(1000);\n  28 |   await page.goto(appUrl);\n> 29 |   await page.getByRole('button', { name: 'Never Appears' }).waitFor();\n     |                                                             ^\n  30 | });\n  31 |\n  32 | test.skip('skipped test', async () => {\n    at tests/outcomes.spec.ts:29:61"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 1,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "test-results/tests-outcomes-times-out-chromium-retry1/error-context.md"
+                    }
+                  ]
+                },
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "timedOut",
+                  "duration": 0,
+                  "error": {
+                    "message": "Test timeout of 1000ms exceeded.",
+                    "stack": "Test timeout of 1000ms exceeded."
+                  },
+                  "errors": [
+                    {
+                      "message": "Test timeout of 1000ms exceeded."
+                    },
+                    {
+                      "location": {
+                        "file": "tests/outcomes.spec.ts",
+                        "column": 61,
+                        "line": 29
+                      },
+                      "message": "Error: locator.waitFor: Test timeout of 1000ms exceeded.\nCall log:\n  - waiting for getByRole('button', { name: 'Never Appears' }) to be visible\n\n\n  27 |   test.setTimeout(1000);\n  28 |   await page.goto(appUrl);\n> 29 |   await page.getByRole('button', { name: 'Never Appears' }).waitFor();\n     |                                                             ^\n  30 | });\n  31 |\n  32 | test.skip('skipped test', async () => {\n    at tests/outcomes.spec.ts:29:61"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 2,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "test-results/tests-outcomes-times-out-chromium-retry2/error-context.md"
+                    }
+                  ]
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "f3a6aab211907d139a3d-ef9d66f51b5140ae11f9",
+          "file": "tests/outcomes.spec.ts",
+          "line": 26,
+          "column": 1
+        },
+        {
+          "title": "skipped test",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [
+                {
+                  "type": "skip",
+                  "location": {
+                    "file": "tests/outcomes.spec.ts",
+                    "line": 32,
+                    "column": 6
+                  }
+                }
+              ],
+              "expectedStatus": "skipped",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [
+                    {
+                      "type": "skip",
+                      "location": {
+                        "file": "tests/outcomes.spec.ts",
+                        "line": 32,
+                        "column": 6
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "f3a6aab211907d139a3d-7098c30a6b63b435c27e",
+          "file": "tests/outcomes.spec.ts",
+          "line": 32,
+          "column": 6
+        },
+        {
+          "title": "expected to fail",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [
+                {
+                  "type": "fail",
+                  "location": {
+                    "file": "tests/outcomes.spec.ts",
+                    "line": 37,
+                    "column": 8
+                  }
+                }
+              ],
+              "expectedStatus": "failed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 0,
+                  "error": {
+                    "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  getByRole('heading', { name: 'Ready' })\nExpected: \"not the heading\"\nReceived: \"Ready\"\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Ready' })\n    1 × locator resolved to <h1>Ready</h1>\n       - unexpected value \"Ready\"\n",
+                    "stack": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  getByRole('heading', { name: 'Ready' })\nExpected: \"not the heading\"\nReceived: \"Ready\"\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Ready' })\n    1 × locator resolved to <h1>Ready</h1>\n       - unexpected value \"Ready\"\n\n    at tests/outcomes.spec.ts:39:62",
+                    "location": {
+                      "file": "tests/outcomes.spec.ts",
+                      "column": 62,
+                      "line": 39
+                    },
+                    "snippet": "  37 |   test.fail();\n  38 |   await page.goto(appUrl);\n> 39 |   await expect(page.getByRole('heading', { name: 'Ready' })).toHaveText('not the heading');\n     |                                                              ^\n  40 | });\n  41 |\n  42 | test.describe('Cart', () => {"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "tests/outcomes.spec.ts",
+                        "column": 62,
+                        "line": 39
+                      },
+                      "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  getByRole('heading', { name: 'Ready' })\nExpected: \"not the heading\"\nReceived: \"Ready\"\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Ready' })\n    1 × locator resolved to <h1>Ready</h1>\n       - unexpected value \"Ready\"\n\n\n  37 |   test.fail();\n  38 |   await page.goto(appUrl);\n> 39 |   await expect(page.getByRole('heading', { name: 'Ready' })).toHaveText('not the heading');\n     |                                                              ^\n  40 | });\n  41 |\n  42 | test.describe('Cart', () => {\n    at tests/outcomes.spec.ts:39:62"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [
+                    {
+                      "type": "fail",
+                      "location": {
+                        "file": "tests/outcomes.spec.ts",
+                        "line": 37,
+                        "column": 8
+                      }
+                    }
+                  ],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "test-results/tests-outcomes-expected-to-fail-chromium/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "tests/outcomes.spec.ts",
+                    "column": 62,
+                    "line": 39
+                  }
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "f3a6aab211907d139a3d-2ef619996f8865093aea",
+          "file": "tests/outcomes.spec.ts",
+          "line": 36,
+          "column": 1
+        }
+      ],
+      "suites": [
+        {
+          "title": "Cart",
+          "file": "tests/outcomes.spec.ts",
+          "line": 42,
+          "column": 6,
+          "specs": [
+            {
+              "title": "shows the heading",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "1970-01-01T00:00:00.000Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "f3a6aab211907d139a3d-6f349b3f834e443202fe",
+              "file": "tests/outcomes.spec.ts",
+              "line": 43,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "1970-01-01T00:00:00.000Z",
+    "duration": 0,
+    "expected": 3,
+    "skipped": 1,
+    "unexpected": 2,
+    "flaky": 1
+  }
+}
