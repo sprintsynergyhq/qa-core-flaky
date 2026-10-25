@@ -32,10 +32,10 @@ type XmlNode = Record<string, unknown>;
 
 /**
  * fast-xml-parser decodes the five XML entities (`lt`, `gt`, `amp`, `apos`,
- * `quot`) and nothing else. `htmlEntities` is off. A DOCTYPE is removed
- * before parse, so custom entities and external entity identifiers are not
- * registered and are not fetched. The parser is not given an external entity
- * map. Attribute values stay strings.
+ * `quot`) and nothing else. `htmlEntities` is off. Every DOCTYPE before the
+ * root element is removed before parse, so custom entities and external
+ * entity identifiers are not registered and are not fetched. The parser is
+ * not given an external entity map. Attribute values stay strings.
  */
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -239,17 +239,27 @@ function readHostname(suite: XmlNode): string | undefined {
 }
 
 /**
- * Drop a DOCTYPE that sits before the root element.
+ * Drop every DOCTYPE that sits before the root element.
  *
- * Custom entities in that DOCTYPE would be expanded by the parser. External
- * identifiers are not fetched, and removing the declaration means they are
- * not read either. Failure text later in the file is left alone.
+ * Custom entities in any of those DOCTYPEs would be expanded by the parser.
+ * External identifiers are not fetched, and removing each declaration means
+ * they are not read either. A DOCTYPE after the root element is left alone,
+ * so failure text is not edited.
  */
 function stripDoctype(xml: string): string {
-  const start = xml.indexOf('<!DOCTYPE');
-  if (start === -1) return xml;
-  const root = indexOfRoot(xml);
-  if (root !== -1 && start > root) return xml;
+  let current = xml;
+  for (;;) {
+    const start = current.indexOf('<!DOCTYPE');
+    if (start === -1) return current;
+    const root = indexOfRoot(current);
+    if (root !== -1 && start > root) return current;
+    const end = endOfDoctype(current, start);
+    if (end === -1) return current;
+    current = current.slice(0, start) + current.slice(end);
+  }
+}
+
+function endOfDoctype(xml: string, start: number): number {
   let quote: string | undefined;
   let brackets = 0;
   for (let index = start + '<!DOCTYPE'.length; index < xml.length; index += 1) {
@@ -264,11 +274,9 @@ function stripDoctype(xml: string): string {
     }
     if (ch === '[') brackets += 1;
     else if (ch === ']') brackets = Math.max(0, brackets - 1);
-    else if (ch === '>' && brackets === 0) {
-      return xml.slice(0, start) + xml.slice(index + 1);
-    }
+    else if (ch === '>' && brackets === 0) return index + 1;
   }
-  return xml;
+  return -1;
 }
 
 function indexOfRoot(xml: string): number {

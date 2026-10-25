@@ -304,6 +304,44 @@ test('a describe titled with the spec file name stays in the title path', () => 
   assert.deepEqual(result.records[0].titlePath, ['outcomes.spec.ts', 'keeps the describe']);
 });
 
+test('error text that is not a filesystem path stays unchanged', () => {
+  const text = 'Expected pattern: /Ready/ "/inventory.html" https://www.saucedemo.com/inventory.html regex /\\d+/ "a\\\\b"';
+  const raw = JSON.stringify({
+    config: { rootDir: '/tmp/project' },
+    suites: [
+      {
+        title: 'sample.spec.ts',
+        file: 'sample.spec.ts',
+        specs: [
+          {
+            title: 'keeps the message',
+            file: 'sample.spec.ts',
+            tests: [
+              {
+                projectName: 'chromium',
+                expectedStatus: 'passed',
+                status: 'unexpected',
+                results: [
+                  {
+                    retry: 0,
+                    status: 'failed',
+                    duration: 1,
+                    errors: [{ message: text, stack: text }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const result = parsePlaywrightJson(raw, 'patterns.json');
+  assert.equal(result.warnings.length, 0);
+  assert.equal(result.records[0].attempts[0].errors[0].message, text);
+  assert.equal(result.records[0].attempts[0].errors[0].stack, text);
+});
+
 test('a test with zero results warns and still returns a record', () => {
   const raw = JSON.stringify({
     suites: [

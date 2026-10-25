@@ -9,6 +9,7 @@ import type {
   SourceInfo,
   TestRecord,
 } from '../model.js';
+import { stripLeadingBom } from './detect.js';
 import { relativizeText, stripAnsi, toPortablePath } from '../report-path.js';
 
 const ATTEMPT_STATUSES: readonly AttemptStatus[] = [
@@ -65,9 +66,10 @@ export function parsePlaywrightJson(
 }
 
 function parseJson(text: string, reportPath: string): JsonObject {
+  const source = stripLeadingBom(text);
   let value: unknown;
   try {
-    value = JSON.parse(text) as unknown;
+    value = JSON.parse(source) as unknown;
   } catch {
     throw new Error(`Invalid JSON in report ${reportPath}`);
   }

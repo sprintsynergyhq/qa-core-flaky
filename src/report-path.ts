@@ -1,18 +1,30 @@
 /**
  * Report paths stored on a record stay relative.
  *
- * A path inside the report root loses that prefix. A path outside the root,
- * or an absolute path when the report has no root, is rewritten. The stored
- * value never keeps an absolute machine path. Each distinct rewrite adds one
- * warning, and the warning quotes the relative path only.
+ * A structured path inside the report root loses that prefix. A structured
+ * path outside the root, or an absolute structured path when the report has
+ * no root, is rewritten. The stored value never keeps an absolute machine
+ * path. Each distinct rewrite adds one warning, and the warning quotes the
+ * relative path only.
+ *
+ * Error text is left unchanged except for a token that starts with the
+ * report root, or that looks like a filesystem path: `/home/`, `/Users/`,
+ * `/tmp/`, `/var/`, `/runner/`, a drive letter such as `X:\`, or a source
+ * location ending in `.ts`, `.js`, or `.mjs` with a line number. Slashes
+ * are normalized only inside such a token.
  */
 
 const OUTSIDE_ROOT_WARNING =
   'File path is outside the report root and was rewritten to a relative path: ';
 const ABSOLUTE_WARNING = 'File path was absolute and was rewritten to a relative path: ';
 
-/** An absolute path at a token boundary, with forward slashes. */
-const ABSOLUTE_TOKEN = /(^|[\s"'=(])((?:\/|[A-Za-z]:\/)[^\s"'<>|]+)/g;
+/** A token after a boundary. Quotes and parentheses stay outside the token. */
+const TEXT_TOKEN = /(^|[\s"'=(])([^\s"'<>|()]+)/g;
+
+const FILESYSTEM_PREFIXES = ['/home/', '/Users/', '/tmp/', '/var/', '/runner/'];
+
+/** `file.ts:12` or `file.ts:12:3` at the end of a token. */
+const SOURCE_LOCATION = /\.(?:ts|js|mjs):\d+(?::\d+)?$/;
 
 export function normalizeSlashes(value: string): string {
   return value.replaceAll('\\', '/');
@@ -48,17 +60,20 @@ export function toPortablePath(
   return safe;
 }
 
-/** Rewrite absolute paths inside error text. Relative text is left as written. */
+/**
+ * Rewrite filesystem paths inside error text.
+ *
+ * Patterns, URL paths, regular expressions, and backslash text stay as
+ * written. No warning is added for those.
+ */
 export function relativizeText(text: string, rootDir: string | undefined, warnings: string[]): string {
   const root = normalizeRoot(rootDir);
-  let out = normalizeSlashes(text);
-  if (root && out.includes(root)) {
-    out = out.split(`${root}/`).join('');
-    out = replaceRootBoundaries(out, root);
-  }
-  return out.replace(ABSOLUTE_TOKEN, (_full, prefix: string, token: string) => {
+  return text.replace(TEXT_TOKEN, (full, prefix: string, token: string) => {
+    if (!shouldRewriteErrorToken(token, root)) return full;
     const portable = toPortablePath(token, root, warnings);
-    return `${prefix}${portable ?? token}`;
+    if (portable === undefined) return full;
+    if (portable === '') return `${prefix}.`;
+    return `${prefix}${portable}`;
   });
 }
 
@@ -101,31 +116,13 @@ function stripAbsolutePrefix(value: string): string {
   return stripped === '' ? '.' : stripped;
 }
 
-function replaceRootBoundaries(text: string, root: string): string {
-  let out = '';
-  let from = 0;
-  while (from <= text.length) {
-    const at = text.indexOf(root, from);
-    if (at === -1) {
-      out += text.slice(from);
-      return out;
-    }
-    const next = text[at + root.length];
-    const boundary =
-      next === undefined ||
-      next === '/' ||
-      next === ':' ||
-      next === '"' ||
-      next === "'" ||
-      next === '<' ||
-      next === '>' ||
-      next === '|' ||
-      /\s/.test(next);
-    out += text.slice(from, at);
-    out += boundary ? '.' : root;
-    from = at + root.length;
-  }
-  return out;
+function shouldRewriteErrorToken(token: string, root: string | undefined): boolean {
+  const normalized = normalizeSlashes(token);
+  if (root && (normalized === root || normalized.startsWith(`${root}/`))) return true;
+  if (FILESYSTEM_PREFIXES.some((prefix) => normalized.startsWith(prefix))) return true;
+  if (/^[A-Za-z]:\//.test(normalized)) return true;
+  if (normalized.startsWith('/') && SOURCE_LOCATION.test(normalized)) return true;
+  return false;
 }
 
 function stripTrailingSlash(value: string): string {

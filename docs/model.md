@@ -112,7 +112,7 @@ A missing or blank `hostname` becomes project `default`. The parser adds one war
 
 Attachment lines do not include a name or a media type. The parser uses the file name as the attachment name and an empty content type. ANSI escape codes are removed from the failure message and text.
 
-The parser decodes the five XML entities (`lt`, `gt`, `amp`, `apos`, `quot`). It does not decode HTML entities. A `DOCTYPE` before the root element is removed before parsing, so custom entities are not expanded and external entity identifiers are not read or fetched.
+The parser decodes the five XML entities (`lt`, `gt`, `amp`, `apos`, `quot`). It does not decode HTML entities. Every `DOCTYPE` before the root element is removed before parsing, so custom entities are not expanded and external entity identifiers are not read or fetched. A `DOCTYPE` after the root element is left in place.
 
 ## Known Gaps
 

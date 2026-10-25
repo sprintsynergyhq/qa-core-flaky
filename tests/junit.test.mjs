@@ -132,6 +132,38 @@ test('XML default entities are decoded and custom entities are not expanded', ()
   assert.match(error.stack, /&nbsp;/);
 });
 
+test('a second DOCTYPE does not expand a custom entity', () => {
+  const xml = `<!DOCTYPE a []><!DOCTYPE b [<!ENTITY e "SECOND">]>
+<testsuites><testsuite hostname="chromium">
+  <testcase name="&e;" classname="a.spec.ts">
+    <failure message="&lt;kept&gt; &e;">nope</failure>
+  </testcase>
+</testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/two-doctype.xml');
+  const blob = JSON.stringify(result);
+  assert.equal(blob.includes('SECOND'), false);
+  assert.equal(result.records[0].titlePath[0], '&e;');
+  const error = result.records[0].attempts[0].errors[0];
+  assert.match(error.message, /<kept>/);
+  assert.match(error.message, /&e;/);
+  assert.equal(error.stack, 'nope');
+});
+
+test('error text that is not a filesystem path stays unchanged', () => {
+  const text =
+    'Expected pattern: /Ready/ "/inventory.html" https://www.saucedemo.com/inventory.html regex /\\d+/ "a\\\\b"';
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="patterns" classname="a.spec.ts">
+      <failure message='${text}'>kept</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/patterns.xml');
+  const error = result.records[0].attempts[0].errors[0];
+  assert.equal(error.message, text);
+  assert.equal(error.stack, 'kept');
+  assert.deepEqual(result.warnings, [NO_ATTEMPT]);
+});
+
 test('an absolute JUnit path is rewritten and does not stay absolute', () => {
   const xml = `<testsuites><testsuite hostname="chromium">
     <testcase name="runs elsewhere" file="/var/data/a.spec.ts">
@@ -174,6 +206,16 @@ test('ANSI codes are removed from a JUnit failure', () => {
   assert.equal(error.stack.includes('\u001b'), false);
   assert.match(error.message, /nope/);
   assert.match(error.stack, /red/);
+});
+
+test('a leading UTF-8 BOM is ignored for detection and JSON parsing', () => {
+  const raw = '\uFEFF{"suites":[]}';
+  assert.equal(detectFormat(raw, 'reports/bom.json'), 'json');
+  const result = parsePlaywrightJson(raw, 'reports/bom.json');
+  assert.equal(result.schemaVersion, 1);
+  assert.deepEqual(result.records, []);
+  assert.deepEqual(result.warnings, []);
+  assert.equal(detectFormat('\uFEFF<testsuite name="only"></testsuite>', 'reports/bom.xml'), 'junit');
 });
 
 test('format detection uses contents, not the file name', () => {
