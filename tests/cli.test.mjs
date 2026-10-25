@@ -4,7 +4,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { redactHomeText, writeReportPair } from '../dist/index.js';
+import {
+  buildTriageReport,
+  classifyCauses,
+  homeMarks,
+  parseJunit,
+  redactHomeText,
+  redactParseResult,
+  renderTriageJson,
+  renderTriageMarkdown,
+  writeReportPair,
+} from '../dist/index.js';
 
 const cli = 'dist/cli.js';
 const fixture = 'fixtures/reports/pw-1.60.0-outcomes.json';
@@ -638,5 +648,146 @@ test('a UNC, extended, or SMB path is redacted from JSON and JUnit', (t) => {
     const causesJson = run(['causes', report, '--json']);
     assert.equal(causesJson.status, 0, causesJson.stderr);
     hidden(causesJson.stdout, `causes --json ${path.basename(report)}`);
+  }
+});
+
+test('an extended drive frame is relative inside the root across triage, causes, and parse', (t) => {
+  const dir = keepTemp(t, 'qa-core-flaky-ext-drive-');
+  const frame = String.raw`    at \\?\C:\Users\zbob\proj\tests\p.spec.ts:3:5`;
+  const relative = 'tests/p.spec.ts:3:5';
+  const roots = [
+    ['drive', String.raw`C:\Users\zbob\proj`, true],
+    ['extended', String.raw`\\?\C:\Users\zbob\proj`, true],
+    ['outside', String.raw`D:\w`, false],
+    ['none', undefined, false],
+  ];
+
+  function jsonReport(rootDir) {
+    return JSON.stringify({
+      config: rootDir === undefined ? {} : { rootDir },
+      suites: [
+        {
+          title: 'p.spec.ts',
+          file: 'p.spec.ts',
+          specs: [
+            {
+              title: 'reads',
+              file: 'p.spec.ts',
+              tests: [
+                {
+                  projectName: 'chromium',
+                  expectedStatus: 'passed',
+                  status: 'unexpected',
+                  results: [
+                    {
+                      retry: 0,
+                      status: 'failed',
+                      duration: 1,
+                      errors: [{ message: frame, stack: frame }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  function xmlReport() {
+    return `<testsuite hostname="chromium">
+      <testcase name="reads" classname="p.spec.ts" file="p.spec.ts">
+        <failure message="${frame}"><![CDATA[${frame}]]></failure>
+      </testcase>
+    </testsuite>`;
+  }
+
+  function assertSurface(text, label, inside) {
+    assert.equal(text.includes('zbob'), false, `${label} leaks zbob`);
+    assert.equal(text.includes('C:Users'), false, `${label} is garbled`);
+    if (inside) assert.equal(text.includes(relative), true, `${label} is not relative`);
+    else assert.equal(text.includes('<home>') || text.includes('&lt;home&gt;'), true, `${label} did not redact`);
+  }
+
+  function assertCli(report, label, inside) {
+    const parsed = run(['parse', report]);
+    assert.equal(parsed.status, 0, parsed.stderr);
+    const parsedJson = JSON.parse(parsed.stdout);
+    assert.equal(
+      parsedJson.warnings.some((warning) => warning.includes('zbob')),
+      false,
+      `${label} warning`,
+    );
+    if (inside) {
+      assert.equal(parsed.stdout.includes('zbob'), false, `${label} parse`);
+      assert.equal(parsed.stdout.includes(relative), true, `${label} parse`);
+    } else {
+      assert.equal(parsed.stdout.includes('zbob'), true, `${label} parse dropped the frame`);
+      assert.equal(parsed.stdout.includes('C:Users'), false, `${label} parse garbled`);
+    }
+    const redacted = run(['parse', report, '--redact']);
+    assert.equal(redacted.status, 0, redacted.stderr);
+    assertSurface(redacted.stdout, `${label} parse --redact`, inside);
+
+    const out = path.join(dir, `${label}-out`);
+    fs.mkdirSync(out);
+    const triage = run(['triage', report, '--out-dir', out, '--fail-on', 'never']);
+    assert.equal(triage.status, 0, triage.stderr);
+    assertSurface(fs.readFileSync(path.join(out, 'triage.md'), 'utf8'), `${label} triage.md`, inside);
+    assertSurface(fs.readFileSync(path.join(out, 'triage.json'), 'utf8'), `${label} triage.json`, inside);
+    const asJson = run(['triage', report, '--json', '--fail-on', 'never']);
+    assert.equal(asJson.status, 0, asJson.stderr);
+    assertSurface(asJson.stdout, `${label} triage --json`, inside);
+
+    const causes = run(['causes', report]);
+    assert.equal(causes.status, 0, causes.stderr);
+    assertSurface(causes.stdout, `${label} causes`, inside);
+    const causesJson = run(['causes', report, '--json']);
+    assert.equal(causesJson.status, 0, causesJson.stderr);
+    assertSurface(causesJson.stdout, `${label} causes --json`, inside);
+  }
+
+  function librarySurfaces(result) {
+    const report = buildTriageReport(result.records);
+    const findings = result.records.flatMap((record) => {
+      const rows = classifyCauses(record);
+      const title = record.titlePath.at(-1) ?? record.id;
+      const marks = homeMarks([record.id, title, record.file, ...rows.flatMap((row) => row.evidence)]);
+      return [
+        redactHomeText(record.id, marks),
+        ...rows.flatMap((row) => row.evidence.map((line) => redactHomeText(line, marks))),
+      ];
+    });
+    return {
+      'parse --redact': JSON.stringify(redactParseResult(result)),
+      'triage.md': renderTriageMarkdown(report),
+      'triage.json': renderTriageJson(report),
+      'triage --json': renderTriageJson(report),
+      causes: findings.join('\n'),
+      'causes --json': JSON.stringify(findings),
+    };
+  }
+
+  for (const [name, rootDir, inside] of roots) {
+    const jsonPath = path.join(dir, `${name}.json`);
+    fs.writeFileSync(jsonPath, jsonReport(rootDir));
+    assertCli(jsonPath, `json-${name}`, inside);
+
+    const xml = xmlReport();
+    if (rootDir === undefined) {
+      const xmlPath = path.join(dir, 'none.xml');
+      fs.writeFileSync(xmlPath, xml);
+      assertCli(xmlPath, 'junit-none', false);
+    }
+    const parsed = parseJunit(xml, `${name}.xml`, rootDir === undefined ? undefined : { rootDir });
+    for (const [surface, text] of Object.entries(librarySurfaces(parsed))) {
+      assertSurface(text, `junit-${name} ${surface}`, inside);
+    }
+    assert.equal(
+      parsed.warnings.some((warning) => warning.includes('zbob')),
+      false,
+      `junit-${name} warning`,
+    );
   }
 });

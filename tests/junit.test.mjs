@@ -599,6 +599,26 @@ test('a username stops at a newline, whitespace, or a colon', () => {
   );
 });
 
+test('an absolute Users Public, Shared, or Default path stays', () => {
+  const cases = [
+    String.raw`C:\Users\Public`,
+    String.raw`C:\Users\Public\Desktop\notes.txt`,
+    String.raw`C:\Users\Shared\x`,
+    String.raw`C:\Users\Default\NTUSER.DAT`,
+    'C:/Users/Public/a',
+    'c:\\users\\PUBLIC\\notes.txt',
+    '/Users/Public/a',
+    '/Users/Shared/x',
+    '/users/Default/NTUSER.DAT',
+    String.raw`\\?\C:\Users\Public\a.txt`,
+  ];
+  for (const input of cases) {
+    assert.equal(redactHomeText(input), input, input);
+  }
+  assert.equal(redactHomeText(String.raw`C:\Users\alice\a`), '<home>/a');
+  assert.equal(redactHomeText(String.raw`C:\home\Public\a`), '<home>/a');
+});
+
 test('a drive letter is only a drive in a real path position', () => {
   const cases = [
     ['open file:///C:/Users/alice/a.html', 'open file:///<home>/a.html'],
@@ -856,6 +876,108 @@ test('a JUnit attachment home is redacted and a relative test path is not', () =
   assert.equal(JSON.stringify(result).includes('bob'), false);
   assert.equal(record.id, 'users/list.spec.ts::chromium::users/list');
   assert.equal(record.file, 'users/list.spec.ts');
+});
+
+test('an extended drive frame is relative inside the root and absolute outside it', () => {
+  const frame = String.raw`    at \\?\C:\Users\zbob\proj\tests\p.spec.ts:3:5`;
+  const relative = '    at tests/p.spec.ts:3:5';
+  const redacted = String.raw`    at \\?\<home>/proj/tests/p.spec.ts:3:5`;
+  const driveRoot = String.raw`C:\Users\zbob\proj`;
+  const extendedRoot = String.raw`\\?\C:\Users\zbob\proj`;
+  const outsideRoot = String.raw`D:\w`;
+  const slashForm = '    at //?/C:/Users/zbob/proj/tests/p.spec.ts:3:5';
+
+  function rewritten(text, root) {
+    const warnings = [];
+    const out = relativizeText(text, root, warnings);
+    assert.equal(warnings.some((warning) => warning.includes('zbob')), false, root ?? 'no-root');
+    return { out, warnings };
+  }
+
+  assert.equal(rewritten(frame, driveRoot).out, relative);
+  assert.equal(rewritten(frame, `${driveRoot}\\`).out, relative);
+  assert.equal(rewritten(frame, extendedRoot).out, relative);
+  assert.equal(rewritten(slashForm, 'C:/Users/zbob/proj').out, relative);
+  const outside = rewritten(frame, outsideRoot);
+  assert.equal(outside.out, frame);
+  assert.equal(outside.warnings.length, 0);
+  const noRoot = rewritten(frame, undefined);
+  assert.equal(noRoot.out, frame);
+  assert.equal(noRoot.warnings.length, 0);
+  const sibling = rewritten(frame, String.raw`C:\Users\zbob\other`);
+  assert.equal(sibling.out, frame);
+  assert.equal(redactHomeText(frame), redacted);
+  assert.equal(redacted.includes('zbob'), false);
+  assert.equal(redacted.includes('C:Users'), false);
+
+  function report(rootDir) {
+    return JSON.stringify({
+      config: rootDir === undefined ? {} : { rootDir },
+      suites: [
+        {
+          title: 'p.spec.ts',
+          file: 'p.spec.ts',
+          specs: [
+            {
+              title: 'reads',
+              file: 'p.spec.ts',
+              tests: [
+                {
+                  projectName: 'chromium',
+                  expectedStatus: 'passed',
+                  status: 'unexpected',
+                  results: [
+                    {
+                      retry: 0,
+                      status: 'failed',
+                      duration: 1,
+                      errors: [{ message: frame, stack: frame }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  function xml() {
+    return `<testsuite hostname="chromium">
+      <testcase name="reads" classname="p.spec.ts" file="p.spec.ts">
+        <failure message="${frame}"><![CDATA[${frame}]]></failure>
+      </testcase>
+    </testsuite>`;
+  }
+
+  function assertInside(result, label, expected) {
+    const error = result.records[0].attempts[0].errors[0];
+    assert.equal(error.message, expected, label);
+    assert.equal(error.stack ?? error.message, expected, label);
+    assert.equal(JSON.stringify(result).includes('zbob'), false, label);
+    assert.equal(result.warnings.some((warning) => warning.includes('zbob')), false, label);
+  }
+
+  function assertOutside(result, label, expected) {
+    const error = result.records[0].attempts[0].errors[0];
+    const stored = error.stack ?? error.message;
+    assert.equal(error.message, expected, label);
+    assert.equal(stored, expected, label);
+    assert.equal(stored.includes('C:Users'), false, label);
+    assert.equal(redactHomeText(stored), redactHomeText(expected), label);
+    assert.equal(redactHomeText(stored).includes('zbob'), false, label);
+    assert.equal(result.warnings.some((warning) => warning.includes('zbob')), false, label);
+  }
+
+  assertInside(parsePlaywrightJson(report(driveRoot), 'drive.json'), 'json-drive', relative);
+  assertInside(parsePlaywrightJson(report(extendedRoot), 'extended.json'), 'json-extended', relative);
+  assertOutside(parsePlaywrightJson(report(outsideRoot), 'outside.json'), 'json-outside', frame);
+  assertOutside(parsePlaywrightJson(report(undefined), 'none.json'), 'json-none', frame);
+  assertInside(parseJunit(xml(), 'drive.xml', { rootDir: driveRoot }), 'junit-drive', relative.trim());
+  assertInside(parseJunit(xml(), 'extended.xml', { rootDir: extendedRoot }), 'junit-extended', relative.trim());
+  assertOutside(parseJunit(xml(), 'outside.xml', { rootDir: outsideRoot }), 'junit-outside', frame.trim());
+  assertOutside(parseJunit(xml(), 'none.xml'), 'junit-none', frame.trim());
 });
 
 test('a UNC project root is relative in JSON and JUnit', () => {

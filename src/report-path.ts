@@ -36,9 +36,12 @@
  * and that rewrite does not add a warning. A UNC path (`\\server\...` or
  * `//server/...`), an extended path (`\\?\...`), and an SMB path (`smb://...`)
  * are made relative when they sit inside the report root. The root is checked
- * first, without case, including `\\?\UNC\` and `\\?\C:\`. Outside that root,
- * or when the report has no root, those paths stay absolute so redaction still
- * sees the home. A single segment such as `/var/`,
+ * first, without case, including `\\?\UNC\` and `\\?\C:\`. Error text strips
+ * `\\?\` and `//?/` before the drive and root checks, so `\\?\C:\...` is one
+ * token. Inside the root that frame becomes a relative path. Outside the
+ * root, or when the report has no root, it stays absolute so redaction still
+ * sees the home, and the warning does not quote the username. A single
+ * segment such as `/var/`,
  * `/Ready/`, or
  * `"/inventory.html"`, a quoted URL path such as `"/cart/checkout.html"`,
  * and prose such as `/and/or` stay as written.
@@ -61,11 +64,13 @@ const WINDOWS_WARNING = 'File path is a Windows path and was normalized: ';
 
 /**
  * A path token after a boundary.
- * `file://` and a drive letter may lead the token. `:12` or `:12:3` may
- * follow it. Quotes, brackets, and the boundary characters stay outside.
+ * `file://` and a drive letter may lead the token. `\\?\` and `//?/` stay
+ * on that drive, so `\\?\C:\...` is one token and the colon does not split
+ * it. `:12` or `:12:3` may follow it. Quotes, brackets, and the boundary
+ * characters stay outside.
  */
 const TEXT_TOKEN =
-  /(^|[\s"'=(`\[{:])((?:[A-Za-z]:[\\/]|file:\/\/)?[^\s"'=()<>|`\[\]{}:]+(?::\d+)*)/g;
+  /(^|[\s"'=(`\[{:])((?:(?:\\\\[?]\\|\/\/\?\/)?[A-Za-z]:[\\/]|file:\/\/)?[^\s"'=()<>|`\[\]{}:]+(?::\d+)*)/g;
 
 const TRAILING_PUNCTUATION = /[,.;)]+$/;
 
@@ -267,6 +272,8 @@ export type HomeMarks = ReadonlyMap<string, string>;
  * attachment of the form `home/<name>/<more>` or `users/<name>/<more>`, in
  * any case, is handled in the JUnit parser, not here. `Users/Shared/`,
  * `Users/Public/`, and `Users/Default/` are not usernames there either.
+ * The same three names stay on an absolute path: `C:\Users\Public`,
+ * `C:\Users\Shared`, `C:\Users\Default`, and `/Users/Public`.
  *
  * A letter before `:` is a drive letter only at the start of the text or
  * after a character that is not a letter or digit. `file:///` and `\\?\`
@@ -385,7 +392,7 @@ function matchDriveHome(text: string, index: number): HomeMatch | undefined {
   const afterDrive = readSeparator(text, index + 2);
   if (afterDrive === undefined) return undefined;
   const folder = readHomeFolder(text, afterDrive, true);
-  if (!folder) return undefined;
+  if (!folder || reservedUsersHome(text, folder)) return undefined;
   return finishHome(text, index, folder.userStart);
 }
 
@@ -396,7 +403,7 @@ function matchSlashHome(text: string, index: number): HomeMatch | undefined {
   const afterSep = readSeparator(text, index);
   if (afterSep === undefined) return undefined;
   const folder = readHomeFolder(text, afterSep, false);
-  if (!folder) return undefined;
+  if (!folder || reservedUsersHome(text, folder)) return undefined;
   // A backslash home does not need a path boundary. `x\\Users\\bob` and
   // `\\server\Users\bob` are still home directories.
   if (text[index] !== '\\' && !slashContextOk(text, index)) return undefined;
@@ -446,7 +453,7 @@ function matchDotDotHome(text: string, index: number): HomeMatch | undefined {
   let cursor = index;
   while (text.startsWith('../', cursor) || text.startsWith('..\\', cursor)) cursor += 3;
   const folder = readHomeFolder(text, cursor, false);
-  if (!folder) return undefined;
+  if (!folder || reservedUsersHome(text, folder)) return undefined;
   return finishHome(text, index, folder.userStart);
 }
 
@@ -487,6 +494,7 @@ function matchEscapedHome(text: string, index: number): HomeMatch | undefined {
   if (userEnd === userStart) return undefined;
   const username = text.slice(userStart, userEnd);
   if (username.startsWith(':') || !/\p{L}/u.test(username)) return undefined;
+  if (/^users$/iu.test(name) && reservedUsersSegment(username)) return undefined;
   return {
     kind: 'replace',
     replaceFrom: index,
@@ -511,7 +519,11 @@ function readSeparator(text: string, index: number): number | undefined {
   return end;
 }
 
-function readHomeFolder(text: string, start: number, drive: boolean): { userStart: number } | undefined {
+function readHomeFolder(
+  text: string,
+  start: number,
+  _drive: boolean,
+): { userStart: number; folder: string } | undefined {
   let end = start;
   while (end < text.length && /[A-Za-z]/.test(text[end] ?? '')) end += 1;
   if (end === start) return undefined;
@@ -520,7 +532,19 @@ function readHomeFolder(text: string, start: number, drive: boolean): { userStar
   if (afterName === undefined) return undefined;
   const allowed = /^home$/i.test(name) || /^users$/i.test(name);
   if (!allowed) return undefined;
-  return { userStart: afterName };
+  return { userStart: afterName, folder: name };
+}
+
+/** `Public`, `Shared`, and `Default` under `Users` are shared folders, not usernames. */
+function reservedUsersSegment(username: string): boolean {
+  return /^(?:shared|public|default)$/iu.test(username);
+}
+
+function reservedUsersHome(text: string, folder: { userStart: number; folder: string }): boolean {
+  if (!/^users$/iu.test(folder.folder)) return false;
+  const userEnd = readUsernameEnd(text, folder.userStart);
+  if (userEnd === folder.userStart) return false;
+  return reservedUsersSegment(text.slice(folder.userStart, userEnd));
 }
 
 /** A drive letter is at the start, or the previous character is not a letter or digit. */
@@ -771,6 +795,21 @@ function isNetworkAbsolute(value: string): boolean {
   return /^smb:\/\//i.test(value);
 }
 
+/**
+ * `\\?\C:\` and `//?/C:/` lose that prefix. `\\?\UNC\` is not a drive.
+ * The returned text is the drive path the root check compares.
+ */
+function stripExtendedDrivePrefix(token: string): string {
+  const match = /^(?:\\\\\?\\|\/\/\?\/)(?=[A-Za-z]:[\\/])/.exec(token);
+  if (!match) return token;
+  return token.slice(match[0].length);
+}
+
+function extendedDriveInsideRoot(token: string, root: string): boolean {
+  const stripped = stripLocationSuffix(token);
+  return portableInsideRoot(stripped, root) !== undefined || portableInsideRoot(token, root) !== undefined;
+}
+
 type PathFamily = 'unc' | 'drive' | 'smb' | 'extended' | 'posix';
 
 interface ClassifiedPath {
@@ -956,6 +995,14 @@ function isPathNameChar(ch: string): boolean {
 }
 
 function shouldRewriteErrorToken(token: string, root: string | undefined): boolean {
+  // `\\?\C:\` and `//?/C:/` are drive paths. Strip the prefix before the
+  // root check. Inside the root, rewrite. Outside, or with no root, keep
+  // the original absolute text so the username can be redacted later.
+  const driveBody = stripExtendedDrivePrefix(token);
+  if (driveBody !== token) {
+    if (!root) return false;
+    return extendedDriveInsideRoot(driveBody, root) || extendedDriveInsideRoot(token, root);
+  }
   if (isNetworkAbsolute(token)) {
     const stripped = stripLocationSuffix(token);
     if (
