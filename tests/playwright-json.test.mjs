@@ -173,6 +173,137 @@ test('an unknown extra field does not stop the parse', () => {
   assert.equal(record.attempts[1].attachments[0].path, 'test-results/shot.png');
 });
 
+function leaksAbsolute(text, absolutePath) {
+  let from = 0;
+  while (from < text.length) {
+    const at = text.indexOf(absolutePath, from);
+    if (at === -1) return false;
+    const prev = at === 0 ? '' : text[at - 1];
+    if (prev !== '.') return true;
+    from = at + absolutePath.length;
+  }
+  return false;
+}
+
+test('a file path outside rootDir stays relative and warns', () => {
+  const raw = JSON.stringify({
+    config: { rootDir: '/tmp/project' },
+    suites: [
+      {
+        title: 'outside.spec.ts',
+        file: '/tmp/project-other/outside.spec.ts',
+        line: 0,
+        column: 0,
+        specs: [
+          {
+            title: 'runs elsewhere',
+            file: '/tmp/project-other/outside.spec.ts',
+            line: 3,
+            tests: [
+              {
+                projectName: 'chromium',
+                expectedStatus: 'passed',
+                status: 'unexpected',
+                results: [
+                  {
+                    retry: 0,
+                    status: 'failed',
+                    duration: 1,
+                    errors: [
+                      {
+                        message: 'Error: boom at /tmp/project-other/outside.spec.ts',
+                        stack: 'at fn (/var/data/outside.spec.ts:3:1)',
+                        location: {
+                          file: '/tmp/project-other/outside.spec.ts',
+                          line: 3,
+                          column: 1,
+                        },
+                      },
+                    ],
+                    attachments: [
+                      {
+                        name: 'shot',
+                        contentType: 'image/png',
+                        path: '/var/data/shot.png',
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  const result = parsePlaywrightJson(raw, 'outside.json');
+  const record = result.records[0];
+  const blob = JSON.stringify(result);
+  assert.equal(leaksAbsolute(blob, '/tmp/project-other/outside.spec.ts'), false);
+  assert.equal(leaksAbsolute(blob, '/tmp/project'), false);
+  assert.equal(leaksAbsolute(blob, '/var/data/shot.png'), false);
+  assert.equal(leaksAbsolute(blob, '/var/data/outside.spec.ts'), false);
+  assert.equal(record.file, '../project-other/outside.spec.ts');
+  assert.equal(record.file.startsWith('/'), false);
+  assert.deepEqual(record.titlePath, ['runs elsewhere']);
+  assert.equal(record.attempts[0].errors[0].location.file, '../project-other/outside.spec.ts');
+  assert.equal(record.attempts[0].errors[0].message, 'Error: boom at ../project-other/outside.spec.ts');
+  assert.equal(record.attempts[0].errors[0].stack, 'at fn (../../var/data/outside.spec.ts:3:1)');
+  assert.equal(record.attempts[0].attachments[0].path, '../../var/data/shot.png');
+  const outside = result.warnings.filter((warning) =>
+    warning.startsWith('File path is outside the report root'),
+  );
+  assert.equal(outside.length, 3);
+  for (const warning of outside) {
+    assert.equal(leaksAbsolute(warning, '/tmp/project'), false);
+    assert.equal(leaksAbsolute(warning, '/var/data'), false);
+  }
+});
+
+test('a describe titled with the spec file name stays in the title path', () => {
+  const raw = JSON.stringify({
+    config: { rootDir: '/tmp/project' },
+    suites: [
+      {
+        title: 'tests/outcomes.spec.ts',
+        file: '/tmp/project/tests/outcomes.spec.ts',
+        line: 0,
+        column: 0,
+        suites: [
+          {
+            title: 'outcomes.spec.ts',
+            file: '/tmp/project/tests/outcomes.spec.ts',
+            line: 10,
+            column: 6,
+            specs: [
+              {
+                title: 'keeps the describe',
+                file: '/tmp/project/tests/outcomes.spec.ts',
+                line: 11,
+                tests: [
+                  {
+                    projectName: 'chromium',
+                    expectedStatus: 'passed',
+                    status: 'expected',
+                    results: [{ retry: 0, status: 'passed', duration: 1 }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  const result = parsePlaywrightJson(raw, 'describe-name.json');
+  assert.equal(result.records.length, 1);
+  assert.equal(result.warnings.length, 0);
+  assert.equal(result.records[0].file, 'tests/outcomes.spec.ts');
+  assert.deepEqual(result.records[0].titlePath, ['outcomes.spec.ts', 'keeps the describe']);
+});
+
 test('a test with zero results warns and still returns a record', () => {
   const raw = JSON.stringify({
     suites: [

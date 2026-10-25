@@ -1,0 +1,201 @@
+<testsuites id="" name="" tests="7" failures="1" skipped="1" errors="1" time="0">
+<testsuite name="tests/outcomes.spec.ts" timestamp="1970-01-01T00:00:00.000Z" hostname="chromium" tests="7" failures="1" skipped="1" time="0" errors="1">
+<testcase name="always passes" classname="tests/outcomes.spec.ts" time="0">
+</testcase>
+<testcase name="flaky by retry" classname="tests/outcomes.spec.ts" time="0">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../pw-project/test-results/tests-outcomes-flaky-by-retry-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+<testcase name="always fails" classname="tests/outcomes.spec.ts" time="0">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../pw-project/test-results/tests-outcomes-always-fails-chromium/error-context.md]]
+
+[[ATTACHMENT|../pw-project/test-results/tests-outcomes-always-fails-chromium-retry1/error-context.md]]
+
+[[ATTACHMENT|../pw-project/test-results/tests-outcomes-always-fails-chromium-retry2/error-context.md]]
+]]>
+</system-out>
+<failure message="expect(locator).toHaveText(expected) failed" type="expect.toHaveText">
+<![CDATA[  [chromium] › tests/outcomes.spec.ts:21:1 › always fails ──────────────────────────────────────────
+
+    Error: expect(locator).toHaveText(expected) failed
+
+    Locator:  getByRole('heading', { name: 'Ready' })
+    Expected: "a different heading"
+    Received: "Ready"
+    Timeout:  1000ms
+
+    Call log:
+      - Expect "toHaveText" with timeout 1000ms
+      - waiting for getByRole('heading', { name: 'Ready' })
+    1 × locator resolved to <h1>Ready</h1>
+       - unexpected value "Ready"
+
+
+      21 | test('always fails', async ({ page }) => {
+      22 |   await page.goto(appUrl);
+    > 23 |   await expect(page.getByRole('heading', { name: 'Ready' })).toHaveText('a different heading');
+         |                                                              ^
+      24 | });
+      25 |
+      26 | test('times out', async ({ page }) => {
+        at tests/outcomes.spec.ts:23:62
+
+    Error Context: test-results/tests-outcomes-always-fails-chromium/error-context.md
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: expect(locator).toHaveText(expected) failed
+
+    Locator:  getByRole('heading', { name: 'Ready' })
+    Expected: "a different heading"
+    Received: "Ready"
+    Timeout:  1000ms
+
+    Call log:
+      - Expect "toHaveText" with timeout 1000ms
+      - waiting for getByRole('heading', { name: 'Ready' })
+    1 × locator resolved to <h1>Ready</h1>
+       - unexpected value "Ready"
+
+
+      21 | test('always fails', async ({ page }) => {
+      22 |   await page.goto(appUrl);
+    > 23 |   await expect(page.getByRole('heading', { name: 'Ready' })).toHaveText('a different heading');
+         |                                                              ^
+      24 | });
+      25 |
+      26 | test('times out', async ({ page }) => {
+        at tests/outcomes.spec.ts:23:62
+
+    Error Context: test-results/tests-outcomes-always-fails-chromium-retry1/error-context.md
+
+    Retry #2 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: expect(locator).toHaveText(expected) failed
+
+    Locator:  getByRole('heading', { name: 'Ready' })
+    Expected: "a different heading"
+    Received: "Ready"
+    Timeout:  1000ms
+
+    Call log:
+      - Expect "toHaveText" with timeout 1000ms
+      - waiting for getByRole('heading', { name: 'Ready' })
+    1 × locator resolved to <h1>Ready</h1>
+       - unexpected value "Ready"
+
+
+      21 | test('always fails', async ({ page }) => {
+      22 |   await page.goto(appUrl);
+    > 23 |   await expect(page.getByRole('heading', { name: 'Ready' })).toHaveText('a different heading');
+         |                                                              ^
+      24 | });
+      25 |
+      26 | test('times out', async ({ page }) => {
+        at tests/outcomes.spec.ts:23:62
+
+    Error Context: test-results/tests-outcomes-always-fails-chromium-retry2/error-context.md
+]]>
+</failure>
+</testcase>
+<testcase name="times out" classname="tests/outcomes.spec.ts" time="0">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../pw-project/test-results/tests-outcomes-times-out-chromium/error-context.md]]
+
+[[ATTACHMENT|../pw-project/test-results/tests-outcomes-times-out-chromium-retry1/error-context.md]]
+
+[[ATTACHMENT|../pw-project/test-results/tests-outcomes-times-out-chromium-retry2/error-context.md]]
+]]>
+</system-out>
+<error message="Test timeout of 1000ms exceeded." type="Error">
+<![CDATA[  [chromium] › tests/outcomes.spec.ts:26:1 › times out ─────────────────────────────────────────────
+
+    Test timeout of 1000ms exceeded.
+
+    Error: locator.waitFor: Test timeout of 1000ms exceeded.
+    Call log:
+      - waiting for getByRole('button', { name: 'Never Appears' }) to be visible
+
+
+      27 |   test.setTimeout(1000);
+      28 |   await page.goto(appUrl);
+    > 29 |   await page.getByRole('button', { name: 'Never Appears' }).waitFor();
+         |                                                             ^
+      30 | });
+      31 |
+      32 | test.skip('skipped test', async () => {
+        at tests/outcomes.spec.ts:29:61
+
+    Error Context: test-results/tests-outcomes-times-out-chromium/error-context.md
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Test timeout of 1000ms exceeded.
+
+    Error: locator.waitFor: Test timeout of 1000ms exceeded.
+    Call log:
+      - waiting for getByRole('button', { name: 'Never Appears' }) to be visible
+
+
+      27 |   test.setTimeout(1000);
+      28 |   await page.goto(appUrl);
+    > 29 |   await page.getByRole('button', { name: 'Never Appears' }).waitFor();
+         |                                                             ^
+      30 | });
+      31 |
+      32 | test.skip('skipped test', async () => {
+        at tests/outcomes.spec.ts:29:61
+
+    Error Context: test-results/tests-outcomes-times-out-chromium-retry1/error-context.md
+
+    Retry #2 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Test timeout of 1000ms exceeded.
+
+    Error: locator.waitFor: Test timeout of 1000ms exceeded.
+    Call log:
+      - waiting for getByRole('button', { name: 'Never Appears' }) to be visible
+
+
+      27 |   test.setTimeout(1000);
+      28 |   await page.goto(appUrl);
+    > 29 |   await page.getByRole('button', { name: 'Never Appears' }).waitFor();
+         |                                                             ^
+      30 | });
+      31 |
+      32 | test.skip('skipped test', async () => {
+        at tests/outcomes.spec.ts:29:61
+
+    Error Context: test-results/tests-outcomes-times-out-chromium-retry2/error-context.md
+]]>
+</error>
+</testcase>
+<testcase name="skipped test" classname="tests/outcomes.spec.ts">
+<properties>
+<property name="skip" value="">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+<testcase name="expected to fail" classname="tests/outcomes.spec.ts" time="0">
+<properties>
+<property name="fail" value="">
+</property>
+</properties>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../pw-project/test-results/tests-outcomes-expected-to-fail-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+<testcase name="Cart › shows the heading" classname="tests/outcomes.spec.ts" time="0">
+</testcase>
+</testsuite>
+</testsuites>

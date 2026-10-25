@@ -1,7 +1,7 @@
 {
   "name": "qa-core-flaky",
   "version": "0.0.1",
-  "description": "Normalize Playwright JSON reports so flaky tests can be triaged.",
+  "description": "Normalize Playwright JSON and JUnit reports so flaky tests can be triaged.",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -18,9 +18,12 @@
     "fixtures": "node scripts/make-fixtures.mjs"
   },
   "devDependencies": {
-    "typescript": "^5.6",
-    "@types/node": "^22",
     "@playwright/test": "1.60.0",
-    "playwright": "1.60.0"
+    "@types/node": "^22",
+    "playwright": "1.60.0",
+    "typescript": "^5.6"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.11.2"
   }
 }

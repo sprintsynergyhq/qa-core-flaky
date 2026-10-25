@@ -28,7 +28,7 @@ export type AttemptError = {
   stack?: string;
   /** Source location of the error, when the report has file, line, and column. */
   location?: {
-    /** File path. Relative to the report root when the file sits inside it. */
+    /** File path. Relative to the report root. Never an absolute machine path. */
     file: string;
     /** Line number from the report. */
     line: number;
@@ -41,7 +41,7 @@ export type AttemptError = {
 export type Attachment = {
   /** Attachment name from the report. */
   name: string;
-  /** Path on disk, when the report has one. Relative to the report root when inside it. */
+  /** Path on disk, when the report has one. Relative. Never an absolute machine path. */
   path?: string;
   /** Media type from the report. */
   contentType: string;
@@ -67,7 +67,7 @@ export type Attempt = {
 
 /** Where a record came from. Later parsers reuse this shape. */
 export type SourceInfo = {
-  /** Report format. `junit` is reserved for a later parser. */
+  /** Report format. `playwright-json` or `junit`. */
   format: 'playwright-json' | 'junit';
   /** Path of the report that was parsed, as given to the parser. */
   reportPath: string;
@@ -91,7 +91,7 @@ export type TestRecord = {
   line?: number;
   /** Playwright project name. `default` when the report has none. */
   project: string;
-  /** Describe titles, then the spec title. The file-level suite title is omitted. */
+  /** Describe titles, then the spec title. The file-level suite title is omitted. A describe title is kept even when it equals the spec file name. */
   titlePath: string[];
   /** Status the test was expected to finish with. */
   expectedStatus: 'passed' | 'failed' | 'skipped' | 'timedOut' | 'interrupted';

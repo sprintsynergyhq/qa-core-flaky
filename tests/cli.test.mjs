@@ -66,3 +66,37 @@ test('parsing the fixture twice is byte identical', () => {
   assert.equal(first.stdout, second.stdout);
   assert.ok(first.stdout.endsWith('\n'));
 });
+
+const junitFixture = 'fixtures/reports/pw-1.60.0-outcomes.junit.xml';
+
+test('parse auto-detects a JUnit report', () => {
+  const result = run(['parse', junitFixture, '--commit', 'abc123', '--branch', 'main']);
+  assert.equal(result.status, 0, result.stderr);
+  const json = JSON.parse(result.stdout);
+  assert.equal(json.schemaVersion, 1);
+  assert.ok(json.records.length > 0);
+  for (const record of json.records) {
+    assert.equal(record.source.format, 'junit');
+    assert.equal(record.source.reportPath, junitFixture);
+    assert.equal(record.source.commitSha, 'abc123');
+    assert.equal(record.source.branch, 'main');
+  }
+});
+
+test('--format json on a JUnit file exits 1', () => {
+  const result = run(['parse', junitFixture, '--format', 'json']);
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.equal(oneLine(result.stderr), true);
+  assert.match(result.stderr, /Invalid JSON/);
+  assert.match(result.stderr, /pw-1\.60\.0-outcomes\.junit\.xml/);
+});
+
+test('parsing the JUnit fixture twice is byte identical', () => {
+  const first = run(['parse', junitFixture]);
+  const second = run(['parse', junitFixture]);
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(second.status, 0, second.stderr);
+  assert.equal(first.stdout, second.stdout);
+  assert.ok(first.stdout.endsWith('\n'));
+});
