@@ -174,6 +174,59 @@ test('numeric character references are decoded', () => {
   assert.equal(error.stack, 'B & &nbsp;');
 });
 
+test('CDATA stays literal and mixed text is decoded only outside CDATA', () => {
+  const xml = `<testsuite hostname="chromium">
+    <testcase name="cdata" classname="a.spec.ts">
+      <failure message="msg"><![CDATA[Received: "Tom &amp; Jerry" url?a=1&amp;b=2 &lt;div&gt;]]></failure>
+    </testcase>
+    <testcase name="mixed" classname="a.spec.ts">
+      <failure message="msg">before &amp; <![CDATA[&amp; and &lt;]]> after &lt;</failure>
+    </testcase>
+  </testsuite>`;
+  const result = parseJunit(xml, 'reports/cdata.xml');
+  const literal = result.records[0].attempts[0].errors[0];
+  const mixed = result.records[1].attempts[0].errors[0];
+  assert.equal(literal.stack, 'Received: "Tom &amp; Jerry" url?a=1&amp;b=2 &lt;div&gt;');
+  assert.equal(mixed.stack, 'before & &amp; and &lt; after <');
+});
+
+test('a DOCTYPE inside CDATA stays in the failure text', () => {
+  const kept = `<testsuite hostname="chromium">
+    <testcase name="kept" classname="a.spec.ts">
+      <failure message="msg"><![CDATA[Received: <!DOCTYPE html><html>]]></failure>
+    </testcase>
+  </testsuite>`;
+  const broken = `<testsuite hostname="chromium">
+    <testcase name="broken" classname="a.spec.ts">
+      <failure message="msg"><![CDATA[got <!DOCTYPE html [ broken]]></failure>
+    </testcase>
+  </testsuite>`;
+  const keptResult = parseJunit(kept, 'reports/cdata-doctype.xml');
+  const brokenResult = parseJunit(broken, 'reports/cdata-doctype-broken.xml');
+  assert.equal(keptResult.records[0].attempts[0].errors[0].stack, 'Received: <!DOCTYPE html><html>');
+  assert.equal(brokenResult.records[0].attempts[0].errors[0].stack, 'got <!DOCTYPE html [ broken');
+});
+
+test('a prolog DOCTYPE is removed and a bad DOCTYPE is rejected', () => {
+  const bom = '\uFEFF<!DOCTYPE a [<!ENTITY e "BOM">]><testsuite hostname="chromium"><testcase name="&e;" classname="a.spec.ts"></testcase></testsuite>';
+  const bombs = `<!DOCTYPE lol [<!ENTITY lol "lol"><!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">]>
+<testsuite hostname="chromium"><testcase name="&lol2;" classname="a.spec.ts"></testcase></testsuite>`;
+  const bomResult = parseJunit(bom, 'reports/bom-doctype.xml');
+  const bombResult = parseJunit(bombs, 'reports/bombs.xml');
+  assert.equal(JSON.stringify(bomResult).includes('BOM'), false);
+  assert.equal(bomResult.records[0].titlePath[0], '&e;');
+  assert.equal(JSON.stringify(bombResult).includes('lollol'), false);
+  assert.equal(bombResult.records[0].titlePath[0], '&lol2;');
+  assert.throws(
+    () => parseJunit('<!doctype html><testsuite hostname="chromium"><testcase name="n" classname="a.spec.ts"></testcase></testsuite>', 'reports/lower.xml'),
+    /Invalid XML in report reports\/lower\.xml/,
+  );
+  assert.throws(
+    () => parseJunit('<!DOCTYPE foo <testsuite hostname="chromium"><testcase name="n" classname="a.spec.ts"></testcase></testsuite>', 'reports/open.xml'),
+    /Invalid XML in report reports\/open\.xml/,
+  );
+});
+
 test('error text that is not a filesystem path stays unchanged', () => {
   const text =
     'Expected pattern: /Ready/ "/inventory.html" https://www.saucedemo.com/inventory.html regex /\\d+/ "a\\\\b"';

@@ -32,12 +32,15 @@ type XmlNode = Record<string, unknown>;
 
 /**
  * Entity expansion is off, so a DOCTYPE cannot define an entity the parser
- * will expand. Every DOCTYPE is removed before parse, which also means an
- * external identifier is not read. Afterwards, attribute values and element
- * text decode only the five predefined XML entities (`lt`, `gt`, `amp`,
- * `apos`, `quot`) and numeric character references (`&#65;`, `&#x42;`).
- * HTML entities stay literal. Attribute values stay strings.
+ * will expand. Only a DOCTYPE in the prolog is removed, which also means an
+ * external identifier there is not read. A DOCTYPE after the root element is
+ * left in place. Attribute values and ordinary element text decode the five
+ * predefined XML entities (`lt`, `gt`, `amp`, `apos`, `quot`) and numeric
+ * character references (`&#65;`, `&#x42;`). CDATA stays literal. HTML entities
+ * stay literal. Attribute values stay strings.
  */
+const CDATA_KEY = '#cdata';
+
 const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
@@ -47,6 +50,8 @@ const parser = new XMLParser({
   trimValues: false,
   htmlEntities: false,
   processEntities: false,
+  preserveOrder: true,
+  cdataPropName: CDATA_KEY,
   isArray: (tagName: string) => ARRAY_TAGS.has(tagName),
 });
 
@@ -98,7 +103,7 @@ function parseXml(text: string, reportPath: string): unknown {
     throw new Error(`Invalid XML in report ${reportPath}`);
   }
   try {
-    return parser.parse(withoutDoctype) as unknown;
+    return fromOrdered(parser.parse(withoutDoctype));
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'Could not parse XML';
     throw new Error(`Invalid XML in report ${reportPath}: ${detail.replaceAll('\n', ' ').trim()}`);
@@ -248,21 +253,49 @@ function readHostname(suite: XmlNode): string | undefined {
 }
 
 /**
- * Remove every DOCTYPE, including one that follows a comment or a
- * processing instruction.
+ * Remove each DOCTYPE in the prolog and leave the root element untouched.
  *
- * Expansion is already disabled. Removing each declaration means a custom
- * entity is not registered and an external identifier is not read.
+ * The scan starts at the beginning, after an optional BOM. It passes the XML
+ * declaration, whitespace, comments, and processing instructions. It drops
+ * each DOCTYPE there, including quoted strings and an internal subset. It
+ * stops at the first tag that starts an element. A DOCTYPE inside later
+ * text or CDATA is kept. Expansion is already disabled.
  */
 function stripDoctype(xml: string): string {
-  let current = xml;
-  for (;;) {
-    const start = current.indexOf('<!DOCTYPE');
-    if (start === -1) return current;
-    const end = endOfDoctype(current, start);
-    if (end === -1) return current;
-    current = current.slice(0, start) + current.slice(end);
+  let index = 0;
+  if (xml.charCodeAt(0) === 0xfeff) index = 1;
+  let out = '';
+  while (index < xml.length) {
+    const ch = xml[index];
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      out += ch;
+      index += 1;
+      continue;
+    }
+    if (ch !== '<') return out + xml.slice(index);
+    if (xml.startsWith('<!--', index)) {
+      const end = xml.indexOf('-->', index + 4);
+      if (end === -1) return out + xml.slice(index);
+      out += xml.slice(index, end + 3);
+      index = end + 3;
+      continue;
+    }
+    if (xml.startsWith('<?', index)) {
+      const end = xml.indexOf('?>', index + 2);
+      if (end === -1) return out + xml.slice(index);
+      out += xml.slice(index, end + 2);
+      index = end + 2;
+      continue;
+    }
+    if (xml.startsWith('<!DOCTYPE', index)) {
+      const end = endOfDoctype(xml, index);
+      if (end === -1) return out + xml.slice(index);
+      index = end;
+      continue;
+    }
+    return out + xml.slice(index);
   }
+  return out;
 }
 
 function endOfDoctype(xml: string, start: number): number {
@@ -278,9 +311,16 @@ function endOfDoctype(xml: string, start: number): number {
       quote = ch;
       continue;
     }
-    if (ch === '[') brackets += 1;
-    else if (ch === ']') brackets = Math.max(0, brackets - 1);
-    else if (ch === '>' && brackets === 0) return index + 1;
+    if (ch === '[') {
+      brackets += 1;
+      continue;
+    }
+    if (ch === ']') {
+      brackets = Math.max(0, brackets - 1);
+      continue;
+    }
+    if (ch === '<' && brackets === 0) return -1;
+    if (ch === '>' && brackets === 0) return index + 1;
   }
   return -1;
 }
@@ -293,15 +333,85 @@ function attr(node: XmlNode, name: string): string | undefined {
 }
 
 function textOf(value: unknown): string {
-  if (typeof value === 'string') return decodeXmlEntities(value);
+  if (typeof value === 'string') return value;
   if (Array.isArray(value)) return value.map((item) => textOf(item)).join('');
-  if (isObject(value) && typeof value['#text'] === 'string') return decodeXmlEntities(value['#text']);
+  if (isObject(value) && typeof value['#text'] === 'string') return value['#text'];
   return '';
+}
+
+/**
+ * Turn an ordered parse into the nested object the rest of this file reads.
+ * Ordinary text is decoded. CDATA is appended as written, in source order.
+ */
+function fromOrdered(nodes: unknown): unknown {
+  if (!Array.isArray(nodes)) return nodes;
+  const obj: XmlNode = {};
+  const textParts: string[] = [];
+  let hasElement = false;
+  for (const node of nodes) {
+    if (!isObject(node)) continue;
+    const key = elementKey(node);
+    if (key === undefined) continue;
+    if (key === '#text') {
+      const value = node[key];
+      if (typeof value === 'string' && value.length > 0) textParts.push(decodeXmlEntities(value));
+      continue;
+    }
+    if (key === CDATA_KEY) {
+      const raw = cdataText(node[key]);
+      if (raw.length > 0) textParts.push(raw);
+      continue;
+    }
+    hasElement = true;
+    const attrs = isObject(node[':@']) ? node[':@'] : undefined;
+    pushChild(obj, key, attachAttrs(fromOrdered(node[key]), attrs));
+  }
+  const text = textParts.join('');
+  if (!hasElement && Object.keys(obj).length === 0) return text;
+  if (text.length > 0) obj['#text'] = text;
+  return obj;
+}
+
+function elementKey(node: XmlNode): string | undefined {
+  for (const key of Object.keys(node)) {
+    if (key !== ':@') return key;
+  }
+  return undefined;
+}
+
+function cdataText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map((item) => cdataText(item)).join('');
+  if (isObject(value) && typeof value['#text'] === 'string') return value['#text'];
+  return '';
+}
+
+function attachAttrs(child: unknown, attrs: XmlNode | undefined): unknown {
+  if (!attrs) return child;
+  if (typeof child === 'string') {
+    if (child.length === 0) return { ...attrs };
+    return { ...attrs, '#text': child };
+  }
+  if (isObject(child)) return { ...attrs, ...child };
+  return { ...attrs };
+}
+
+function pushChild(obj: XmlNode, key: string, value: unknown): void {
+  const existing = obj[key];
+  if (existing === undefined) {
+    obj[key] = ARRAY_TAGS.has(key) ? [value] : value;
+    return;
+  }
+  if (Array.isArray(existing)) {
+    existing.push(value);
+    return;
+  }
+  obj[key] = [existing, value];
 }
 
 /** One left-to-right pass. A replacement is not scanned again. */
 function decodeXmlEntities(value: string): string {
-  return value.replace(/&(?:#(\d+)|#x([0-9a-fA-F]+)|([A-Za-z][A-Za-z0-9]*));/gi, (full, dec: string | undefined, hex: string | undefined, name: string | undefined) => {
+  return value.replace(/&(?:#(\d+)|#x([0-9a-fA-F]+)|([A-Za-z][A-Za-z0-9]*));/g, (full, dec: string | undefined, hex: string | undefined, name: string | undefined) => {
     if (dec !== undefined) return characterReference(Number(dec)) ?? full;
     if (hex !== undefined) return characterReference(Number.parseInt(hex, 16)) ?? full;
     if (name !== undefined && Object.hasOwn(NAMED_XML_ENTITIES, name)) return NAMED_XML_ENTITIES[name] ?? full;
@@ -309,10 +419,14 @@ function decodeXmlEntities(value: string): string {
   });
 }
 
+/** XML 1.0 Char. Invalid control characters stay as the original reference. */
 function characterReference(code: number): string | undefined {
-  if (!Number.isInteger(code) || code < 0 || code > 0x10ffff) return undefined;
-  if (code >= 0xd800 && code <= 0xdfff) return undefined;
-  return String.fromCodePoint(code);
+  if (!Number.isInteger(code)) return undefined;
+  if (code === 0x9 || code === 0xa || code === 0xd) return String.fromCodePoint(code);
+  if (code >= 0x20 && code <= 0xd7ff) return String.fromCodePoint(code);
+  if (code >= 0xe000 && code <= 0xfffd) return String.fromCodePoint(code);
+  if (code >= 0x10000 && code <= 0x10ffff) return String.fromCodePoint(code);
+  return undefined;
 }
 
 function asArray(value: unknown): unknown[] {

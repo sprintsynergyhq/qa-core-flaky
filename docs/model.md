@@ -112,7 +112,7 @@ A missing or blank `hostname` becomes project `default`. The parser adds one war
 
 Attachment lines do not include a name or a media type. The parser uses the file name as the attachment name and an empty content type. ANSI escape codes are removed from the failure message and text.
 
-The XML parser does not expand entities. After parsing, attribute values and element text decode the five predefined XML entities (`lt`, `gt`, `amp`, `apos`, `quot`) and numeric character references (`&#65;` and `&#x42;`). HTML entities stay literal. Entities declared in a `DOCTYPE` stay literal. Every `DOCTYPE` is removed before parsing, including one that follows a comment or a processing instruction, so an external entity identifier is not read or fetched.
+The XML parser does not expand entities. After parsing, attribute values and ordinary element text decode the five predefined XML entities (`lt`, `gt`, `amp`, `apos`, `quot`) and numeric character references (`&#65;` and `&#x42;`). `CDATA` stays literal, including entity text inside it. HTML entities stay literal. Entities declared in a `DOCTYPE` stay literal. Only a `DOCTYPE` in the prolog is removed, so an external entity identifier there is not read or fetched. A `DOCTYPE` after the root element, including one inside `CDATA`, is left in place.
 
 ## Known Gaps
 
