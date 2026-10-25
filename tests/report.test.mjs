@@ -6,7 +6,10 @@ import test from 'node:test';
 import {
   buildTriageReport,
   classifyCauses,
+  collapseRunRecords,
+  decideVerdict,
   fixTemplates,
+  homeMarks,
   parseJunit,
   parsePlaywrightJson,
   redactHomeText,
@@ -142,7 +145,7 @@ test('passed records produce an empty report', () => {
   assert.equal(report.entries.length, 0);
 });
 
-test('a triage entry keeps the review status and a command', () => {
+test('a triage entry keeps the review status and a command', (t) => {
   const report = buildTriageReport(fixtureRecords());
   for (const entry of report.entries) {
     assert.equal(entry.review.status, 'Needs Review');
@@ -150,6 +153,7 @@ test('a triage entry keeps the review status and a command', () => {
     assert.equal(entry.suggestedFix.length > 0, true);
   }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.writeFileSync(path.join(dir, 'note.txt'), 'unused');
   assert.equal(fs.existsSync(dir), true);
 });
@@ -325,10 +329,11 @@ test('a home path does not change the verdict', () => {
     true,
   );
   assert.equal(drift.causes.some((finding) => finding.ruleIds.includes('DATA-VALUE-DRIFT')), true);
-  const driftText = drift.evidence.join('\n');
-  assert.equal(driftText.includes('/home/login'), true);
-  assert.equal(driftText.includes('/home/settings'), true);
-  assert.equal(driftText.includes('<home>'), false);
+  const received = drift.evidence.filter((row) => row.startsWith('Received:'));
+  assert.deepEqual(received, ['Received: "<home>"', 'Received: "<home~2>"']);
+  assert.equal(drift.evidence.join('\n').includes('/home/'), false);
+  assert.equal(drift.evidence.join('\n').includes('login'), false);
+  assert.equal(drift.evidence.join('\n').includes('settings'), false);
 });
 
 function entryFor(text) {
@@ -458,9 +463,7 @@ test('home-path drift keeps both redacted lines', () => {
   const item = oneRecord('files', [attempt('failed', line('alice'), 0), attempt('failed', line('bob'), 1)]);
   const entry = buildTriageReport([item]).entries[0];
   const received = entry.evidence.filter((row) => row.startsWith('Received:'));
-  assert.equal(received.length, 2);
-  assert.equal(received[0], received[1]);
-  assert.match(received[0], /<home>\/proj\/a\.json/);
+  assert.deepEqual(received, ['Received: "<home>/proj/a.json"', 'Received: "<home~2>/proj/a.json"']);
   assert.equal(entry.evidence.join('\n').includes('alice'), false);
   assert.equal(entry.evidence.join('\n').includes('bob'), false);
 });
@@ -484,12 +487,169 @@ test('test ids that differ only by username stay separate after redaction', () =
   assert.match(joined, /\(2\)$/m);
 });
 
+test('bare homes in Expected and Received are numbered inside one entry', () => {
+  const pair = [
+    'Error: expect(received).toBe(expected) // Object.is equality',
+    'Expected: "/home/alice"',
+    'Received: "/Users/bob"',
+  ].join('\n');
+  const pairReport = buildTriageReport([
+    oneRecord('pair', [attempt('failed', pair, 0), attempt('failed', pair, 1), attempt('failed', pair, 2)]),
+  ]);
+  const pairJson = renderTriageJson(pairReport);
+  const pairMd = renderTriageMarkdown(pairReport);
+  assert.equal(pairJson.includes('alice'), false);
+  assert.equal(pairJson.includes('bob'), false);
+  assert.equal(pairMd.includes('alice'), false);
+  assert.equal(pairMd.includes('bob'), false);
+  assert.equal(pairReport.entries[0].evidence.includes('Expected: "<home>"'), true);
+  assert.equal(pairReport.entries[0].evidence.includes('Received: "<home~2>"'), true);
+  assert.match(pairMd, /Expected: "&lt;home&gt;"/);
+  assert.match(pairMd, /Received: "&lt;home~2&gt;"/);
+
+  const slash = [
+    'Error: expect(received).toBe(expected) // Object.is equality',
+    'Expected: "/home/alice"',
+    'Received: "/home/alice/"',
+  ].join('\n');
+  const slashReport = buildTriageReport([
+    oneRecord('slash', [attempt('failed', slash, 0), attempt('failed', slash, 1)]),
+  ]);
+  const slashJson = renderTriageJson(slashReport);
+  assert.equal(slashJson.includes('alice'), false);
+  assert.equal(slashReport.entries[0].evidence.includes('Expected: "<home>"'), true);
+  assert.equal(slashReport.entries[0].evidence.includes('Received: "<home>/"'), true);
+  assert.equal(slashReport.entries[0].evidence.some((line) => line.includes('<home~2>')), false);
+
+  const line = (user) =>
+    ['Error: expect(locator).toHaveText(expected) failed', 'Expected: "saved"', `Received: "/home/${user}"`].join('\n');
+  const driftReport = buildTriageReport([
+    oneRecord('users', [
+      attempt('failed', line('alice'), 0),
+      attempt('failed', line('bob'), 1),
+      attempt('failed', line('carol'), 2),
+    ]),
+  ]);
+  const driftJson = renderTriageJson(driftReport);
+  const driftMd = renderTriageMarkdown(driftReport);
+  const driftText = driftJson + driftMd;
+  assert.equal(driftText.includes('alice'), false);
+  assert.equal(driftText.includes('bob'), false);
+  assert.equal(driftText.includes('carol'), false);
+  const driftReceived = driftReport.entries[0].evidence.filter((row) => row.startsWith('Received:'));
+  assert.deepEqual(driftReceived, ['Received: "<home>"', 'Received: "<home~2>"', 'Received: "<home~3>"']);
+  assert.match(driftMd, /Received: "&lt;home&gt;"/);
+  assert.match(driftMd, /Received: "&lt;home~2&gt;"/);
+  assert.match(driftMd, /Received: "&lt;home~3&gt;"/);
+});
+
+test('redaction on and off keeps the same verdict', () => {
+  const files = [
+    ['fixtures/reports/pw-1.60.0-outcomes.json', 'json'],
+    ['fixtures/reports/pw-1.60.0-outcomes.junit.xml', 'junit'],
+    ['demo/saucedemo/reports/recorded-seed-443.json', 'json'],
+    ['demo/saucedemo/reports/recorded-seed-443.junit.xml', 'junit'],
+  ];
+  const groups = [];
+  for (const [file, format] of files) {
+    const text = fs.readFileSync(file, 'utf8');
+    const parsed = format === 'json' ? parsePlaywrightJson(text, file) : parseJunit(text, file);
+    groups.push(...groupsFrom(parsed.records));
+  }
+  const route = (received) =>
+    ['Error: expect(locator).toHaveURL(expected) failed', 'Expected: "/home/feed"', `Received: "${received}"`].join('\n');
+  groups.push([
+    oneRecord('routes', [attempt('failed', route('/home/login'), 0), attempt('failed', route('/home/settings'), 1)]),
+  ]);
+  const homes = (user) =>
+    ['Error: expect(locator).toHaveText(expected) failed', 'Expected: "saved"', `Received: "/home/${user}"`].join('\n');
+  groups.push([
+    oneRecord('users', [
+      attempt('failed', homes('alice'), 0),
+      attempt('failed', homes('bob'), 1),
+      attempt('failed', homes('carol'), 2),
+    ]),
+  ]);
+  const net = 'Error: missing /home/alice\nError: connect ECONNREFUSED';
+  groups.push([oneRecord('net', [0, 1, 2].map((retry) => attempt('failed', net, retry)))]);
+  assert.equal(countVerdictDifferences(groups), 0);
+});
+
+function groupsFrom(records) {
+  const byId = new Map();
+  for (const record of records) {
+    const list = byId.get(record.id) ?? [];
+    list.push(record);
+    byId.set(record.id, list);
+  }
+  return [...byId.values()].filter((group) =>
+    group.some((record) => record.outcome === 'failed' || record.outcome === 'flaky'),
+  );
+}
+
+function decisionOf(records) {
+  const collapsed = collapseRunRecords(records);
+  const base = collapsed[0];
+  const merged = { ...base, attempts: collapsed.flatMap((record) => record.attempts) };
+  const decision = decideVerdict(collapsed, classifyCauses(merged));
+  return { verdict: decision.verdict, ruleId: decision.ruleId, cause: decision.cause };
+}
+
+function redactErrors(records) {
+  const texts = [];
+  for (const record of records) {
+    for (const attempt of record.attempts) {
+      for (const error of attempt.errors ?? []) {
+        texts.push(error.message ?? '');
+        if (error.stack !== undefined) texts.push(error.stack);
+      }
+    }
+  }
+  const marks = homeMarks(texts);
+  return records.map((record) => ({
+    ...record,
+    attempts: record.attempts.map((attempt) => ({
+      ...attempt,
+      errors: (attempt.errors ?? []).map((error) => {
+        const next = { ...error, message: redactHomeText(error.message ?? '', marks) };
+        if (error.stack !== undefined) next.stack = redactHomeText(error.stack, marks);
+        return next;
+      }),
+    })),
+  }));
+}
+
+function countVerdictDifferences(groups) {
+  let differences = 0;
+  for (const group of groups) {
+    const before = decisionOf(group);
+    const after = decisionOf(redactErrors(group));
+    if (before.verdict !== after.verdict || before.ruleId !== after.ruleId || before.cause !== after.cause) {
+      differences += 1;
+    }
+  }
+  return differences;
+}
+
 test('the same report passed twice is counted once', () => {
   const item = oneRecord('once', [attempt('failed', 'Error: gave up', 0)]);
   const copy = { ...item, attempts: item.attempts.map((row) => ({ ...row })) };
   const entry = buildTriageReport([item, copy]).entries[0];
   assert.equal(entry.attempts.total, 1);
   assert.equal(entry.history.runsSeen, 1);
+});
+
+test('spellings of one report path are one run', () => {
+  const file = 'demo/saucedemo/reports/recorded-seed-443.junit.xml';
+  const make = (reportPath) => {
+    const item = oneRecord('once', [attempt('failed', 'Error: gave up', 0)]);
+    item.source = { format: 'junit', reportPath };
+    return item;
+  };
+  const entry = buildTriageReport([make(file), make(`./${file}`), make(path.resolve(file))]).entries[0];
+  assert.equal(entry.attempts.total, 1);
+  assert.equal(entry.history.runsSeen, 1);
+  assert.equal(entry.verdict, 'needs-more-runs');
 });
 
 test('a run JSON report is used instead of its JUnit twin', () => {

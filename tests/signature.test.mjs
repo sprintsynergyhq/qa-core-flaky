@@ -47,6 +47,39 @@ test('call-log repeat counts share a signature', () => {
   assert.equal(normalizeErrorSignature(letter), normalizeErrorSignature(other));
   const received = 'Received: "9 x"';
   assert.equal(normalizeErrorSignature(received), received);
+  const dashed = '  - 9 x locator.click';
+  const dashedOther = '  - 2 × locator.click';
+  assert.equal(normalizeErrorSignature(dashed), normalizeErrorSignature(dashedOther));
+  assert.match(normalizeErrorSignature(dashed), /N × locator/);
+});
+
+test('a count inside an assertion value does not share a signature', () => {
+  const toBe = (expected, received) =>
+    ['Error: expect(received).toBe(expected) // Object.is equality', '', `Expected: "${expected}"`, `Received: "${received}"`].join(
+      '\n',
+    );
+  const times = ['2 × 4', '3 × 4', '5 × 4'].map((received) => normalizeErrorSignature(toBe('1 × 4', received)));
+  assert.notEqual(times[0], times[1]);
+  assert.notEqual(times[1], times[2]);
+  assert.match(times[0], /Expected: "1 × 4"/);
+  assert.match(times[0], /Received: "2 × 4"/);
+
+  const marks = ['2×', '3×', '5×'].map((received) => normalizeErrorSignature(toBe('1×', received)));
+  assert.notEqual(marks[0], marks[1]);
+  assert.notEqual(marks[1], marks[2]);
+  assert.match(marks[0], /Received: "2×"/);
+
+  const text = (received) =>
+    [
+      'Error: expect(locator).toHaveText(expected) failed',
+      `Locator: locator('[data-test="item"]')`,
+      'Expected: "Backpack"',
+      `Received: "${received}"`,
+    ].join('\n');
+  const backpack = ['2 × Backpack', '3 × Backpack', '5 × Backpack'].map((received) => normalizeErrorSignature(text(received)));
+  assert.notEqual(backpack[0], backpack[1]);
+  assert.notEqual(backpack[1], backpack[2]);
+  assert.match(backpack[0], /Received: "2 × Backpack"/);
 });
 
 test('a fractional duration and a private tmp path normalize', () => {

@@ -212,8 +212,11 @@ function splitAbsolute(value: string): { drive: string; parts: string[] } {
 }
 
 type HomeMatch =
-  | { kind: 'replace'; replaceFrom: number; replacement: string; tail: string; next: number }
+  | { kind: 'replace'; replaceFrom: number; username: string; hasSep: boolean; tail: string; next: number }
   | { kind: 'skip'; next: number };
+
+/** Username to the `<home>` mark used for one triage entry. */
+export type HomeMarks = ReadonlyMap<string, string>;
 
 /**
  * Hide a home directory and its username.
@@ -247,19 +250,19 @@ type HomeMatch =
  * `\\server\Users\bob`, `x\\Users\\bob`, and `\\home\\alice` are homes.
  * A path tail stops at `;`, so `;C:\\Windows` keeps its backslashes.
  *
- * Inside an Expected or Received value, a bare POSIX `/home/<name>` or
- * `/Users/<name>` stays. That shape is also an app route (`/home/feed`,
- * `/home/login`), and a bare `/home/alice` cannot be told apart from it.
- * Any path after the username is rewritten, including one segment and no
- * file extension, so `Received: "/Users/bob/notes"` and
- * `Received: "/home/alice/Desktop"` become `<home>/...`.
+ * A bare POSIX `/home/<name>` or `/Users/<name>` is redacted inside an
+ * Expected or Received value too. An app route such as `/home/feed` has
+ * that same shape, so it shows as `<home>`. Pass `marks` from `homeMarks`
+ * when one entry has several usernames: the first is `<home>` and the
+ * later ones are `<home~2>`, `<home~3>`. Any path after the username is
+ * rewritten, including one segment and no file extension.
  * `C:/Users/alice/Desktop` and `C:\\Users\\alice\\Downloads\\report.csv`
  * are drive paths, so they are rewritten at any depth.
  *
  * `http://` and `https://` URLs are left as written. This function does not
  * add a warning.
  */
-export function redactHomeText(value: string): string {
+export function redactHomeText(value: string, marks?: HomeMarks): string {
   const masked = maskUrls(value);
   const text = masked.text;
   let out = '';
@@ -270,13 +273,47 @@ export function redactHomeText(value: string): string {
       out += text.slice(cursor);
       break;
     }
+    const mark = marks?.get(hit.username) ?? '<home>';
     out += text.slice(cursor, hit.replaceFrom);
-    out += hit.replacement;
+    out += homeToken(text, hit.replaceFrom, hit.hasSep, mark);
     out += hit.tail;
     if (hit.next <= cursor) break;
     cursor = hit.next;
   }
   return unmaskUrls(out, masked.urls);
+}
+
+/**
+ * Number different home usernames inside one entry.
+ * The first username in `texts` is `<home>`. The next new ones are
+ * `<home~2>`, `<home~3>`, in that order. The mark is not the username.
+ */
+export function homeMarks(texts: readonly string[]): HomeMarks {
+  const users: string[] = [];
+  for (const value of texts) {
+    for (const user of homeUsernames(value)) {
+      if (!users.includes(user)) users.push(user);
+    }
+  }
+  const marks = new Map<string, string>();
+  users.forEach((user, index) => {
+    marks.set(user, index === 0 ? '<home>' : `<home~${index + 1}>`);
+  });
+  return marks;
+}
+
+function homeUsernames(value: string): string[] {
+  const text = maskUrls(value).text;
+  const users: string[] = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    const hit = findHome(text, cursor);
+    if (!hit || hit.kind !== 'replace') break;
+    users.push(hit.username);
+    if (hit.next <= cursor) break;
+    cursor = hit.next;
+  }
+  return users;
 }
 
 function findHome(text: string, from: number): HomeMatch | undefined {
@@ -404,14 +441,11 @@ function finishHome(text: string, replaceFrom: number, userStart: number): HomeM
   const afterUser = readSeparator(text, userEnd);
   const hasSep = afterUser !== undefined;
   const tail = hasSep ? readPathTail(text, afterUser) : { text: '', next: userEnd };
-  // A drive path is a filesystem path at every depth, never an app route.
-  if (!isDriveLetter(text, replaceFrom) && inExpectedOrReceived(text, replaceFrom) && !expectedHomeRewrites(tail.text, hasSep)) {
-    return { kind: 'skip', next: tail.next };
-  }
   return {
     kind: 'replace',
     replaceFrom,
-    replacement: homeToken(text, replaceFrom, hasSep),
+    username,
+    hasSep,
     tail: tail.text,
     next: tail.next,
   };
@@ -422,30 +456,14 @@ function finishHome(text: string, replaceFrom: number, userStart: number): HomeM
  * separator, so the replacement writes it back. A drive letter is replaced
  * together with the folder.
  */
-function homeToken(text: string, index: number, hasSep: boolean): string {
-  const mark = hasSep ? '<home>/' : '<home>';
-  if (text[index] === '~') return mark;
-  if (index === 0 || isDriveLetter(text, index)) return mark;
-  if (isKnownHomePrefix(text.slice(0, index))) return `/${mark}`;
-  if (text.slice(Math.max(0, index - 7), index) === 'file://') return `/${mark}`;
-  if (endsWithAt(text, index, 'file://localhost')) return `/${mark}`;
-  return mark;
-}
-
-function inExpectedOrReceived(text: string, index: number): boolean {
-  const lineStart = text.lastIndexOf('\n', index - 1) + 1;
-  return /^[ \t]*(?:Expected|Received):/.test(text.slice(lineStart, index));
-}
-
-/**
- * Quoted app routes such as `/home/feed` have no file extension and fewer
- * than two segments after the username. A seed file does.
- */
-function expectedHomeRewrites(tail: string, hasSep: boolean): boolean {
-  // Bare `/home/<name>` stays (same shape as `/home/feed`). Any tail is a
-  // directory, including one segment and no file extension.
-  if (!hasSep) return false;
-  return tail.length > 0 || hasSep;
+function homeToken(text: string, index: number, hasSep: boolean, mark: string): string {
+  const written = hasSep ? `${mark}/` : mark;
+  if (text[index] === '~') return written;
+  if (index === 0 || isDriveLetter(text, index)) return written;
+  if (isKnownHomePrefix(text.slice(0, index))) return `/${written}`;
+  if (text.slice(Math.max(0, index - 7), index) === 'file://') return `/${written}`;
+  if (endsWithAt(text, index, 'file://localhost')) return `/${written}`;
+  return written;
 }
 
 function readUsernameEnd(text: string, start: number): number {

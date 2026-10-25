@@ -22,6 +22,10 @@ function redactRecord(record: TestRecord): TestRecord {
     id: redactHomeText(record.id),
     file: redactHomeText(record.file),
     titlePath: record.titlePath.map((part) => redactHomeText(part)),
+    source: {
+      ...record.source,
+      reportPath: redactHomeText(record.source.reportPath),
+    },
     attempts: record.attempts.map((attempt) => ({
       ...attempt,
       errors: attempt.errors.map((error) => {

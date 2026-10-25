@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { detectFormat, parseJunit, parsePlaywrightJson, redactHomeText } from '../dist/index.js';
+import { detectFormat, homeMarks, parseJunit, parsePlaywrightJson, redactHomeText } from '../dist/index.js';
 
 const jsonPath = 'fixtures/reports/pw-1.60.0-outcomes.json';
 const junitPath = 'fixtures/reports/pw-1.60.0-outcomes.junit.xml';
@@ -605,11 +605,11 @@ test('a drive letter is only a drive in a real path position', () => {
   }
 });
 
-test('app routes and short Expected values are not home directories', () => {
+test('a bare home in Expected or Received is redacted, and a route parameter stays', () => {
   assert.equal(redactHomeText('Expected: "/users/:id"'), 'Expected: "/users/:id"');
   assert.equal(redactHomeText('Expected: "/Users/:id"'), 'Expected: "/Users/:id"');
-  assert.equal(redactHomeText('Expected: "/home/feed"'), 'Expected: "/home/feed"');
-  assert.equal(redactHomeText('Received: "/home/login"'), 'Received: "/home/login"');
+  assert.equal(redactHomeText('Expected: "/home/feed"'), 'Expected: "<home>"');
+  assert.equal(redactHomeText('Received: "/home/login"'), 'Received: "<home>"');
   assert.equal(redactHomeText('/users/alice/feed'), '/users/alice/feed');
   assert.equal(
     redactHomeText('Expected: "/home/alice/notes.txt"'),
@@ -622,7 +622,12 @@ test('app routes and short Expected values are not home directories', () => {
   const drift = ['Error: expect(locator).toHaveURL(expected) failed', 'Expected: "/home/feed"', 'Received: "/home/login"'].join(
     '\n',
   );
-  assert.equal(redactHomeText(drift), drift);
+  assert.equal(redactHomeText(drift), 'Error: expect(locator).toHaveURL(expected) failed\nExpected: "<home>"\nReceived: "<home>"');
+  const marks = homeMarks([drift]);
+  assert.equal(
+    redactHomeText(drift, marks),
+    'Error: expect(locator).toHaveURL(expected) failed\nExpected: "<home>"\nReceived: "<home~2>"',
+  );
 });
 
 test('a run of backslashes is one separator around a Windows home path', () => {
@@ -650,8 +655,8 @@ test('a run of backslashes is one separator around a Windows home path', () => {
     'Received: "<home>/Desktop/Inner/notes.txt"',
   );
   assert.equal(redactHomeText('Received: "/home/alice/Desktop"'), 'Received: "<home>/Desktop"');
-  assert.equal(redactHomeText('Expected: "/home/feed"'), 'Expected: "/home/feed"');
-  assert.equal(redactHomeText('Expected: "/home/alice"'), 'Expected: "/home/alice"');
+  assert.equal(redactHomeText('Expected: "/home/feed"'), 'Expected: "<home>"');
+  assert.equal(redactHomeText('Expected: "/home/alice"'), 'Expected: "<home>"');
   assert.equal(redactHomeText('Received: "/Users/bob/notes"'), 'Received: "<home>/notes"');
 });
 

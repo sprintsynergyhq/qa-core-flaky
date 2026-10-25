@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { classifyCauses } from './causes/index.js';
 import type { Cause, CauseFinding, Confidence } from './causes/types.js';
 import type { Attempt, TestRecord } from './model.js';
@@ -394,9 +395,14 @@ export function runIdentity(record: TestRecord): string {
   return `stem:${reportStem(record.source.reportPath)}`;
 }
 
-/** `a.json`, `a.xml`, and `a.junit.xml` share a stem. */
+/** `a.json`, `a.xml`, and `a.junit.xml` share a stem. `./a` and `a` are one path. */
 export function reportStem(reportPath: string): string {
-  return reportPath.replace(/\\/g, '/').replace(/\.junit\.xml$/i, '').replace(/\.xml$/i, '').replace(/\.json$/i, '');
+  return canonicalReportPath(reportPath).replace(/\.junit\.xml$/i, '').replace(/\.xml$/i, '').replace(/\.json$/i, '');
+}
+
+/** Resolve `.` and `..`, then use forward slashes, so spellings of one file match. */
+function canonicalReportPath(reportPath: string): string {
+  return path.resolve(reportPath).replace(/\\/g, '/');
 }
 
 /**
@@ -408,7 +414,7 @@ export function collapseRunRecords(records: readonly TestRecord[]): TestRecord[]
   const seen = new Set<string>();
   const unique: TestRecord[] = [];
   for (const record of records) {
-    const marker = `${record.id}\0${record.source.format}\0${record.source.reportPath}`;
+    const marker = `${record.id}\0${record.source.format}\0${canonicalReportPath(record.source.reportPath)}`;
     if (seen.has(marker)) continue;
     seen.add(marker);
     unique.push(record);

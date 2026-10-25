@@ -2,7 +2,7 @@ import { classifyCauses } from '../causes/index.js';
 import type { Cause, CauseFinding } from '../causes/types.js';
 import { suggestFix } from '../fixes/templates.js';
 import type { TestRecord } from '../model.js';
-import { redactHomeText } from '../report-path.js';
+import { homeMarks, redactHomeText } from '../report-path.js';
 import { collapseRunRecords, decideVerdict, VERDICT_ORDER } from '../verdict.js';
 import type { TriageEntry, TriageReport } from './schema.js';
 
@@ -74,22 +74,32 @@ function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefi
   const findings = classifyCauses(merged, classifyOptions);
   const decision = decideVerdict(records, findings, classifyOptions);
   const ordered = orderCauses(decision.findings, decision.cause);
-  // Dedupe the original lines first. Two home paths can redact to the same
-  // `<home>` text, and that repeat is how the drift stays visible.
-  const evidence = flattenEvidence(ordered, decision.note).map((line) => redactHomeText(line));
+  // Dedupe the original lines first. Different usernames in this entry then
+  // become `<home>`, `<home~2>`, and so on, so the drift stays readable.
+  const rawEvidence = flattenEvidence(ordered, decision.note);
+  const titleRaw = base.titlePath[base.titlePath.length - 1] ?? base.id;
+  const marks = homeMarks([
+    ...rawEvidence,
+    ...ordered.flatMap((finding) => finding.evidence),
+    base.id,
+    base.file,
+    titleRaw,
+  ]);
+  const redact = (value: string) => redactHomeText(value, marks);
+  const evidence = rawEvidence.map((line) => redact(line));
   const causes = ordered.map((finding) => ({
     ...finding,
-    evidence: finding.evidence.map((line) => redactHomeText(line)),
+    evidence: finding.evidence.map((line) => redact(line)),
   }));
   const failed = attempts.filter(
     (attempt) => attempt.status === 'failed' || attempt.status === 'timedOut' || attempt.status === 'interrupted',
   ).length;
   const passed = attempts.filter((attempt) => attempt.status === 'passed').length;
-  const title = redactHomeText(base.titlePath[base.titlePath.length - 1] ?? base.id);
-  const file = redactHomeText(base.file);
+  const title = redact(titleRaw);
+  const file = redact(base.file);
 
   return {
-    id: redactHomeText(base.id),
+    id: redact(base.id),
     verdict: decision.verdict,
     confidence: decision.confidence,
     ruleId: decision.ruleId,

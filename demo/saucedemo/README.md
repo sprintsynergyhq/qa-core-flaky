@@ -68,7 +68,7 @@ Observed on 25 Oct 2026 (UTC) against https://www.saucedemo.com. This is what th
 
 `locked_out_user`, one login, stayed on `/` and showed `Epic sadface: Sorry, this user has been locked out.`
 
-`problem_user`, three logins, gave every product image the src `/assets/sl-404-Cq1a9k9X.jpg`. The recorded test failed the same way on all three attempts. No flake was observed in those runs. One extra check selected name Z to A. The control stayed on `az`, and the names stayed in the same order. The image mismatch is the assertion this suite keeps.
+`problem_user`: on 25 Oct 2026 UTC, three separate logins each showed every product image src as `/assets/sl-404-Cq1a9k9X.jpg`. The recorded suite is one later run. All three of its attempts failed with that same src. No flake was observed in those checks. One extra check selected name Z to A. The control stayed on `az`, and the names stayed in the same order. The image mismatch is the assertion this suite keeps.
 
 `performance_glitch_user` reached the inventory in 5319 ms, 5324 ms, and 5318 ms. The delay was present on all three logins, so it cannot fail one attempt and pass the next. It is not in the suite.
 

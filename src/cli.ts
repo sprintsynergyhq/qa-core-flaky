@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +10,7 @@ import type { ParseResult, TestRecord } from './model.js';
 import { detectFormat } from './parsers/detect.js';
 import { parseJunit } from './parsers/junit.js';
 import { parsePlaywrightJson } from './parsers/playwright-json.js';
-import { redactHomeText } from './report-path.js';
+import { homeMarks, redactHomeText } from './report-path.js';
 import { redactParseResult } from './redact.js';
 import { renderTriageMarkdown } from './report/markdown.js';
 import { buildTriageReport, renderTriageJson } from './report/json.js';
@@ -174,12 +175,13 @@ function runTriage(reportPaths: readonly string[], values: FlagValues): void {
     runId: values['run-id'],
   };
   const records: TestRecord[] = [];
-  for (const reportPath of reportPaths) {
-    const text = readReport(reportPath);
+  for (const loaded of loadUniqueReports(reportPaths)) {
     try {
-      const selected = format ?? detectFormat(text, reportPath);
+      const selected = format ?? detectFormat(loaded.text, loaded.reportPath);
       const result =
-        selected === 'json' ? parsePlaywrightJson(text, reportPath, meta) : parseJunit(text, reportPath, meta);
+        selected === 'json'
+          ? parsePlaywrightJson(loaded.text, loaded.reportPath, meta)
+          : parseJunit(loaded.text, loaded.reportPath, meta);
       records.push(...result.records);
     } catch (error) {
       if (error instanceof ExitRequest) throw error;
@@ -245,13 +247,17 @@ function writeTriagePair(dir: string, json: string, markdown: string): void {
 function formatCauses(result: ParseResult, testTimeoutMs: number | undefined, asJson: boolean): string {
   const rows = result.records
     .filter((record) => record.outcome === 'failed' || record.outcome === 'flaky')
-    .map((record) => ({
-      id: redactHomeText(record.id),
-      findings: classifyCauses(record, testTimeoutMs === undefined ? {} : { testTimeoutMs }).map((finding) => ({
-        ...finding,
-        evidence: finding.evidence.map((line) => redactHomeText(line)),
-      })),
-    }));
+    .map((record) => {
+      const findings = classifyCauses(record, testTimeoutMs === undefined ? {} : { testTimeoutMs });
+      const marks = homeMarks([record.id, ...findings.flatMap((finding) => finding.evidence)]);
+      return {
+        id: redactHomeText(record.id, marks),
+        findings: findings.map((finding) => ({
+          ...finding,
+          evidence: finding.evidence.map((line) => redactHomeText(line, marks)),
+        })),
+      };
+    });
   if (asJson) return `${JSON.stringify(rows, null, 2)}\n`;
   return formatCauseText(rows);
 }
@@ -267,6 +273,35 @@ function formatCauseText(rows: { id: string; findings: CauseFinding[] }[]): stri
     return lines.join('\n');
   });
   return `${blocks.join('\n\n')}\n`;
+}
+
+/**
+ * Read each report once.
+ * `realpath` makes `./report`, an absolute path, and a symlink one file.
+ * A second path with the same bytes is dropped too, so a copy is not a second run.
+ * The error names the path the user typed when the file cannot be resolved.
+ */
+function loadUniqueReports(reportPaths: readonly string[]): { text: string; reportPath: string }[] {
+  const seenPaths = new Set<string>();
+  const seenHashes = new Set<string>();
+  const loaded: { text: string; reportPath: string }[] = [];
+  for (const original of reportPaths) {
+    let real: string;
+    try {
+      real = fs.realpathSync(original);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'unknown error';
+      fail(`Cannot read report ${original}: ${oneLine(detail)}`);
+    }
+    if (seenPaths.has(real)) continue;
+    seenPaths.add(real);
+    const text = readReport(real);
+    const hash = createHash('sha256').update(text).digest('hex');
+    if (seenHashes.has(hash)) continue;
+    seenHashes.add(hash);
+    loaded.push({ text, reportPath: real });
+  }
+  return loaded;
 }
 
 function readReport(reportPath: string): string {

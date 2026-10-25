@@ -12,11 +12,15 @@ import { stripAnsi } from './report-path.js';
  *    URL becomes `:PORT`.
  * 5. Digits inside a `/tmp/`, `/private/tmp/`, or `/var/folders/` path become `N`.
  * 6. A UUID becomes `ID`. Digits after `id=` or `id:` become `N`.
- * 7. A call-log repeat count such as `9 ×` or `9 x locator` becomes `N ×`.
+ * 7. A count is rewritten only when it starts a call-log line. Optional
+ *    spaces and an optional `-` come first, then the count, then `×` or `x`,
+ *    then `locator`. That count becomes `N ×`. A count inside a quoted
+ *    value, or on an Expected or Received line, stays.
  * 8. Runs of spaces or tabs become one space, then the ends are trimmed.
  *
- * Numbers that are part of the assertion, such as `Received: "1"`, are kept.
- * Two errors that differ only by a call-log repeat count share a signature.
+ * Numbers in assertion values are kept, including `Expected: "1 × 4"`,
+ * `Received: "2×"`, and `Received: "2 × Backpack"`. Two errors that differ
+ * only by a call-log repeat count share a signature.
  */
 export function normalizeErrorSignature(text: string): string {
   let out = stripAnsi(text);
@@ -32,8 +36,7 @@ export function normalizeErrorSignature(text: string): string {
     'ID',
   );
   out = out.replace(/\bid[=:]\s*\d+/gi, 'id=N');
-  out = out.replace(/\d+[ \t]*×/g, 'N ×');
-  out = out.replace(/\d+[ \t]+x(?=[ \t]+locator\b)/gi, 'N ×');
+  out = out.replace(/^([ \t]*-?[ \t]*)\d+[ \t]*[×x][ \t]+(?=locator\b)/gm, '$1N × ');
   out = out.replace(/[ \t]+/g, ' ');
   return out.trim();
 }

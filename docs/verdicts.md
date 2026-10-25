@@ -8,7 +8,7 @@ When a later run fails on every attempt with one error signature, that consisten
 
 A later code group that only passes removes the earlier consistent verdict. A broken test on commit `aaa`, then a pass on commit `bbb`, is `needs-more-runs`. The pass and the fail are not the same code, so the verdict is not flaky. A pass and a fail on one SHA are still flaky.
 
-Without a commit SHA, a run id is the code key. With neither, the report path with `.json`, `.xml`, or `.junit.xml` removed is the key, so one run's JSON and JUnit files are one group. The same report path given twice is counted once. When both formats are present, the JSON record is kept and the JUnit record is not added again, because the JSON file has the retries.
+Without a commit SHA, a run id is the code key. With neither, the report path with `.json`, `.xml`, or `.junit.xml` removed is the key, so one run's JSON and JUnit files are one group. `collapseRunRecords` resolves `.` and `..` first, so `./report.json` and an absolute spelling of that file are one path. `triage` also resolves each path with `realpath` and drops a repeated path before parsing. A second file with the same bytes is dropped before parsing too, so a copy is not a second run. When both formats are present, the JSON record is kept and the JUnit record is not added again, because the JSON file has the retries.
 
 ## Confidence
 

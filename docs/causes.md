@@ -219,9 +219,10 @@ A value mismatch on a resolved locator, such as `toHaveText` with `Received: "1"
 4. A port on `localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`, or an `http(s)` URL becomes `:PORT`.
 5. Digits inside a `/tmp/`, `/private/tmp/`, or `/var/folders/` path become `N`.
 6. A UUID becomes `ID`. Digits after `id=` or `id:` become `N`.
-7. Runs of spaces or tabs become one space, then the ends are trimmed.
+7. A count is rewritten only when it starts a call-log line. Optional spaces and an optional `-` come first, then the count, then `×` or `x`, then `locator`. That count becomes `N ×`. `9 × locator` and `9 x locator` become `N × locator`. A count inside a quoted value, or on an Expected or Received line, stays.
+8. Runs of spaces or tabs become one space, then the ends are trimmed.
 
-Numbers that belong to the assertion, such as `Received: "1"`, are kept. A call-log repeat count such as `9 ×` or `9 x locator` becomes `N ×`, so two errors that differ only by that count share a signature. `Received: "9 x"` is an assertion value and is kept.
+Numbers in assertion values are kept, including `Expected: "1 × 4"`, `Received: "2×"`, and `Received: "2 × Backpack"`. `Received: "1"` and `Received: "9 x"` stay as written. Two errors that differ only by a call-log repeat count share a signature.
 
 ## Local Fixture
 
