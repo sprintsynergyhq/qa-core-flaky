@@ -9,6 +9,7 @@ import {
   redactHomeText,
   redactParseResult,
 } from '../dist/index.js';
+import { relativizeText, toPortablePath } from '../dist/report-path.js';
 
 const jsonPath = 'fixtures/reports/pw-1.60.0-outcomes.json';
 const junitPath = 'fixtures/reports/pw-1.60.0-outcomes.junit.xml';
@@ -824,9 +825,14 @@ test('a JUnit attachment home is redacted and a relative test path is not', () =
       <system-out><![CDATA[
 [[ATTACHMENT|home/alice/proj/test-results/missing-reads-the-seed-file-chromium/error-context.md]]
 [[ATTACHMENT|Users/alice/notes/a.txt]]
+[[ATTACHMENT|users/bob/proj/x.png]]
+[[ATTACHMENT|HOME/bob/a.png]]
 [[ATTACHMENT|users/list.spec.ts]]
 [[ATTACHMENT|home/page.spec.ts]]
 [[ATTACHMENT|Users/Shared]]
+[[ATTACHMENT|Users/Shared/x]]
+[[ATTACHMENT|users/Public/doc/a.txt]]
+[[ATTACHMENT|Users/Default/NTUSER.DAT]]
 ]]></system-out>
     </testcase>
   </testsuite>`;
@@ -838,10 +844,162 @@ test('a JUnit attachment home is redacted and a relative test path is not', () =
   const paths = record.attempts[0].attachments.map((item) => item.path);
   assert.equal(paths[0], '<home>/proj/test-results/missing-reads-the-seed-file-chromium/error-context.md');
   assert.equal(paths[1], '<home>/notes/a.txt');
-  assert.equal(paths[2], 'users/list.spec.ts');
-  assert.equal(paths[3], 'home/page.spec.ts');
-  assert.equal(paths[4], 'Users/Shared');
+  assert.equal(paths[2], '<home>/proj/x.png');
+  assert.equal(paths[3], '<home>/a.png');
+  assert.equal(paths[4], 'users/list.spec.ts');
+  assert.equal(paths[5], 'home/page.spec.ts');
+  assert.equal(paths[6], 'Users/Shared');
+  assert.equal(paths[7], 'Users/Shared/x');
+  assert.equal(paths[8], 'users/Public/doc/a.txt');
+  assert.equal(paths[9], 'Users/Default/NTUSER.DAT');
   assert.equal(JSON.stringify(result).includes('alice'), false);
+  assert.equal(JSON.stringify(result).includes('bob'), false);
+  assert.equal(record.id, 'users/list.spec.ts::chromium::users/list');
+  assert.equal(record.file, 'users/list.spec.ts');
+});
+
+test('a UNC project root is relative in JSON and JUnit', () => {
+  const root = String.raw`\\srv\share\proj`;
+  const spec = String.raw`\\srv\share\proj\p.spec.ts`;
+  const stack = String.raw`Error at \\srv\share\proj\p.spec.ts:3:5`;
+  const attachment = String.raw`\\srv\share\proj\test-results\x\trace.zip`;
+  const deeper = String.raw`\\srv\share\proj\tests\a.spec.ts`;
+  const deeperText = String.raw`Error at \\srv\share\proj\tests\a.spec.ts:3:5`;
+  const warnings = [];
+  assert.equal(toPortablePath(deeper, root, warnings), 'tests/a.spec.ts');
+  assert.equal(relativizeText(deeperText, root, warnings), 'Error at tests/a.spec.ts:3:5');
+  assert.equal(warnings.length, 0);
+  const mixedCase = String.raw`\\SRV\Share\Proj`;
+  assert.equal(toPortablePath(spec, mixedCase, warnings), 'p.spec.ts');
+
+  const extendedRoot = String.raw`\\?\UNC\srv\share\proj`;
+  const extendedSpec = String.raw`\\?\UNC\srv\share\proj\p.spec.ts`;
+  const extendedStack = String.raw`Error at \\?\UNC\srv\share\proj\p.spec.ts:3:5`;
+  const extendedAttachment = String.raw`\\?\UNC\srv\share\proj\test-results\x\trace.zip`;
+  assert.equal(toPortablePath(extendedSpec, extendedRoot, warnings), 'p.spec.ts');
+  assert.equal(relativizeText(extendedStack, extendedRoot, warnings), 'Error at p.spec.ts:3:5');
+  const driveRoot = String.raw`\\?\C:\work\repo`;
+  const driveFile = String.raw`\\?\C:\work\repo\src\a.ts`;
+  assert.equal(toPortablePath(driveFile, driveRoot, warnings), 'src/a.ts');
+
+  function jsonReport(rootDir, filePath, message, attach) {
+    return JSON.stringify({
+      config: { rootDir },
+      suites: [
+        {
+          title: 'p.spec.ts',
+          file: filePath,
+          specs: [
+            {
+              title: 'reads',
+              file: filePath,
+              tests: [
+                {
+                  projectName: 'chromium',
+                  expectedStatus: 'passed',
+                  status: 'unexpected',
+                  results: [
+                    {
+                      retry: 0,
+                      status: 'failed',
+                      duration: 1,
+                      errors: [
+                        {
+                          message: 'boom',
+                          stack: message,
+                          location: { file: filePath, line: 3, column: 5 },
+                        },
+                      ],
+                      attachments: [{ name: 'trace', path: attach, contentType: 'application/zip' }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  function assertRelative(result, label, withLocation) {
+    const error = result.records[0].attempts[0].errors[0];
+    assert.equal(result.records[0].file, 'p.spec.ts', label);
+    if (withLocation) assert.equal(error.location.file, 'p.spec.ts', label);
+    assert.equal(error.stack, 'Error at p.spec.ts:3:5', label);
+    assert.equal(result.records[0].attempts[0].attachments[0].path, 'test-results/x/trace.zip', label);
+    assert.equal(JSON.stringify(result).includes('srv'), false, label);
+    assert.equal(JSON.stringify(result).includes('share'), false, label);
+  }
+
+  assertRelative(parsePlaywrightJson(jsonReport(root, spec, stack, attachment), 'unc-root.json'), 'json', true);
+  assertRelative(
+    parsePlaywrightJson(jsonReport(extendedRoot, extendedSpec, extendedStack, extendedAttachment), 'ext.json'),
+    'extended',
+    true,
+  );
+  assertRelative(
+    parsePlaywrightJson(jsonReport(mixedCase, spec, stack, attachment), 'case.json'),
+    'case',
+    true,
+  );
+
+  const xml = `<testsuite hostname="chromium">
+    <testcase name="reads" classname="p.spec.ts" file="${spec}">
+      <failure message="boom"><![CDATA[${stack}]]></failure>
+      <system-out><![CDATA[
+[[ATTACHMENT|${attachment}]]
+]]></system-out>
+    </testcase>
+  </testsuite>`;
+  assertRelative(parseJunit(xml, 'unc-root.xml', { rootDir: root }), 'junit', false);
+  const extendedXml = `<testsuite hostname="chromium">
+    <testcase name="reads" classname="p.spec.ts" file="${extendedSpec}">
+      <failure message="boom"><![CDATA[${extendedStack}]]></failure>
+      <system-out><![CDATA[
+[[ATTACHMENT|${extendedAttachment}]]
+]]></system-out>
+    </testcase>
+  </testsuite>`;
+  assertRelative(parseJunit(extendedXml, 'ext.xml', { rootDir: extendedRoot }), 'junit-extended', false);
+
+  const outsideHome = String.raw`\\srv\Users\bob\proj\a.ts`;
+  const outsideLine = String.raw`at \\srv\Users\bob\proj\a.ts:3:1`;
+  const outsidePlain = String.raw`\\other\share\notes.txt`;
+  const outsidePlainText = String.raw`Error at \\other\share\notes.txt`;
+  const outside = parsePlaywrightJson(
+    jsonReport('/workspace/app', outsideHome, outsideLine, outsideHome),
+    'outside-home.json',
+  );
+  const outsideError = outside.records[0].attempts[0].errors[0];
+  assert.equal(outsideError.stack, outsideLine);
+  assert.equal(outsideError.location.file.includes('bob'), false);
+  assert.match(outsideError.location.file, /\\\\srv<home>\/proj\/a\.ts/);
+  assert.equal(outside.records[0].attempts[0].attachments[0].path.includes('bob'), false);
+  assert.equal(outsideError.stack.includes('srv/Users'), false);
+  assert.equal(outsideError.stack.includes('../../srv'), false);
+  const plain = parsePlaywrightJson(
+    jsonReport('/workspace/app', outsidePlain, outsidePlainText, outsidePlain),
+    'outside-plain.json',
+  );
+  const plainError = plain.records[0].attempts[0].errors[0];
+  assert.equal(plainError.location.file, outsidePlain);
+  assert.equal(plainError.stack, outsidePlainText);
+  assert.equal(plain.records[0].attempts[0].attachments[0].path, outsidePlain);
+  assert.equal(JSON.stringify(plain).includes('other/share'), false);
+  assert.equal(JSON.stringify(plain).includes('../../other'), false);
+  const plainXml = `<testsuite hostname="chromium">
+    <testcase name="reads" classname="notes" file="${outsidePlain}">
+      <failure message="boom"><![CDATA[${outsidePlainText}]]></failure>
+      <system-out><![CDATA[
+[[ATTACHMENT|${outsidePlain}]]
+]]></system-out>
+    </testcase>
+  </testsuite>`;
+  const plainJunit = parseJunit(plainXml, 'outside-plain.xml', { rootDir: '/workspace/app' });
+  assert.equal(plainJunit.records[0].file, outsidePlain);
+  assert.equal(plainJunit.records[0].attempts[0].errors[0].stack, outsidePlainText);
+  assert.equal(plainJunit.records[0].attempts[0].attachments[0].path, outsidePlain);
 });
 
 test('a UNC line stays absolute so the username can be redacted later', () => {

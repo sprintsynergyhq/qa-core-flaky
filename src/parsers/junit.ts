@@ -73,9 +73,14 @@ const NAMED_XML_ENTITIES: Readonly<Record<string, string>> = {
  * One testcase becomes one record with one attempt. A `failure` or `error`
  * child is `failed`, a `skipped` child is `skipped`, and anything else is
  * `passed`. Throws when the XML is not well formed. The thrown message
- * includes `reportPath`.
+ * includes `reportPath`. The XML has no project root. Pass `rootDir` when
+ * the caller knows it. That root is used for paths and is not stored.
  */
-export function parseJunit(text: string, reportPath: string, meta?: Partial<SourceInfo>): ParseResult {
+export function parseJunit(
+  text: string,
+  reportPath: string,
+  meta?: Partial<SourceInfo> & { rootDir?: string },
+): ParseResult {
   const data = parseXml(text, reportPath);
   const suites = readRootSuites(data);
   if (suites.length === 0) {
@@ -87,9 +92,10 @@ export function parseJunit(text: string, reportPath: string, meta?: Partial<Sour
   const rawFiles: string[] = [];
   const missingProject = { value: false };
   const source = buildSource(reportPath, meta);
+  const rootDir = meta?.rootDir;
 
   for (const suite of suites) {
-    walkSuite(suite, undefined, source, records, rawFiles, warnings, missingProject);
+    walkSuite(suite, undefined, source, records, rawFiles, warnings, missingProject, rootDir);
   }
 
   const ordered = [NO_ATTEMPT_WARNING];
@@ -148,6 +154,7 @@ function walkSuite(
   rawFiles: string[],
   warnings: string[],
   missingProject: { value: boolean },
+  rootDir: string | undefined,
 ): void {
   if (!isObject(suite)) return;
   const ownProject = readHostname(suite);
@@ -155,12 +162,12 @@ function walkSuite(
   for (const testcase of asArray(suite.testcase)) {
     if (!isObject(testcase)) continue;
     if (!project) missingProject.value = true;
-    const read = readCase(testcase, project ?? 'default', source, warnings);
+    const read = readCase(testcase, project ?? 'default', source, warnings, rootDir);
     records.push(read.record);
     rawFiles.push(read.raw);
   }
   for (const child of asArray(suite.testsuite)) {
-    walkSuite(child, project, source, records, rawFiles, warnings, missingProject);
+    walkSuite(child, project, source, records, rawFiles, warnings, missingProject, rootDir);
   }
 }
 
@@ -169,22 +176,23 @@ function readCase(
   project: string,
   source: SourceInfo,
   warnings: string[],
+  rootDir: string | undefined,
 ): { record: TestRecord; raw: string } {
   const raw = rawFile(testcase);
-  const file = toPortablePath(raw, undefined, warnings) ?? '';
+  const file = toPortablePath(raw, rootDir, warnings) ?? '';
   const titlePath = titlePathFromName(attr(testcase, 'name') ?? '');
   const failures = [...asArray(testcase.failure), ...asArray(testcase.error)];
   const failed = failures.length > 0;
   const skipped = testcase.skipped !== undefined;
   const outcome: Outcome = failed ? 'failed' : skipped ? 'skipped' : 'passed';
   const status = outcome === 'failed' ? 'failed' : outcome === 'skipped' ? 'skipped' : 'passed';
-  const errors = readErrors(failures, warnings);
+  const errors = readErrors(failures, warnings, rootDir);
   const attempt: Attempt = {
     retry: 0,
     status,
     durationMs: durationMs(testcase),
     errors,
-    attachments: readAttachments(testcase, warnings),
+    attachments: readAttachments(testcase, warnings, rootDir),
   };
   return {
     raw,
@@ -214,18 +222,18 @@ function titlePathFromName(name: string): string[] {
   return name === '' ? [] : [name];
 }
 
-function readErrors(failures: unknown[], warnings: string[]): AttemptError[] {
+function readErrors(failures: unknown[], warnings: string[], rootDir: string | undefined): AttemptError[] {
   for (const failure of failures) {
-    const error = readFailure(failure, warnings);
+    const error = readFailure(failure, warnings, rootDir);
     if (error) return [error];
   }
   return [];
 }
 
-function readFailure(failure: unknown, warnings: string[]): AttemptError | undefined {
+function readFailure(failure: unknown, warnings: string[], rootDir: string | undefined): AttemptError | undefined {
   const messageAttr = isObject(failure) ? attr(failure, 'message') : undefined;
-  const message = relativizeText(stripAnsi(messageAttr ?? '').trim(), undefined, warnings);
-  const stack = relativizeText(stripAnsi(textOf(failure)).trim(), undefined, warnings);
+  const message = relativizeText(stripAnsi(messageAttr ?? '').trim(), rootDir, warnings);
+  const stack = relativizeText(stripAnsi(textOf(failure)).trim(), rootDir, warnings);
   if (!message && !stack) return undefined;
   if (!stack || stack === message) return { message: message || stack };
   if (!message) return { message: stack };
@@ -234,26 +242,30 @@ function readFailure(failure: unknown, warnings: string[]): AttemptError | undef
 
 /**
  * A JUnit `[[ATTACHMENT|...]]` path can be `home/<name>/<more>` or
- * `Users/<name>/<more>` with no leading slash. That is a home only in this
- * attachment slot. Ids, files, titles, locations, evidence, and `--only`
- * do not use this rule, so `users/list.spec.ts` and `home/page.spec.ts` stay.
+ * `users/<name>/<more>` in any case, with no leading slash. That is a home
+ * only in this attachment slot. Ids, files, titles, locations, evidence,
+ * and `--only` do not use this rule, so `users/list.spec.ts` and
+ * `home/page.spec.ts` stay. `Users/Shared/`, `Users/Public/`, and
+ * `Users/Default/` are shared Windows folders, not a username.
  */
 function redactJunitAttachmentHome(file: string): string {
-  const match = /^(home|Users)\/([^/]+)\/(.+)$/u.exec(file);
+  const match = /^(home|users)\/([^/]+)\/(.+)$/iu.exec(file);
   if (!match) return file;
+  const folder = match[1] ?? '';
   const username = match[2] ?? '';
   const rest = match[3] ?? '';
   if (username === '' || username.startsWith(':') || !/\p{L}/u.test(username)) return file;
+  if (/^users$/iu.test(folder) && /^(?:shared|public|default)$/iu.test(username)) return file;
   return `<home>/${rest}`;
 }
 
-function readAttachments(testcase: XmlNode, warnings: string[]): Attachment[] {
+function readAttachments(testcase: XmlNode, warnings: string[], rootDir: string | undefined): Attachment[] {
   const chunks = [...asArray(testcase['system-out']), ...asArray(testcase['system-err'])];
   const text = chunks.map((chunk) => textOf(chunk)).join('\n');
   const attachments: Attachment[] = [];
   for (const match of text.matchAll(ATTACHMENT_PATTERN)) {
     const raw = match[1] ?? '';
-    const portable = redactJunitAttachmentHome(toPortablePath(raw, undefined, warnings) ?? '');
+    const portable = redactJunitAttachmentHome(toPortablePath(raw, rootDir, warnings) ?? '');
     const name = portable.split('/').pop() || 'attachment';
     attachments.push({
       name,

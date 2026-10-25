@@ -35,8 +35,10 @@
  * A structured file path with no report root still hides the username here,
  * and that rewrite does not add a warning. A UNC path (`\\server\...` or
  * `//server/...`), an extended path (`\\?\...`), and an SMB path (`smb://...`)
- * stay absolute. They are not turned into a relative path first, because that
- * drops the marker redaction needs. A single segment such as `/var/`,
+ * are made relative when they sit inside the report root. The root is checked
+ * first, without case, including `\\?\UNC\` and `\\?\C:\`. Outside that root,
+ * or when the report has no root, those paths stay absolute so redaction still
+ * sees the home. A single segment such as `/var/`,
  * `/Ready/`, or
  * `"/inventory.html"`, a quoted URL path such as `"/cart/checkout.html"`,
  * and prose such as `/and/or` stay as written.
@@ -135,12 +137,16 @@ export function toPortablePath(
   redactUser = true,
 ): string | undefined {
   if (file === undefined) return undefined;
-  // Normalize would turn `\\srv\Users\bob` into `/srv/Users/bob` and then a
-  // relative path, and the username would no longer look like a home.
+  const root = normalizeRoot(rootDir);
+  // A UNC, `\\?\`, or SMB path inside the project root is relative, the same
+  // as any other path under that root. The check is case-insensitive and
+  // understands `\\?\UNC\` and `\\?\C:\`. Outside the root, or with no root,
+  // the original text stays absolute so a later redaction still sees the home.
+  const inside = root ? portableInsideRoot(file, root) : undefined;
+  if (inside !== undefined) return inside;
   if (isNetworkAbsolute(file)) return redactUser ? redactHomeText(file) : file;
   let normalized = stripTrailingSlash(normalizeSlashes(file));
   if (normalized === '') return '';
-  const root = normalizeRoot(rootDir);
   // Structured file paths can hide a home directory here. Error text does not:
   // cause rules read the original message, and the report redacts at output.
   if (!root && redactUser) normalized = redactHomeText(normalized);
@@ -258,8 +264,9 @@ export type HomeMarks = ReadonlyMap<string, string>;
  * and leave every other escape as written.
  * A relative path with no leading slash is not a home. `users/list.spec.ts`,
  * `home/page.spec.ts`, and `Users/Shared/x` stay as written. A JUnit
- * attachment of the form `home/<name>/<more>` or `Users/<name>/<more>` is
- * handled in the JUnit parser, not here.
+ * attachment of the form `home/<name>/<more>` or `users/<name>/<more>`, in
+ * any case, is handled in the JUnit parser, not here. `Users/Shared/`,
+ * `Users/Public/`, and `Users/Default/` are not usernames there either.
  *
  * A letter before `:` is a drive letter only at the start of the text or
  * after a character that is not a letter or digit. `file:///` and `\\?\`
@@ -764,6 +771,84 @@ function isNetworkAbsolute(value: string): boolean {
   return /^smb:\/\//i.test(value);
 }
 
+type PathFamily = 'unc' | 'drive' | 'smb' | 'extended' | 'posix';
+
+interface ClassifiedPath {
+  family: PathFamily;
+  /** Original segments. A drive path keeps the drive letter as segment 0. */
+  segments: string[];
+  /** Comparison key. Windows, UNC, and SMB keys are lower case. */
+  key: string[];
+}
+
+/**
+ * Relative path of `file` when it sits inside `root`.
+ * Windows, UNC, `\\?\UNC\`, `\\?\C:\`, and SMB match without case.
+ * A slash-collapsed root (`/srv/share/proj` from `\\srv\share\proj`, or
+ * `/?/UNC/srv/share/proj` from `\\?\UNC\...`) matches the original UNC form.
+ * Returns `''` when `file` is the root. Returns undefined when it is outside.
+ */
+function portableInsideRoot(file: string, root: string): string | undefined {
+  const left = classifyPath(file);
+  const right = classifyPath(root);
+  if (!left || !right) return undefined;
+  if (!familiesMatch(left.family, right.family)) return undefined;
+  if (right.key.length === 0 || left.key.length < right.key.length) return undefined;
+  for (let index = 0; index < right.key.length; index += 1) {
+    if (left.key[index] !== right.key[index]) return undefined;
+  }
+  return left.segments.slice(right.key.length).join('/');
+}
+
+function familiesMatch(file: PathFamily, root: PathFamily): boolean {
+  if (file === 'posix' && root === 'posix') return false;
+  if (file === root) return true;
+  return (file === 'unc' && root === 'posix') || (file === 'posix' && root === 'unc');
+}
+
+function classifyPath(value: string): ClassifiedPath | undefined {
+  const trimmed = value.replace(/[\\/]+$/u, '');
+  if (trimmed === '' || trimmed === '.') return undefined;
+  const smb = /^smb:\/\//i.exec(trimmed);
+  if (smb) return keyed('smb', splitPathParts(trimmed.slice(smb[0].length)));
+  const extended = /^(?:\\\\\?\\|\/\/\?\/|\/\?\/)/.exec(trimmed);
+  if (extended) return classifyExtended(trimmed.slice(extended[0].length));
+  if (trimmed.startsWith('\\\\') || trimmed.startsWith('//')) {
+    return keyed('unc', splitPathParts(trimmed.replace(/^[/\\]+/u, '')));
+  }
+  const drive = /^([A-Za-z]):[\\/]/.exec(trimmed);
+  if (drive?.[1]) {
+    const rest = splitPathParts(trimmed.slice(drive[0].length));
+    return keyed('drive', [drive[1], ...rest]);
+  }
+  if (trimmed.startsWith('/')) return keyed('posix', splitPathParts(trimmed.slice(1)));
+  return undefined;
+}
+
+function classifyExtended(rest: string): ClassifiedPath | undefined {
+  const unc = /^(?:UNC)[\\/]/i.exec(rest);
+  if (unc) return keyed('unc', splitPathParts(rest.slice(unc[0].length)));
+  const drive = /^([A-Za-z]):[\\/]/.exec(rest);
+  if (drive?.[1]) {
+    const parts = splitPathParts(rest.slice(drive[0].length));
+    return keyed('drive', [drive[1], ...parts]);
+  }
+  return keyed('extended', splitPathParts(rest));
+}
+
+function keyed(family: PathFamily, segments: string[]): ClassifiedPath | undefined {
+  if (segments.length === 0) return undefined;
+  return {
+    family,
+    segments,
+    key: segments.map((segment) => segment.toLowerCase()),
+  };
+}
+
+function splitPathParts(value: string): string[] {
+  return value.split(/[\\/]+/u).filter((part) => part.length > 0);
+}
+
 /**
  * A `/home/` or `/Users/` path left in the text on purpose.
  * `home` and `users` match in any case.
@@ -871,7 +956,16 @@ function isPathNameChar(ch: string): boolean {
 }
 
 function shouldRewriteErrorToken(token: string, root: string | undefined): boolean {
-  if (isNetworkAbsolute(token)) return false;
+  if (isNetworkAbsolute(token)) {
+    const stripped = stripLocationSuffix(token);
+    if (
+      root &&
+      (portableInsideRoot(stripped, root) !== undefined || portableInsideRoot(token, root) !== undefined)
+    ) {
+      return true;
+    }
+    return false;
+  }
   const normalized = normalizeSlashes(token);
   const stripped = stripLocationSuffix(normalized);
   if (root && (pathStartsWithRoot(stripped, root) || pathStartsWithRoot(normalized, root))) return true;
