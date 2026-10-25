@@ -1,0 +1,1 @@
+Error: browserType.launch: Failed to launch the browser.

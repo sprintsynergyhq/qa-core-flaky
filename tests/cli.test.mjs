@@ -92,6 +92,38 @@ test('--format json on a JUnit file exits 1', () => {
   assert.match(result.stderr, /pw-1\.60\.0-outcomes\.junit\.xml/);
 });
 
+test('causes exits 0 and json output is byte identical twice', () => {
+  const first = run(['causes', fixture, '--json']);
+  const second = run(['causes', fixture, '--json']);
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(second.status, 0, second.stderr);
+  assert.equal(first.stdout, second.stdout);
+  assert.ok(first.stdout.endsWith('\n'));
+  const rows = JSON.parse(first.stdout);
+  assert.ok(Array.isArray(rows));
+  const ids = rows.map((row) => row.id);
+  assert.equal(ids.some((id) => id.endsWith('always fails')), true);
+  assert.equal(ids.some((id) => id.endsWith('skipped test')), false);
+  const alwaysFails = rows.find((row) => row.id.endsWith('always fails'));
+  assert.equal(alwaysFails.findings.length, 1);
+  assert.equal(alwaysFails.findings[0].cause, 'unknown');
+  const timedOut = rows.find((row) => row.id.endsWith('times out'));
+  assert.ok(timedOut.findings.some((finding) => finding.ruleIds.includes('TIM-TEST-TIMEOUT')));
+});
+
+test('causes text lists the test id and a finding', () => {
+  const result = run(['causes', fixture]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /always fails/);
+  assert.match(result.stdout, /unknown low UNK-NONE/);
+});
+
+test('help lists causes', () => {
+  const result = run(['--help']);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /causes/);
+});
+
 test('parsing the JUnit fixture twice is byte identical', () => {
   const first = run(['parse', junitFixture]);
   const second = run(['parse', junitFixture]);

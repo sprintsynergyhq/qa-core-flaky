@@ -1,0 +1,16 @@
+Error: locator.click: Error: strict mode violation: getByRole('button', { name: 'Remove' }) resolved to 2 elements:
+    1) <button type="button">Remove</button> aka getByRole('button', { name: 'Remove' }).first()
+    2) <button type="button">Remove</button> aka getByRole('button', { name: 'Remove' }).nth(1)
+
+Call log:
+  - waiting for getByRole('button', { name: 'Remove' })
+
+
+  13 | test('strict mode', async ({ page }) => {
+  14 |   await page.goto(pageUrl);
+> 15 |   await page.getByRole('button', { name: 'Remove' }).click({ timeout: 500 });
+     |                                                      ^
+  16 | });
+  17 |
+  18 | test('element not found', async ({ page }) => {
+    at fixtures/pw-project/tests/causes.spec.ts:15:54

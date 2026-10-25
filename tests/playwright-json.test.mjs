@@ -435,6 +435,93 @@ function errorReport(text) {
   });
 }
 
+test('an http URL is not rewritten, including a query path and the report root', () => {
+  const text = 'see https://example.com/page?x=/home/a and https://x.test/tmp/project/a end';
+  const result = parsePlaywrightJson(errorReport(text), 'urls.json');
+  assert.equal(result.records[0].attempts[0].errors[0].message, text);
+  assert.equal(result.records[0].attempts[0].errors[0].stack, text);
+  assert.equal(result.warnings.length, 0);
+});
+
+test('a real path beside a URL is rewritten and the URL is not', () => {
+  const text = 'boom /opt/app/data.json see https://example.com/opt/app/data.json';
+  const result = parsePlaywrightJson(errorReport(text), 'url-and-path.json');
+  const message = result.records[0].attempts[0].errors[0].message;
+  assert.equal(message.includes('https://example.com/opt/app/data.json'), true);
+  assert.equal(message.includes('boom /opt/app/data.json'), false);
+  assert.match(message, /boom \.\.\/\.\.\/opt\/app\/data\.json/);
+  assert.equal(
+    result.warnings.some((warning) => warning.includes('https://example.com')),
+    false,
+  );
+});
+
+test('a known prefix in prose is not rewritten', () => {
+  const text = 'The prefixes /var/ /home/ /tmp/ /Users/ /runner/ appear in prose.';
+  const result = parsePlaywrightJson(errorReport(text), 'prose.json');
+  assert.equal(result.records[0].attempts[0].errors[0].message, text);
+  assert.equal(result.warnings.length, 0);
+});
+
+test('an absolute path outside the old prefix list is rewritten', () => {
+  const text = 'wrote /srv/ci/out.json and /opt/app/data.json';
+  const result = parsePlaywrightJson(errorReport(text), 'wide.json');
+  const message = result.records[0].attempts[0].errors[0].message;
+  assert.equal(message, 'wrote ../../srv/ci/out.json and ../../opt/app/data.json');
+  assert.equal(/(?:^|\s)\/srv\/ci\/out\.json/.test(message), false);
+  assert.equal(/(?:^|\s)\/opt\/app\/data\.json/.test(message), false);
+});
+
+test('escaped Windows backslashes keep the drive and use single separators', () => {
+  const message = 'Error at C:\\\\Users\\\\bob\\\\a.ts:12:3';
+  const result = parsePlaywrightJson(errorReport(message), 'windows.json');
+  const stored = result.records[0].attempts[0].errors[0].message;
+  assert.equal(stored, 'Error at C:/Users/bob/a.ts:12:3');
+  assert.equal(stored.includes('Users//bob'), false);
+  assert.equal(stored.includes('\\'), false);
+  assert.ok(result.warnings.some((warning) => warning.includes('C:/Users/bob/a.ts:12:3')));
+});
+
+test('a Windows path on the report drive becomes relative', () => {
+  const raw = JSON.stringify({
+    config: { rootDir: 'C:/work/repo' },
+    suites: [
+      {
+        title: 'a.ts',
+        file: 'C:/work/repo/src/a.ts',
+        specs: [
+          {
+            title: 'runs',
+            file: 'C:/work/repo/src/a.ts',
+            tests: [
+              {
+                projectName: 'chromium',
+                expectedStatus: 'passed',
+                status: 'unexpected',
+                results: [
+                  {
+                    retry: 0,
+                    status: 'failed',
+                    duration: 1,
+                    errors: [{ message: 'at C:\\\\work\\\\repo\\\\src\\\\a.ts:2:1' }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const result = parsePlaywrightJson(raw, 'windows-root.json');
+  assert.equal(result.records[0].file, 'src/a.ts');
+  assert.equal(result.records[0].attempts[0].errors[0].message, 'at src/a.ts:2:1');
+  assert.equal(
+    result.warnings.some((warning) => warning.startsWith('File path is a Windows path')),
+    false,
+  );
+});
+
 test('a test with zero results warns and still returns a record', () => {
   const raw = JSON.stringify({
     suites: [

@@ -1,0 +1,13 @@
+Error: locator.waitFor: Test timeout of 800ms exceeded.
+Call log:
+  - waiting for getByRole('button', { name: 'Missing' }) to be visible
+
+
+  39 |   test.setTimeout(800);
+  40 |   await page.goto(pageUrl);
+> 41 |   await page.getByRole('button', { name: 'Missing' }).waitFor({ timeout: 0 });
+     |                                                       ^
+  42 | });
+  43 |
+  44 | test('intercepts pointer events', async ({ page }) => {
+    at fixtures/pw-project/tests/causes.spec.ts:41:55

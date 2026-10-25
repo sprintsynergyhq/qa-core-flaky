@@ -21,7 +21,9 @@
         "id": "chromium",
         "name": "chromium",
         "testDir": ".",
-        "testIgnore": [],
+        "testIgnore": [
+          "**/causes.spec.ts"
+        ],
         "testMatch": [
           "**/*.@(spec|test).?(c|m)[jt]s?(x)"
         ],

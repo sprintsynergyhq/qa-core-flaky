@@ -36,8 +36,12 @@ type XmlNode = Record<string, unknown>;
  * external identifier there is not read. A DOCTYPE after the root element is
  * left in place. Attribute values and ordinary element text decode the five
  * predefined XML entities (`lt`, `gt`, `amp`, `apos`, `quot`) and numeric
- * character references (`&#65;`, `&#x42;`). CDATA stays literal. HTML entities
- * stay literal. Attribute values stay strings.
+ * character references whose code point is a legal XML 1.0 character
+ * (`&#65;`, `&#x42;`). A reference the grammar rejects, including a hex
+ * reference with an uppercase `X` (`&#X41;`), does not fail the report. It
+ * stays as the original reference text. A reference to a forbidden character,
+ * such as `&#0;`, also stays as the original reference text. CDATA stays
+ * literal. HTML entities stay literal. Attribute values stay strings.
  */
 const CDATA_KEY = '#cdata';
 
@@ -97,7 +101,7 @@ export function parseJunit(text: string, reportPath: string, meta?: Partial<Sour
 }
 
 function parseXml(text: string, reportPath: string): unknown {
-  const withoutDoctype = stripDoctype(text);
+  const withoutDoctype = neutralizeInvalidCharRefs(stripDoctype(text));
   const validation = XMLValidator.validate(withoutDoctype, { allowBooleanAttributes: true });
   if (validation !== true) {
     throw new Error(`Invalid XML in report ${reportPath}`);
@@ -296,6 +300,71 @@ function stripDoctype(xml: string): string {
     return out + xml.slice(index);
   }
   return out;
+}
+
+/**
+ * A character reference the XML grammar rejects is written as `&amp;#...`
+ * outside CDATA, comments, and processing instructions. Validation then
+ * accepts the document. `decodeXmlEntities` turns `&amp;` back into `&`
+ * and does not decode the invalid reference, so `&#X41;` stays literal.
+ * `&#0;` is grammatically a character reference, so it is left for the
+ * decoder, which also keeps it literal.
+ */
+function neutralizeInvalidCharRefs(xml: string): string {
+  let out = '';
+  let index = 0;
+  while (index < xml.length) {
+    if (xml.startsWith('<![CDATA[', index)) {
+      const end = xml.indexOf(']]>', index + 9);
+      if (end === -1) return out + xml.slice(index);
+      out += xml.slice(index, end + 3);
+      index = end + 3;
+      continue;
+    }
+    if (xml.startsWith('<!--', index)) {
+      const end = xml.indexOf('-->', index + 4);
+      if (end === -1) return out + xml.slice(index);
+      out += xml.slice(index, end + 3);
+      index = end + 3;
+      continue;
+    }
+    if (xml.startsWith('<?', index)) {
+      const end = xml.indexOf('?>', index + 2);
+      if (end === -1) return out + xml.slice(index);
+      out += xml.slice(index, end + 2);
+      index = end + 2;
+      continue;
+    }
+    if (xml.startsWith('&#', index) && charRefRejected(xml, index)) {
+      out += '&amp;';
+      index += 1;
+      continue;
+    }
+    out += xml[index];
+    index += 1;
+  }
+  return out;
+}
+
+function charRefRejected(xml: string, start: number): boolean {
+  let index = start + 2;
+  if (index >= xml.length) return true;
+  let hex = false;
+  if (xml[index] === 'x') {
+    hex = true;
+    index += 1;
+  } else if (xml[index] === 'X') {
+    return true;
+  }
+  const digit = hex ? /[0-9a-fA-F]/ : /[0-9]/;
+  const first = xml[index];
+  if (first === undefined || first === ';') return false;
+  for (; index < xml.length; index += 1) {
+    const ch = xml[index];
+    if (ch === ';') return false;
+    if (!digit.test(ch ?? '')) return true;
+  }
+  return true;
 }
 
 function endOfDoctype(xml: string, start: number): number {

@@ -1,0 +1,36 @@
+TimeoutError: locator.click: Timeout 400ms exceeded.
+Call log:
+  - waiting for locator('#go')
+    - locator resolved to <button id="go" type="button">Go</button>
+  - attempting click action
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div id="cover"></div> intercepts pointer events
+    - retrying click action
+    - waiting 20ms
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div id="cover"></div> intercepts pointer events
+    - retrying click action
+      - waiting 100ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <div id="cover"></div> intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+
+
+  51 |     document.body.appendChild(cover);
+  52 |   });
+> 53 |   await page.locator('#go').click({ timeout: 400 });
+     |                             ^
+  54 | });
+  55 |
+  56 | test('value mismatch one', async ({ page }) => {
+    at fixtures/pw-project/tests/causes.spec.ts:53:29

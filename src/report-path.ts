@@ -1,27 +1,38 @@
 /**
- * Report paths stored on a record stay relative.
+ * Report paths stored on a record stay relative when they can be.
  *
- * A structured path inside the report root loses that prefix. A structured
- * path outside the root, or an absolute structured path when the report has
- * no root, is rewritten. The stored value never keeps an absolute machine
- * path. Each distinct rewrite adds one warning, and the warning quotes the
- * relative path only.
+ * A structured POSIX path inside the report root loses that prefix. A
+ * structured POSIX path outside the root, or an absolute POSIX path when
+ * the report has no root, is rewritten to a relative path. Each distinct
+ * rewrite adds one warning, and that warning quotes the relative path only.
  *
- * Error text keeps its slashes. A token is rewritten when it is the report
- * root, or when it looks like a filesystem path: `/home/`, `/Users/`,
- * `/tmp/`, `/var/`, `/runner/`, a drive letter such as `X:\`, or a source
- * location ending in `.ts`, `.js`, or `.mjs` with a line number. A token may
- * start after whitespace, a quote, `=`, `(`, a backtick, `[`, `{`, `:`, or
- * `file://`. Trailing `,`, `.`, `;`, and `)` stay outside the rewritten path.
- * The report root is also removed wherever it still appears as its own
- * prefix. The character after the root has to be a boundary, so a longer
- * name such as `/tmp/project-other` is not cut apart. Slashes are normalized
- * only inside a rewritten path.
+ * A Windows path is normalized before anything else: a run of backslashes
+ * is one separator, and the stored form uses forward slashes. `C:\\Users\\bob`
+ * becomes `C:/Users/bob`, not `Users//bob`. The drive letter stays. When the
+ * report root uses that same drive, the path is made relative and the drive
+ * is no longer in the result. Otherwise the normalized `C:/...` form is
+ * kept, because dropping the drive would throw away the only root the path
+ * has. That case adds a warning that quotes the normalized path.
+ *
+ * Error text keeps its slashes except inside a rewritten token. A token is
+ * rewritten when it is the report root, when it is an absolute POSIX path
+ * with at least two segments, when it is a Windows path with a drive and a
+ * segment, or when it is a source location ending in `.ts`, `.js`, or
+ * `.mjs` with a line number. A single segment such as `/var/`, `/Ready/`,
+ * or `"/inventory.html"` is left alone. `http://` and `https://` URLs are
+ * left alone, including a query such as `?x=/home/a` and a root prefix that
+ * sits inside the URL. A token may start after whitespace, a quote, `=`,
+ * `(`, a backtick, `[`, `{`, `:`, or `file://`. Trailing `,`, `.`, `;`, and
+ * `)` stay outside the rewritten path. The report root is also removed
+ * wherever it still appears as its own prefix, but not inside a URL. The
+ * character after the root has to be a boundary, so a longer name such as
+ * `/tmp/project-other` is not cut apart.
  */
 
 const OUTSIDE_ROOT_WARNING =
   'File path is outside the report root and was rewritten to a relative path: ';
 const ABSOLUTE_WARNING = 'File path was absolute and was rewritten to a relative path: ';
+const WINDOWS_WARNING = 'File path is a Windows path and was normalized: ';
 
 /**
  * A path token after a boundary.
@@ -33,13 +44,26 @@ const TEXT_TOKEN =
 
 const TRAILING_PUNCTUATION = /[,.;)]+$/;
 
-const FILESYSTEM_PREFIXES = ['/home/', '/Users/', '/tmp/', '/var/', '/runner/'];
-
 /** `file.ts:12` or `file.ts:12:3` at the end of a token. */
 const SOURCE_LOCATION = /\.(?:ts|js|mjs):\d+(?::\d+)?$/;
 
+/**
+ * Turn Windows separators into forward slashes.
+ * A run of backslashes is one separator, so `C:\\Users\\bob` becomes
+ * `C:/Users/bob` rather than `C://Users//bob`.
+ */
 export function normalizeSlashes(value: string): string {
-  return value.replaceAll('\\', '/');
+  let out = '';
+  for (let index = 0; index < value.length; index += 1) {
+    const ch = value[index];
+    if (ch !== '\\') {
+      out += ch;
+      continue;
+    }
+    while (index + 1 < value.length && value[index + 1] === '\\') index += 1;
+    out += '/';
+  }
+  return out;
 }
 
 export function isAbsolutePath(value: string): boolean {
@@ -64,6 +88,10 @@ export function toPortablePath(
     if (normalized.startsWith(`${root}/`)) return normalized.slice(root.length + 1);
   }
   if (!isAbsolutePath(normalized)) return normalized;
+  if (isWindowsDrivePath(normalized) && !sameDrive(root, normalized)) {
+    pushWarning(warnings, `${WINDOWS_WARNING}${normalized}`);
+    return normalized;
+  }
   const rewritten =
     root && isAbsolutePath(root) ? relativeFrom(root, normalized) : stripAbsolutePrefix(normalized);
   const safe = isAbsolutePath(rewritten) ? stripAbsolutePrefix(rewritten) : rewritten;
@@ -75,14 +103,17 @@ export function toPortablePath(
 /**
  * Rewrite filesystem paths inside error text.
  *
- * Patterns, URL paths, regular expressions, and backslash text stay as
- * written. No warning is added for those. A path inside the report root is
- * removed with no warning. The root prefix is then removed anywhere it
- * remains, using the same boundary check.
+ * `http://` and `https://` URLs are masked first, so a query such as
+ * `?x=/home/a` and a root prefix inside the URL are not rewritten and do
+ * not warn. Patterns, single-segment URL paths, regular expressions, and
+ * backslash text that is not a Windows path stay as written. A path inside
+ * the report root is removed with no warning. The root prefix is then
+ * removed anywhere it remains outside a URL, using the same boundary check.
  */
 export function relativizeText(text: string, rootDir: string | undefined, warnings: string[]): string {
   const root = normalizeRoot(rootDir);
-  const tokenized = text.replace(TEXT_TOKEN, (full, prefix: string, token: string) => {
+  const masked = maskUrls(text);
+  const tokenized = masked.text.replace(TEXT_TOKEN, (full, prefix: string, token: string) => {
     const parts = splitErrorToken(token);
     if (parts.path === '') return full;
     if (!shouldRewriteErrorToken(parts.path, root)) return full;
@@ -91,7 +122,7 @@ export function relativizeText(text: string, rootDir: string | undefined, warnin
     const body = portable === '' ? '.' : portable;
     return `${prefix}${parts.lead}${body}${parts.trailing}`;
   });
-  return replaceRootPrefixes(tokenized, root);
+  return unmaskUrls(replaceRootPrefixes(tokenized, root), masked.urls);
 }
 
 export function stripAnsi(text: string): string {
@@ -184,11 +215,69 @@ function replaceRootBoundaries(text: string, root: string): string {
 
 function shouldRewriteErrorToken(token: string, root: string | undefined): boolean {
   const normalized = normalizeSlashes(token);
-  if (root && (normalized === root || normalized.startsWith(`${root}/`))) return true;
-  if (FILESYSTEM_PREFIXES.some((prefix) => normalized.startsWith(prefix))) return true;
-  if (/^[A-Za-z]:\//.test(normalized)) return true;
+  const stripped = stripLocationSuffix(normalized);
+  if (root && (pathStartsWithRoot(stripped, root) || pathStartsWithRoot(normalized, root))) return true;
+  if (isWindowsDrivePath(stripped) && windowsHasSegment(stripped)) return true;
+  if (isRegexLiteral(stripped) || isRegexLiteral(normalized)) return false;
   if (normalized.startsWith('/') && SOURCE_LOCATION.test(normalized)) return true;
-  return false;
+  return isMultiSegmentPosixPath(stripped);
+}
+
+function pathStartsWithRoot(value: string, root: string): boolean {
+  return value === root || value.startsWith(`${root}/`);
+}
+
+function stripLocationSuffix(value: string): string {
+  return value.replace(/:\d+(?::\d+)?$/, '');
+}
+
+function isWindowsDrivePath(value: string): boolean {
+  return /^[A-Za-z]:\//.test(value);
+}
+
+function sameDrive(root: string | undefined, value: string): boolean {
+  if (!root || !isWindowsDrivePath(root) || !isWindowsDrivePath(value)) return false;
+  return root.slice(0, 2).toLowerCase() === value.slice(0, 2).toLowerCase();
+}
+
+function windowsHasSegment(value: string): boolean {
+  const rest = value.replace(/^[A-Za-z]:\//, '').replace(/\/+$/, '');
+  return rest.split('/').some((part) => part.length > 0);
+}
+
+/** A `/pattern/` token, including flags. A filesystem path with two segments does not match. */
+function isRegexLiteral(value: string): boolean {
+  return /^\/(?:[^/\n\\]|\\.)+\/[gimsuy]*$/.test(value);
+}
+
+/**
+ * An absolute POSIX path with at least two safe segments, such as
+ * `/opt/app/data.json`. One segment (`/var/`, `/inventory.html`) is not a
+ * filesystem path. A segment that contains regex metacharacters is not one
+ * either.
+ */
+function isMultiSegmentPosixPath(value: string): boolean {
+  if (!value.startsWith('/') || value.startsWith('//')) return false;
+  const segments = value
+    .replace(/\/+$/, '')
+    .split('/')
+    .filter((part) => part.length > 0);
+  if (segments.length < 2) return false;
+  return segments.every((segment) => /^[A-Za-z0-9._+\-@]+$/.test(segment));
+}
+
+function maskUrls(text: string): { text: string; urls: string[] } {
+  const urls: string[] = [];
+  const masked = text.replace(/https?:\/\/[^\s<>"'`]+/gi, (url) => {
+    const token = `\uE000${urls.length}\uE001`;
+    urls.push(url);
+    return token;
+  });
+  return { text: masked, urls };
+}
+
+function unmaskUrls(text: string, urls: readonly string[]): string {
+  return text.replace(/\uE000(\d+)\uE001/g, (_full, index: string) => urls[Number(index)] ?? '');
 }
 
 function stripTrailingSlash(value: string): string {

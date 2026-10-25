@@ -10,7 +10,7 @@ import type {
   TestRecord,
 } from '../model.js';
 import { stripLeadingBom } from './detect.js';
-import { relativizeText, stripAnsi, toPortablePath } from '../report-path.js';
+import { normalizeSlashes, relativizeText, stripAnsi, toPortablePath } from '../report-path.js';
 
 const ATTEMPT_STATUSES: readonly AttemptStatus[] = [
   'passed',
@@ -96,7 +96,7 @@ function readRootDir(data: JsonObject): string | undefined {
   if (!isObject(config)) return undefined;
   const rootDir = config.rootDir;
   if (typeof rootDir !== 'string' || rootDir === '' || rootDir === '.') return undefined;
-  const normalized = rootDir.replaceAll('\\', '/').replace(/\/$/, '');
+  const normalized = normalizeSlashes(rootDir).replace(/\/$/, '');
   if (normalized === '' || normalized === '.') return undefined;
   return normalized;
 }
