@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "id": "tests/outcomes.spec.ts::chromium::always fails",
+      "verdict": "likely-real-bug",
+      "confidence": "medium",
+      "ruleId": "LIKELY-REAL-BUG",
+      "signals": [
+        {
+          "kind": "consistent-failure",
+          "detail": "All attempts on this code failed with one error signature."
+        }
+      ],
+      "causes": [
+        {
+          "cause": "unknown",
+          "confidence": "low",
+          "evidence": [
+            "Expected: \"a different heading\"",
+            "Received: \"Ready\""
+          ],
+          "ruleIds": [
+            "UNK-NONE"
+          ]
+        }
+      ],
+      "evidence": [
+        "Expected: \"a different heading\"",
+        "Received: \"Ready\""
+      ],
+      "attempts": {
+        "total": 3,
+        "failed": 3,
+        "passed": 0,
+        "sameCommit": false
+      },
+      "history": {
+        "runsSeen": 1,
+        "firstFailingCommit": null
+      },
+      "suggestedFix": "The rules did not name a cause. Compare the quoted expected and received values with what the user sees. Do not loosen the assertion to make it pass.",
+      "healProposal": null,
+      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun \"tests/outcomes.spec.ts\" -g \"always fails\" --times 10",
+      "note": null,
+      "llm": null,
+      "review": {
+        "status": "Needs Review",
+        "reviewer": null,
+        "decision": null
+      }
+    },
+    {
+      "id": "tests/outcomes.spec.ts::chromium::flaky by retry",
+      "verdict": "flaky",
+      "confidence": "low",
+      "ruleId": "FLAKY",
+      "signals": [
+        {
+          "kind": "same-code-flip",
+          "detail": "At least one pass and one fail share the same code."
+        }
+      ],
+      "causes": [
+        {
+          "cause": "unknown",
+          "confidence": "low",
+          "evidence": [
+            "Expected: \"not ready\"",
+            "Received: \"Ready\""
+          ],
+          "ruleIds": [
+            "UNK-NONE"
+          ]
+        }
+      ],
+      "evidence": [
+        "Expected: \"not ready\"",
+        "Received: \"Ready\""
+      ],
+      "attempts": {
+        "total": 2,
+        "failed": 1,
+        "passed": 1,
+        "sameCommit": true
+      },
+      "history": {
+        "runsSeen": 1,
+        "firstFailingCommit": null
+      },
+      "suggestedFix": "The rules did not name a cause. Compare the quoted expected and received values with what the user sees. Do not loosen the assertion to make it pass.",
+      "healProposal": null,
+      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun \"tests/outcomes.spec.ts\" -g \"flaky by retry\" --times 10",
+      "note": null,
+      "llm": null,
+      "review": {
+        "status": "Needs Review",
+        "reviewer": null,
+        "decision": null
+      }
+    },
+    {
+      "id": "tests/outcomes.spec.ts::chromium::times out",
+      "verdict": "needs-more-runs",
+      "confidence": "medium",
+      "ruleId": "NEEDS-MORE-RUNS",
+      "signals": [
+        {
+          "kind": "consistent-failure",
+          "detail": "All attempts on this code failed with one error signature. The primary cause is selectors (SEL-UNRESOLVED), which is not a broken test, an environment issue, or a likely real bug."
+        }
+      ],
+      "causes": [
+        {
+          "cause": "selectors",
+          "confidence": "high",
+          "evidence": [
+            "  - waiting for getByRole('button', { name: 'Never Appears' }) to be visible"
+          ],
+          "ruleIds": [
+            "SEL-UNRESOLVED"
+          ]
+        },
+        {
+          "cause": "timing",
+          "confidence": "high",
+          "evidence": [
+            "Test timeout of 1000ms exceeded.",
+            "Error: locator.waitFor: Test timeout of 1000ms exceeded."
+          ],
+          "ruleIds": [
+            "TIM-TEST-TIMEOUT"
+          ]
+        }
+      ],
+      "evidence": [
+        "  - waiting for getByRole('button', { name: 'Never Appears' }) to be visible",
+        "Test timeout of 1000ms exceeded.",
+        "Error: locator.waitFor: Test timeout of 1000ms exceeded."
+      ],
+      "attempts": {
+        "total": 3,
+        "failed": 3,
+        "passed": 0,
+        "sameCommit": false
+      },
+      "history": {
+        "runsSeen": 1,
+        "firstFailingCommit": null
+      },
+      "suggestedFix": "The locator never resolved. Check whether the element is missing or the locator is wrong. This is a candidate for qa-core-heal (PR 9).",
+      "healProposal": null,
+      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun \"tests/outcomes.spec.ts\" -g \"times out\" --times 10",
+      "note": null,
+      "llm": null,
+      "review": {
+        "status": "Needs Review",
+        "reviewer": null,
+        "decision": null
+      }
+    }
+  ]
+}

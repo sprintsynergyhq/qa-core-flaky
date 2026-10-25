@@ -1,0 +1,27 @@
+<testsuites id="" name="" tests="1" failures="0" skipped="0" errors="1" time="0">
+<testsuite name="missing.spec.js" timestamp="1970-01-01T00:00:00.000Z" hostname="chromium" tests="1" failures="0" skipped="0" time="0" errors="1">
+<testcase name="reads the seed file" classname="missing.spec.js" time="0">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|home/alice/proj/test-results/missing-reads-the-seed-file-chromium/error-context.md]]
+]]>
+</system-out>
+<error message="ENOENT: no such file or directory, open &apos;/home/alice/proj/tests/seed-users.json&apos;" type="Error">
+<![CDATA[  [chromium] › missing.spec.js:5:1 › reads the seed file ───────────────────────────────────────────
+
+    Error: ENOENT: no such file or directory, open '/home/alice/proj/tests/seed-users.json'
+
+      4 |
+      5 | test('reads the seed file', () => {
+    > 6 |   fs.readFileSync(path.join(__dirname, 'seed-users.json'), 'utf8');
+        |      ^
+      7 | });
+      8 |
+        at /home/alice/proj/tests/missing.spec.js:6:6
+
+    Error Context: ../test-results/missing-reads-the-seed-file-chromium/error-context.md
+]]>
+</error>
+</testcase>
+</testsuite>
+</testsuites>

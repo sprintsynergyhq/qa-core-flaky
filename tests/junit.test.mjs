@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { detectFormat, parseJunit, parsePlaywrightJson } from '../dist/index.js';
+import { detectFormat, parseJunit, parsePlaywrightJson, redactHomeText } from '../dist/index.js';
 
 const jsonPath = 'fixtures/reports/pw-1.60.0-outcomes.json';
 const junitPath = 'fixtures/reports/pw-1.60.0-outcomes.junit.xml';
@@ -261,19 +261,19 @@ test('a root-shaped absolute path is rewritten when the next character is not a 
     'url https://x.test/home/ci/w/a?x=/home/ci/w',
   ].join(' ');
   const expected = [
-    'a=home/ci/w&b',
-    'cd home/ci/w&&npm test',
-    'bang home/ci/w!',
-    'query /home/ci/w?',
-    'hash /home/ci/w#x',
-    'star /home/ci/w*',
-    'pct home/ci/w%20',
-    'tilde home/ci/w~',
-    'dollar home/ci/w$HOME',
-    'file home/ci/w/a%20b.ts',
-    'ampfile home/ci/w/a&b.ts',
-    'keep home/ci/w-other/file.ts',
-    'dot home/ci/w.backup/a.ts',
+    'a=<home>/w&b',
+    'cd <home>/w&&npm test',
+    'bang <home>/w!',
+    'query <home>/w?',
+    'hash <home>/w#x',
+    'star <home>/w*',
+    'pct <home>/w%20',
+    'tilde <home>/w~',
+    'dollar <home>/w$HOME',
+    'file <home>/w/a%20b.ts',
+    'ampfile <home>/w/a&b.ts',
+    'keep <home>/w-other/file.ts',
+    'dot <home>/w.backup/a.ts',
     'prose /var/',
     'url https://x.test/home/ci/w/a?x=/home/ci/w',
   ].join(' ');
@@ -284,10 +284,50 @@ test('a root-shaped absolute path is rewritten when the next character is not a 
   </testsuite></testsuites>`;
   const result = parseJunit(xml, 'reports/root-boundary.xml');
   const message = result.records[0].attempts[0].errors[0].message;
-  assert.equal(message, expected);
+  assert.equal(message, input);
+  assert.equal(redactHomeText(message), expected);
   for (const warning of result.warnings) {
     assert.equal(warning.includes('/home/ci/w'), false);
   }
+});
+
+test('Unicode home paths and CI work folders are rewritten when JUnit has no root', () => {
+  const input = [
+    '/home/bob/file#1.json',
+    '/home/józef/secret.txt',
+    '/Users/李/a.ts',
+    '/__w/repo/a.ts',
+    '/github/workspace/repo/a.ts',
+    '/Volumes/CI/a.ts',
+    '/agent/_work/1/a.ts',
+    '/app/foo/bar.json',
+    '/data/foo/bar.json',
+  ].join(' ');
+  // No report root. The home directory and username become <home>/, including
+  // up to a blocked character. Other known folders are still rewritten.
+  const expected = [
+    '<home>/file#1.json',
+    '<home>/secret.txt',
+    '<home>/a.ts',
+    '__w/repo/a.ts',
+    'github/workspace/repo/a.ts',
+    'Volumes/CI/a.ts',
+    'agent/_work/1/a.ts',
+    '/app/foo/bar.json',
+    '/data/foo/bar.json',
+  ].join(' ');
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="paths" classname="a.spec.ts">
+      <failure message="${input}">kept</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/blocked.xml');
+  const message = result.records[0].attempts[0].errors[0].message;
+  assert.equal(message.includes('/home/józef/secret.txt'), true);
+  assert.equal(message.includes('/Users/李/a.ts'), true);
+  assert.equal(message.includes('__w/repo/a.ts'), true);
+  assert.equal(message.includes('/__w/repo/a.ts'), false);
+  assert.equal(redactHomeText(message), expected);
 });
 
 test('queries, globs, url paths, and prose stay as written', () => {
@@ -448,4 +488,167 @@ test('parsing the JUnit fixture twice is byte identical', () => {
   const first = JSON.stringify(parseJunit(text, junitPath));
   const second = JSON.stringify(parseJunit(text, junitPath));
   assert.equal(first, second);
+});
+
+test('a JUnit report with no root rewrites the home directory and username to <home>/', () => {
+  const message = [
+    "open '/tmp/home/alice/proj/tests/seed-users.json'",
+    'also /home/alice/proj/x.json',
+    'blocked /home/bob/file#1.json',
+    'win C:\\Users\\alice\\proj\\tests\\seed.json',
+    'var /var/home/alice/a.json',
+    'priv /private/home/alice/a.json',
+    'mnt /mnt/data/home/alice/a.json',
+    'link file:///home/alice/a.json',
+  ].join(' ');
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="reads the seed file" classname="missing.spec.ts" file="/tmp/home/alice/proj/tests/missing.spec.ts">
+      <failure message="${message.replaceAll('&', '&amp;')}">${message}</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/home.xml');
+  const stored = result.records[0].attempts[0].errors[0].message;
+  assert.equal(stored, message);
+  assert.equal(stored.includes('/home/alice/'), true);
+  const redacted = redactHomeText(stored);
+  assert.match(redacted, /open '\/tmp\/<home>\/proj\/tests\/seed-users\.json'/);
+  assert.match(redacted, /also <home>\/proj\/x\.json/);
+  assert.match(redacted, /blocked <home>\/file#1\.json/);
+  assert.match(redacted, /win <home>\/proj\/tests\/seed\.json/);
+  assert.match(redacted, /var \/var\/<home>\/a\.json/);
+  assert.match(redacted, /priv \/private\/<home>\/a\.json/);
+  assert.match(redacted, /mnt \/mnt\/data\/<home>\/a\.json/);
+  assert.match(redacted, /link file:\/\/\/<home>\/a\.json/);
+  assert.equal(redacted.includes('alice'), false);
+  assert.equal(redacted.includes('bob'), false);
+  assert.match(result.records[0].file, /^tmp\/<home>\/proj\/tests\/missing\.spec\.ts$/);
+  assert.equal(result.records[0].file.includes('alice'), false);
+  for (const warning of result.warnings) {
+    assert.equal(warning.includes('alice'), false);
+    assert.equal(warning.includes('/home/'), false);
+  }
+});
+
+test('a username with a space is rewritten before the text is split', () => {
+  const message = "open 'C:\\Users\\Jöhn Smith\\proj\\seed.json' c:\\users\\alice\\proj\\a.json";
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="seed" classname="a.spec.ts">
+      <failure message="${message}">kept</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/spaced-user.xml');
+  const stored = result.records[0].attempts[0].errors[0].message;
+  assert.equal(stored, message);
+  const redacted = redactHomeText(stored);
+  assert.equal(redacted, "open '<home>/proj/seed.json' <home>/proj/a.json");
+  assert.equal(redacted.includes('Smith'), false);
+  assert.equal(redacted.includes('Jöhn'), false);
+  assert.equal(redacted.includes('alice'), false);
+  assert.equal(redacted.includes('Users'), false);
+  assert.equal(redacted.includes('users'), false);
+  const escaped = JSON.parse('"C:\\\\Users\\\\J\\u00f6hn Smith\\\\proj\\\\seed.json"');
+  assert.equal(redactHomeText(escaped), '<home>/proj/seed.json');
+});
+
+test('url routes that contain home are not rewritten', () => {
+  const message = ['/api/home/settings/save', 'GET /home/index/page', '/Users/42/orders'].join(' ');
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="routes" classname="a.spec.ts">
+      <failure message="${message}">kept</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/url-home.xml');
+  const stored = result.records[0].attempts[0].errors[0].message;
+  assert.equal(stored, message);
+  assert.equal(redactHomeText(stored), message);
+});
+
+test('a home rewrite does not add a path warning', () => {
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="home" classname="a.spec.ts" file="/home/alice/proj/a.spec.ts">
+      <failure message="open '/home/alice/proj/a.json'">open '/home/alice/proj/a.json'</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/home-warn.xml');
+  assert.equal(result.records[0].file, '<home>/proj/a.spec.ts');
+  assert.equal(result.records[0].attempts[0].errors[0].message, "open '/home/alice/proj/a.json'");
+  assert.equal(redactHomeText(result.records[0].attempts[0].errors[0].message), "open '<home>/proj/a.json'");
+  assert.equal(
+    result.warnings.some((warning) => warning.includes('rewritten') || warning.includes('alice') || warning.includes('/home/')),
+    false,
+  );
+});
+
+test('a username stops at a newline, whitespace, or a colon', () => {
+  assert.equal(
+    redactHomeText('Error: missing /home/alice\nError: second line stays'),
+    'Error: missing <home>\nError: second line stays',
+  );
+  assert.equal(redactHomeText('cwd is /home/alice and npm failed'), 'cwd is <home> and npm failed');
+  assert.equal(
+    redactHomeText('/Users/bob: permission denied (os error 13)'),
+    '<home>: permission denied (os error 13)',
+  );
+});
+
+test('a drive letter is only a drive in a real path position', () => {
+  const cases = [
+    ['open file:///C:/Users/alice/a.html', 'open file:///<home>/a.html'],
+    ['PATH=/usr/bin:/home/alice/bin', 'PATH=/usr/bin:<home>/bin'],
+    ['user@host:/home/alice/x', 'user@host:<home>/x'],
+    ['HOME:/home/alice/x', 'HOME:<home>/x'],
+    ['cwd:/home/ci/w', 'cwd:<home>/w'],
+    ['\\\\?\\C:\\Users\\alice\\a.json', '\\\\?\\<home>/a.json'],
+  ];
+  for (const [input, expected] of cases) {
+    assert.equal(redactHomeText(input), expected, input);
+  }
+});
+
+test('app routes and short Expected values are not home directories', () => {
+  assert.equal(redactHomeText('Expected: "/users/:id"'), 'Expected: "/users/:id"');
+  assert.equal(redactHomeText('Expected: "/Users/:id"'), 'Expected: "/Users/:id"');
+  assert.equal(redactHomeText('Expected: "/home/feed"'), 'Expected: "/home/feed"');
+  assert.equal(redactHomeText('Received: "/home/login"'), 'Received: "/home/login"');
+  assert.equal(redactHomeText('/users/alice/feed'), '/users/alice/feed');
+  assert.equal(
+    redactHomeText('Expected: "/home/alice/notes.txt"'),
+    'Expected: "<home>/notes.txt"',
+  );
+  assert.equal(
+    redactHomeText('Expected: "/home/alice/proj/a.json"'),
+    'Expected: "<home>/proj/a.json"',
+  );
+  const drift = ['Error: expect(locator).toHaveURL(expected) failed', 'Expected: "/home/feed"', 'Received: "/home/login"'].join(
+    '\n',
+  );
+  assert.equal(redactHomeText(drift), drift);
+});
+
+test('a run of backslashes is one separator around a Windows home path', () => {
+  const file = 'C:\\\\Users\\\\alice\\\\x.json';
+  assert.equal(file.includes('\\\\'), true);
+  assert.equal(redactHomeText(file), '<home>/x.json');
+  assert.equal(redactHomeText('Error at C:\\\\Users\\\\bob\\\\a.ts:12:3'), 'Error at <home>/a.ts:12:3');
+  assert.equal(redactHomeText('Error at C:\\Users\\bob\\a.ts:12:3'), 'Error at <home>/a.ts:12:3');
+  assert.equal(
+    redactHomeText('    at readCsv (C:\\\\Users\\\\alice\\\\x.json:12:3)'),
+    '    at readCsv (<home>/x.json:12:3)',
+  );
+  assert.equal(
+    redactHomeText('Expected: "C:\\\\Users\\\\alice\\\\Downloads\\\\report.csv"'),
+    'Expected: "<home>/Downloads/report.csv"',
+  );
+  assert.equal(
+    redactHomeText('Received: "C:\\\\Users\\\\alice\\\\Downloads\\\\report.csv"'),
+    'Received: "<home>/Downloads/report.csv"',
+  );
+  assert.equal(redactHomeText('Received: "C:/Users/alice/Desktop"'), 'Received: "<home>/Desktop"');
+  assert.equal(redactHomeText('Received: "C:\\\\Users\\\\alice\\\\Desktop"'), 'Received: "<home>/Desktop"');
+  assert.equal(
+    redactHomeText('Received: "C:\\\\Users\\\\alice\\\\Desktop\\\\Inner\\\\notes.txt"'),
+    'Received: "<home>/Desktop/Inner/notes.txt"',
+  );
+  assert.equal(redactHomeText('Received: "/home/alice/Desktop"'), 'Received: "/home/alice/Desktop"');
+  assert.equal(redactHomeText('Expected: "/home/feed"'), 'Expected: "/home/feed"');
 });
