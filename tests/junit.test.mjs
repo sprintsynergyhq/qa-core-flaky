@@ -149,6 +149,31 @@ test('a second DOCTYPE does not expand a custom entity', () => {
   assert.equal(error.stack, 'nope');
 });
 
+test('a DOCTYPE after a comment or a processing instruction is not expanded', () => {
+  const comment = `<!-- <testsuite --><!DOCTYPE a [<!ENTITY e "DECOY">]>
+<testsuite hostname="chromium"><testcase name="&e;" classname="a.spec.ts"></testcase></testsuite>`;
+  const instruction = `<?x <testsuites?><!DOCTYPE a [<!ENTITY e "DECOY">]>
+<testsuite hostname="chromium"><testcase name="&e;" classname="a.spec.ts"></testcase></testsuite>`;
+  for (const xml of [comment, instruction]) {
+    const result = parseJunit(xml, 'reports/decoy.xml');
+    assert.equal(JSON.stringify(result).includes('DECOY'), false);
+    assert.equal(result.records[0].titlePath[0], '&e;');
+  }
+});
+
+test('numeric character references are decoded', () => {
+  const xml = `<testsuite hostname="chromium">
+    <testcase name="&#65;&#x42;" classname="a.spec.ts">
+      <failure message="&lt;&#65;&gt;">&#x42; &amp; &nbsp;</failure>
+    </testcase>
+  </testsuite>`;
+  const result = parseJunit(xml, 'reports/numeric.xml');
+  assert.equal(result.records[0].titlePath[0], 'AB');
+  const error = result.records[0].attempts[0].errors[0];
+  assert.equal(error.message, '<A>');
+  assert.equal(error.stack, 'B & &nbsp;');
+});
+
 test('error text that is not a filesystem path stays unchanged', () => {
   const text =
     'Expected pattern: /Ready/ "/inventory.html" https://www.saucedemo.com/inventory.html regex /\\d+/ "a\\\\b"';

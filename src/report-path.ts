@@ -7,19 +7,31 @@
  * path. Each distinct rewrite adds one warning, and the warning quotes the
  * relative path only.
  *
- * Error text is left unchanged except for a token that starts with the
- * report root, or that looks like a filesystem path: `/home/`, `/Users/`,
+ * Error text keeps its slashes. A token is rewritten when it is the report
+ * root, or when it looks like a filesystem path: `/home/`, `/Users/`,
  * `/tmp/`, `/var/`, `/runner/`, a drive letter such as `X:\`, or a source
- * location ending in `.ts`, `.js`, or `.mjs` with a line number. Slashes
- * are normalized only inside such a token.
+ * location ending in `.ts`, `.js`, or `.mjs` with a line number. A token may
+ * start after whitespace, a quote, `=`, `(`, a backtick, `[`, `{`, `:`, or
+ * `file://`. Trailing `,`, `.`, `;`, and `)` stay outside the rewritten path.
+ * The report root is also removed wherever it still appears as its own
+ * prefix. The character after the root has to be a boundary, so a longer
+ * name such as `/tmp/project-other` is not cut apart. Slashes are normalized
+ * only inside a rewritten path.
  */
 
 const OUTSIDE_ROOT_WARNING =
   'File path is outside the report root and was rewritten to a relative path: ';
 const ABSOLUTE_WARNING = 'File path was absolute and was rewritten to a relative path: ';
 
-/** A token after a boundary. Quotes and parentheses stay outside the token. */
-const TEXT_TOKEN = /(^|[\s"'=(])([^\s"'<>|()]+)/g;
+/**
+ * A path token after a boundary.
+ * `file://` and a drive letter may lead the token. `:12` or `:12:3` may
+ * follow it. Quotes, brackets, and the boundary characters stay outside.
+ */
+const TEXT_TOKEN =
+  /(^|[\s"'=(`\[{:])((?:[A-Za-z]:[\\/]|file:\/\/)?[^\s"'=()<>|`\[\]{}:]+(?::\d+)*)/g;
+
+const TRAILING_PUNCTUATION = /[,.;)]+$/;
 
 const FILESYSTEM_PREFIXES = ['/home/', '/Users/', '/tmp/', '/var/', '/runner/'];
 
@@ -64,17 +76,22 @@ export function toPortablePath(
  * Rewrite filesystem paths inside error text.
  *
  * Patterns, URL paths, regular expressions, and backslash text stay as
- * written. No warning is added for those.
+ * written. No warning is added for those. A path inside the report root is
+ * removed with no warning. The root prefix is then removed anywhere it
+ * remains, using the same boundary check.
  */
 export function relativizeText(text: string, rootDir: string | undefined, warnings: string[]): string {
   const root = normalizeRoot(rootDir);
-  return text.replace(TEXT_TOKEN, (full, prefix: string, token: string) => {
-    if (!shouldRewriteErrorToken(token, root)) return full;
-    const portable = toPortablePath(token, root, warnings);
+  const tokenized = text.replace(TEXT_TOKEN, (full, prefix: string, token: string) => {
+    const parts = splitErrorToken(token);
+    if (parts.path === '') return full;
+    if (!shouldRewriteErrorToken(parts.path, root)) return full;
+    const portable = toPortablePath(parts.path, root, warnings);
     if (portable === undefined) return full;
-    if (portable === '') return `${prefix}.`;
-    return `${prefix}${portable}`;
+    const body = portable === '' ? '.' : portable;
+    return `${prefix}${parts.lead}${body}${parts.trailing}`;
   });
+  return replaceRootPrefixes(tokenized, root);
 }
 
 export function stripAnsi(text: string): string {
@@ -114,6 +131,55 @@ function splitAbsolute(value: string): { drive: string; parts: string[] } {
 function stripAbsolutePrefix(value: string): string {
   const stripped = value.replace(/^[A-Za-z]:\//, '').replace(/^\/+/, '');
   return stripped === '' ? '.' : stripped;
+}
+
+function splitErrorToken(token: string): { lead: string; path: string; trailing: string } {
+  let path = token;
+  let lead = '';
+  if (path.startsWith('file://')) {
+    lead = 'file://';
+    path = path.slice(lead.length);
+  }
+  const trailing = TRAILING_PUNCTUATION.exec(path)?.[0] ?? '';
+  if (trailing) path = path.slice(0, -trailing.length);
+  return { lead, path, trailing };
+}
+
+/**
+ * Remove `root/` anywhere, then a bare `root` when the next character is a
+ * boundary. This is the report-root step used for error text: no warning,
+ * and no slash rewrite of the surrounding message.
+ */
+function replaceRootPrefixes(text: string, root: string | undefined): string {
+  if (!root || !text.includes(root)) return text;
+  return replaceRootBoundaries(text.split(`${root}/`).join(''), root);
+}
+
+function replaceRootBoundaries(text: string, root: string): string {
+  let out = '';
+  let from = 0;
+  while (from <= text.length) {
+    const at = text.indexOf(root, from);
+    if (at === -1) return out + text.slice(from);
+    const next = text[at + root.length];
+    const boundary =
+      next === undefined ||
+      next === '/' ||
+      next === ':' ||
+      next === '"' ||
+      next === "'" ||
+      next === '`' ||
+      next === '[' ||
+      next === '{' ||
+      next === '<' ||
+      next === '>' ||
+      next === '|' ||
+      /\s/.test(next);
+    out += text.slice(from, at);
+    out += boundary ? '.' : root;
+    from = at + root.length;
+  }
+  return out;
 }
 
 function shouldRewriteErrorToken(token: string, root: string | undefined): boolean {

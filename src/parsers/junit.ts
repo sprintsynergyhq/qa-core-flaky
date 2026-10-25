@@ -31,11 +31,12 @@ const ATTACHMENT_PATTERN = /\[\[ATTACHMENT\|([^\]]+)\]\]/g;
 type XmlNode = Record<string, unknown>;
 
 /**
- * fast-xml-parser decodes the five XML entities (`lt`, `gt`, `amp`, `apos`,
- * `quot`) and nothing else. `htmlEntities` is off. Every DOCTYPE before the
- * root element is removed before parse, so custom entities and external
- * entity identifiers are not registered and are not fetched. The parser is
- * not given an external entity map. Attribute values stay strings.
+ * Entity expansion is off, so a DOCTYPE cannot define an entity the parser
+ * will expand. Every DOCTYPE is removed before parse, which also means an
+ * external identifier is not read. Afterwards, attribute values and element
+ * text decode only the five predefined XML entities (`lt`, `gt`, `amp`,
+ * `apos`, `quot`) and numeric character references (`&#65;`, `&#x42;`).
+ * HTML entities stay literal. Attribute values stay strings.
  */
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -45,9 +46,17 @@ const parser = new XMLParser({
   parseAttributeValue: false,
   trimValues: false,
   htmlEntities: false,
-  processEntities: { enabled: true },
+  processEntities: false,
   isArray: (tagName: string) => ARRAY_TAGS.has(tagName),
 });
+
+const NAMED_XML_ENTITIES: Readonly<Record<string, string>> = {
+  lt: '<',
+  gt: '>',
+  amp: '&',
+  apos: "'",
+  quot: '"',
+};
 
 /**
  * Parse a JUnit XML report into the normalized model.
@@ -239,20 +248,17 @@ function readHostname(suite: XmlNode): string | undefined {
 }
 
 /**
- * Drop every DOCTYPE that sits before the root element.
+ * Remove every DOCTYPE, including one that follows a comment or a
+ * processing instruction.
  *
- * Custom entities in any of those DOCTYPEs would be expanded by the parser.
- * External identifiers are not fetched, and removing each declaration means
- * they are not read either. A DOCTYPE after the root element is left alone,
- * so failure text is not edited.
+ * Expansion is already disabled. Removing each declaration means a custom
+ * entity is not registered and an external identifier is not read.
  */
 function stripDoctype(xml: string): string {
   let current = xml;
   for (;;) {
     const start = current.indexOf('<!DOCTYPE');
     if (start === -1) return current;
-    const root = indexOfRoot(current);
-    if (root !== -1 && start > root) return current;
     const end = endOfDoctype(current, start);
     if (end === -1) return current;
     current = current.slice(0, start) + current.slice(end);
@@ -279,26 +285,34 @@ function endOfDoctype(xml: string, start: number): number {
   return -1;
 }
 
-function indexOfRoot(xml: string): number {
-  const suites = xml.indexOf('<testsuites');
-  const suite = xml.indexOf('<testsuite');
-  if (suites === -1) return suite;
-  if (suite === -1) return suites;
-  return Math.min(suites, suite);
-}
-
 function attr(node: XmlNode, name: string): string | undefined {
   const value = node[`@_${name}`];
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') return decodeXmlEntities(value);
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   return undefined;
 }
 
 function textOf(value: unknown): string {
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') return decodeXmlEntities(value);
   if (Array.isArray(value)) return value.map((item) => textOf(item)).join('');
-  if (isObject(value) && typeof value['#text'] === 'string') return value['#text'];
+  if (isObject(value) && typeof value['#text'] === 'string') return decodeXmlEntities(value['#text']);
   return '';
+}
+
+/** One left-to-right pass. A replacement is not scanned again. */
+function decodeXmlEntities(value: string): string {
+  return value.replace(/&(?:#(\d+)|#x([0-9a-fA-F]+)|([A-Za-z][A-Za-z0-9]*));/gi, (full, dec: string | undefined, hex: string | undefined, name: string | undefined) => {
+    if (dec !== undefined) return characterReference(Number(dec)) ?? full;
+    if (hex !== undefined) return characterReference(Number.parseInt(hex, 16)) ?? full;
+    if (name !== undefined && Object.hasOwn(NAMED_XML_ENTITIES, name)) return NAMED_XML_ENTITIES[name] ?? full;
+    return full;
+  });
+}
+
+function characterReference(code: number): string | undefined {
+  if (!Number.isInteger(code) || code < 0 || code > 0x10ffff) return undefined;
+  if (code >= 0xd800 && code <= 0xdfff) return undefined;
+  return String.fromCodePoint(code);
 }
 
 function asArray(value: unknown): unknown[] {

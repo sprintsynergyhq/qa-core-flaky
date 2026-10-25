@@ -342,6 +342,99 @@ test('error text that is not a filesystem path stays unchanged', () => {
   assert.equal(result.records[0].attempts[0].errors[0].stack, text);
 });
 
+test('a root path in error text stays hidden after file, colon, backtick, and brackets', () => {
+  const text = [
+    'at file:///tmp/project/tests/a.spec.ts:3:1',
+    'cwd:/tmp/project/x',
+    'see `/tmp/project/src/a.ts`',
+    '[/tmp/project/a.png]',
+    '{/tmp/project/lib/a.ts}',
+  ].join(' ');
+  const expected = [
+    'at file://tests/a.spec.ts:3:1',
+    'cwd:x',
+    'see `src/a.ts`',
+    '[a.png]',
+    '{lib/a.ts}',
+  ].join(' ');
+  const result = parsePlaywrightJson(errorReport(text), 'root-text.json');
+  assert.equal(result.warnings.length, 0);
+  assert.equal(result.records[0].attempts[0].errors[0].message, expected);
+  assert.equal(result.records[0].attempts[0].errors[0].stack, expected);
+  assert.equal(JSON.stringify(result).includes('/tmp/project'), false);
+});
+
+test('a filesystem path after file, colon, backtick, and brackets is rewritten', () => {
+  const text = [
+    'file:///var/data/a.spec.ts:3:1',
+    'cwd:/home/user/a.ts:2',
+    'see `/tmp/other/a.ts:4`',
+    '[/var/data/a.png]',
+    '{/runner/work/a.ts:1}',
+    'at /var/data/a.ts:1).',
+    'note /home/me/a.ts:2,',
+    'pic /var/data/a.png.',
+    'end /tmp/project/a.ts:3;',
+  ].join(' ');
+  const expected = [
+    'file://../../var/data/a.spec.ts:3:1',
+    'cwd:../../home/user/a.ts:2',
+    'see `../other/a.ts:4`',
+    '[../../var/data/a.png]',
+    '{../../runner/work/a.ts:1}',
+    'at ../../var/data/a.ts:1).',
+    'note ../../home/me/a.ts:2,',
+    'pic ../../var/data/a.png.',
+    'end a.ts:3;',
+  ].join(' ');
+  const result = parsePlaywrightJson(errorReport(text), 'prefix-text.json');
+  assert.equal(result.records[0].attempts[0].errors[0].message, expected);
+  assert.equal(result.records[0].attempts[0].errors[0].stack, expected);
+  const blob = JSON.stringify(result);
+  assert.equal(leaksAbsolute(blob, '/tmp/project'), false);
+  assert.equal(leaksAbsolute(blob, '/var/data/a.spec.ts'), false);
+  assert.equal(leaksAbsolute(blob, '/home/user/a.ts'), false);
+  assert.equal(leaksAbsolute(blob, '/tmp/other/a.ts'), false);
+  assert.equal(leaksAbsolute(blob, '/runner/work/a.ts'), false);
+  const outside = result.warnings.filter((warning) =>
+    warning.startsWith('File path is outside the report root'),
+  );
+  assert.equal(outside.length, 7);
+});
+
+function errorReport(text) {
+  return JSON.stringify({
+    config: { rootDir: '/tmp/project' },
+    suites: [
+      {
+        title: 'sample.spec.ts',
+        file: 'sample.spec.ts',
+        specs: [
+          {
+            title: 'keeps the surrounding text',
+            file: 'sample.spec.ts',
+            tests: [
+              {
+                projectName: 'chromium',
+                expectedStatus: 'passed',
+                status: 'unexpected',
+                results: [
+                  {
+                    retry: 0,
+                    status: 'failed',
+                    duration: 1,
+                    errors: [{ message: text, stack: text }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+}
+
 test('a test with zero results warns and still returns a record', () => {
   const raw = JSON.stringify({
     suites: [
