@@ -17,8 +17,8 @@ Confidence: low
 
 ### Evidence
 
-> ENOENT: no such file or directory, open 'tmp/~/proj/tests/seed-users.json'
->     Error: ENOENT: no such file or directory, open 'tmp/~/proj/tests/seed-users.json'
+> ENOENT: no such file or directory, open '&lt;home&gt;/proj/tests/seed-users.json'
+>     Error: ENOENT: no such file or directory, open '&lt;home&gt;/proj/tests/seed-users.json'
 
 ### Attempts
 

@@ -77,6 +77,15 @@ test('a repeated unknown value mismatch is a likely real bug', () => {
   assert.equal(three.note, null);
 });
 
+test('any verdict with no error text keeps the empty-text note', () => {
+  const item = record('blank', [attempt('failed', undefined, 0), attempt('failed', undefined, 1), attempt('failed', undefined, 2)]);
+  const decision = decideVerdict([item], [
+    { cause: 'selectors', confidence: 'high', evidence: [], ruleIds: ['SEL-NOTFOUND'] },
+  ]);
+  assert.equal(decision.verdict, 'broken-test');
+  assert.equal(decision.note, 'The report has no error text for these attempts.');
+});
+
 test('a pass and a fail on the same code are flaky', () => {
   const text = 'Error: element(s) not found';
   const sameReport = verdictOf([attempt('failed', text, 0), attempt('passed', undefined, 1)]);

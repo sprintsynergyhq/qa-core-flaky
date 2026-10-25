@@ -261,19 +261,19 @@ test('a root-shaped absolute path is rewritten when the next character is not a 
     'url https://x.test/home/ci/w/a?x=/home/ci/w',
   ].join(' ');
   const expected = [
-    'a=~/w&b',
-    'cd ~/w&&npm test',
-    'bang ~/w!',
-    'query ~/w?',
-    'hash ~/w#x',
-    'star ~/w*',
-    'pct ~/w%20',
-    'tilde ~/w~',
-    'dollar ~/w$HOME',
-    'file ~/w/a%20b.ts',
-    'ampfile ~/w/a&b.ts',
-    'keep ~/w-other/file.ts',
-    'dot ~/w.backup/a.ts',
+    'a=<home>/w&b',
+    'cd <home>/w&&npm test',
+    'bang <home>/w!',
+    'query <home>/w?',
+    'hash <home>/w#x',
+    'star <home>/w*',
+    'pct <home>/w%20',
+    'tilde <home>/w~',
+    'dollar <home>/w$HOME',
+    'file <home>/w/a%20b.ts',
+    'ampfile <home>/w/a&b.ts',
+    'keep <home>/w-other/file.ts',
+    'dot <home>/w.backup/a.ts',
     'prose /var/',
     'url https://x.test/home/ci/w/a?x=/home/ci/w',
   ].join(' ');
@@ -302,12 +302,12 @@ test('Unicode home paths and CI work folders are rewritten when JUnit has no roo
     '/app/foo/bar.json',
     '/data/foo/bar.json',
   ].join(' ');
-  // No report root. The home directory and username become ~/ , including
+  // No report root. The home directory and username become <home>/, including
   // up to a blocked character. Other known folders are still rewritten.
   const expected = [
-    '~/file#1.json',
-    '~/secret.txt',
-    '~/a.ts',
+    '<home>/file#1.json',
+    '<home>/secret.txt',
+    '<home>/a.ts',
     '__w/repo/a.ts',
     'github/workspace/repo/a.ts',
     'Volumes/CI/a.ts',
@@ -485,12 +485,16 @@ test('parsing the JUnit fixture twice is byte identical', () => {
   assert.equal(first, second);
 });
 
-test('a JUnit report with no root rewrites the home directory and username to ~/', () => {
+test('a JUnit report with no root rewrites the home directory and username to <home>/', () => {
   const message = [
     "open '/tmp/home/alice/proj/tests/seed-users.json'",
     'also /home/alice/proj/x.json',
     'blocked /home/bob/file#1.json',
     'win C:\\Users\\alice\\proj\\tests\\seed.json',
+    'var /var/home/alice/a.json',
+    'priv /private/home/alice/a.json',
+    'mnt /mnt/data/home/alice/a.json',
+    'link file:///home/alice/a.json',
   ].join(' ');
   const xml = `<testsuites><testsuite hostname="chromium">
     <testcase name="reads the seed file" classname="missing.spec.ts" file="/tmp/home/alice/proj/tests/missing.spec.ts">
@@ -499,14 +503,61 @@ test('a JUnit report with no root rewrites the home directory and username to ~/
   </testsuite></testsuites>`;
   const result = parseJunit(xml, 'reports/home.xml');
   const stored = result.records[0].attempts[0].errors[0].message;
-  assert.match(stored, /open 'tmp\/~\/proj\/tests\/seed-users\.json'/);
-  assert.match(stored, /also ~\/proj\/x\.json/);
-  assert.match(stored, /blocked ~\/file#1\.json/);
-  assert.match(stored, /win ~\/proj\/tests\/seed\.json/);
-  assert.match(result.records[0].file, /^tmp\/~\/proj\/tests\/missing\.spec\.ts$/);
+  assert.match(stored, /open 'tmp\/<home>\/proj\/tests\/seed-users\.json'/);
+  assert.match(stored, /also <home>\/proj\/x\.json/);
+  assert.match(stored, /blocked <home>\/file#1\.json/);
+  assert.match(stored, /win <home>\/proj\/tests\/seed\.json/);
+  assert.match(stored, /var var\/<home>\/a\.json/);
+  assert.match(stored, /priv private\/<home>\/a\.json/);
+  assert.match(stored, /mnt mnt\/data\/<home>\/a\.json/);
+  assert.match(stored, /link file:\/\/\/<home>\/a\.json/);
+  assert.match(result.records[0].file, /^tmp\/<home>\/proj\/tests\/missing\.spec\.ts$/);
   const blob = JSON.stringify(result);
   assert.equal(blob.includes('alice'), false);
   assert.equal(blob.includes('bob'), false);
   assert.equal(blob.includes('/home/'), false);
   assert.equal(blob.includes('Users'), false);
+});
+
+test('a username with a space is rewritten before the text is split', () => {
+  const message = "open 'C:\\Users\\Jöhn Smith\\proj\\seed.json' c:\\users\\alice\\proj\\a.json";
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="seed" classname="a.spec.ts">
+      <failure message="${message}">kept</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/spaced-user.xml');
+  const stored = result.records[0].attempts[0].errors[0].message;
+  assert.equal(stored, "open '<home>/proj/seed.json' <home>/proj/a.json");
+  assert.equal(stored.includes('Smith'), false);
+  assert.equal(stored.includes('Jöhn'), false);
+  assert.equal(stored.includes('alice'), false);
+  assert.equal(stored.includes('Users'), false);
+  assert.equal(stored.includes('users'), false);
+});
+
+test('url routes that contain home are not rewritten', () => {
+  const message = ['/api/home/settings/save', 'GET /home/index/page', '/Users/42/orders'].join(' ');
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="routes" classname="a.spec.ts">
+      <failure message="${message}">kept</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/url-home.xml');
+  assert.equal(result.records[0].attempts[0].errors[0].message, message);
+});
+
+test('a home rewrite does not add a path warning', () => {
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="home" classname="a.spec.ts" file="/home/alice/proj/a.spec.ts">
+      <failure message="open '/home/alice/proj/a.json'">open '/home/alice/proj/a.json'</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/home-warn.xml');
+  assert.equal(result.records[0].file, '<home>/proj/a.spec.ts');
+  assert.match(result.records[0].attempts[0].errors[0].message, /<home>\/proj\/a\.json/);
+  assert.equal(
+    result.warnings.some((warning) => warning.includes('rewritten') || warning.includes('alice') || warning.includes('/home/')),
+    false,
+  );
 });

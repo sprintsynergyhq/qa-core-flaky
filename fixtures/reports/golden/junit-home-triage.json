@@ -17,8 +17,8 @@
           "cause": "unknown",
           "confidence": "low",
           "evidence": [
-            "ENOENT: no such file or directory, open 'tmp/~/proj/tests/seed-users.json'",
-            "    Error: ENOENT: no such file or directory, open 'tmp/~/proj/tests/seed-users.json'"
+            "ENOENT: no such file or directory, open '<home>/proj/tests/seed-users.json'",
+            "    Error: ENOENT: no such file or directory, open '<home>/proj/tests/seed-users.json'"
           ],
           "ruleIds": [
             "UNK-NONE"
@@ -26,8 +26,8 @@
         }
       ],
       "evidence": [
-        "ENOENT: no such file or directory, open 'tmp/~/proj/tests/seed-users.json'",
-        "    Error: ENOENT: no such file or directory, open 'tmp/~/proj/tests/seed-users.json'"
+        "ENOENT: no such file or directory, open '<home>/proj/tests/seed-users.json'",
+        "    Error: ENOENT: no such file or directory, open '<home>/proj/tests/seed-users.json'"
       ],
       "attempts": {
         "total": 1,

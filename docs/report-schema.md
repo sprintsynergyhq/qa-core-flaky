@@ -30,7 +30,7 @@ Passed and skipped tests are omitted. A test that was expected to fail, and did 
 | causes[].confidence | `high`, `medium`, or `low` | Cause confidence. |
 | causes[].evidence | `string[]` | Exact substrings of the error text. Each one is at most 300 characters. |
 | causes[].ruleIds | `string[]` | Cause rule ids, in rule-table order. |
-| evidence | `string[]` | The cause evidence lines, in cause order, without duplicates. An unexpected pass with no error text uses the note as its one evidence line. |
+| evidence | `string[]` | The cause evidence lines, in cause order, without duplicates. An unexpected pass, or any verdict whose failures have no error text, uses the note as its one evidence line. |
 | attempts.total | `number` | Every attempt, including skipped attempts. |
 | attempts.failed | `number` | Attempts with status `failed`, `timedOut`, or `interrupted`. |
 | attempts.passed | `number` | Attempts with status `passed`. |
@@ -48,7 +48,7 @@ Passed and skipped tests are omitted. A test that was expected to fail, and did 
 
 ## Markdown
 
-The Markdown file starts with a summary table: test, verdict, cause, confidence. Then one section per test, in the same order. Each section has the causes, the evidence quotes, the attempt counts, the signals, the suggested fix, and the next step. Evidence quotes escape `&`, `<`, and `>` so a line such as `<div id="cover">` stays visible. A flaky section also has this sentence: "A flaky test can still point to a real app defect. Check the app behavior too."
+The Markdown file starts with a summary table: test, verdict, cause, confidence. Then one section per test, in the same order. Each section has the causes, the evidence quotes, the attempt counts, the signals, the suggested fix, and the next step. Evidence quotes escape `&`, `<`, and `>` so a line such as `<div id="cover">` stays visible. A home path written as `<home>/` is escaped as `&lt;home&gt;` in Markdown. The JSON evidence keeps the raw `<home>/` text. A flaky section also has this sentence: "A flaky test can still point to a real app defect. Check the app behavior too."
 
 When more than one commit is present, the cause list, the evidence, and the suggested fix come from the commit that selected the verdict. The other commit is a separate signal, and each signal names its commit.
 

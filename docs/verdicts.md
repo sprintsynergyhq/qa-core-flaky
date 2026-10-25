@@ -56,6 +56,8 @@ The same pass and fail on one commit SHA across two reports is also flaky. A pas
 
 A flaky entry includes this sentence: "A flaky test can still point to a real app defect. Check the app behavior too."
 
+A flaky entry whose failed attempts have no error text still has evidence. The note, and the evidence line, are: "The report has no error text for these attempts." The same line is used for any other verdict whose failures have no error text.
+
 ### Needs More Runs
 
 One attempt and an error that matches no stronger row, such as `Error: gave up`. Verdict `needs-more-runs`, confidence low.

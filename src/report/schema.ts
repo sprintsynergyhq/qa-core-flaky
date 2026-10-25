@@ -73,7 +73,7 @@ export type TriageEntry = {
   causes: CauseFinding[];
   /**
    * Quoted evidence from the cause that selected the verdict.
-   * An unexpected pass, or failures with no error text, use the note as evidence.
+   * An unexpected pass, or any verdict whose failures have no error text, uses the note as evidence.
    */
   evidence: string[];
   /** Attempt counts. */

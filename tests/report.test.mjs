@@ -241,10 +241,22 @@ test('three failures with no error text are needs-more-runs', () => {
   assert.equal(entry.confidence, 'medium');
 });
 
+test('a flaky entry with no error text still has evidence', () => {
+  const item = oneRecord('blank', [attempt('failed', undefined, 0), attempt('passed', undefined, 1)]);
+  const report = buildTriageReport([item]);
+  const entry = report.entries[0];
+  assert.equal(entry.verdict, 'flaky');
+  assert.equal(entry.note, 'The report has no error text for these attempts.');
+  assert.deepEqual(entry.evidence, ['The report has no error text for these attempts.']);
+  const markdown = renderTriageMarkdown(report);
+  assert.equal(markdown.includes('No error text was quoted.'), false);
+  assert.match(markdown, /The report has no error text for these attempts\./);
+});
+
 test('a real JUnit run with no root hides the home username in triage', () => {
   const reportPath = 'fixtures/reports/junit-no-root-home.xml';
   const source = fs.readFileSync(reportPath, 'utf8');
-  assert.equal(source.includes('/tmp/home/alice/proj/tests/seed-users.json'), true);
+  assert.equal(source.includes('/home/alice/proj/tests/seed-users.json'), true);
   const records = parseJunit(source, reportPath).records;
   const report = buildTriageReport(records);
   const json = renderTriageJson(report);
@@ -255,7 +267,9 @@ test('a real JUnit run with no root hides the home username in triage', () => {
   assert.equal(triage.includes('alice'), false);
   assert.equal(triage.includes('/home/'), false);
   assert.equal(triage.includes('Users'), false);
-  assert.match(triage, /tmp\/~\/proj\/tests\/seed-users\.json/);
+  assert.match(json, /<home>\/proj\/tests\/seed-users\.json/);
+  assert.match(markdown, /&lt;home&gt;\/proj\/tests\/seed-users\.json/);
+  assert.equal(markdown.includes('<home>'), false);
 });
 
 test('markdown evidence escapes html from an overlay error', () => {

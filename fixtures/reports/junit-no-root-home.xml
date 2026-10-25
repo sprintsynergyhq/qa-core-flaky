@@ -6,10 +6,10 @@
 [[ATTACHMENT|home/alice/proj/test-results/missing-reads-the-seed-file-chromium/error-context.md]]
 ]]>
 </system-out>
-<error message="ENOENT: no such file or directory, open &apos;/tmp/home/alice/proj/tests/seed-users.json&apos;" type="Error">
+<error message="ENOENT: no such file or directory, open &apos;/home/alice/proj/tests/seed-users.json&apos;" type="Error">
 <![CDATA[  [chromium] › missing.spec.js:5:1 › reads the seed file ───────────────────────────────────────────
 
-    Error: ENOENT: no such file or directory, open '/tmp/home/alice/proj/tests/seed-users.json'
+    Error: ENOENT: no such file or directory, open '/home/alice/proj/tests/seed-users.json'
 
       4 |
       5 | test('reads the seed file', () => {
@@ -17,7 +17,7 @@
         |      ^
       7 | });
       8 |
-        at /tmp/home/alice/proj/tests/missing.spec.js:6:6
+        at /home/alice/proj/tests/missing.spec.js:6:6
 
     Error Context: ../test-results/missing-reads-the-seed-file-chromium/error-context.md
 ]]>
