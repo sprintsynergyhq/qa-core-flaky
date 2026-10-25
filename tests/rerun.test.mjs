@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,6 +15,7 @@ import {
   formatCap,
   formatPrintedCommand,
   guardPipe,
+  redactHomeText,
   launchRerunChild,
   mergeRerunRecords,
   onStopSignal,
@@ -167,6 +168,54 @@ test('the argument builder is an array, anchors the title, and refuses snapshot 
   );
 });
 
+test('file:line is used only when the line is unique for the file and project', () => {
+  const row = (title, line, outcome = 'failed') => {
+    const item = record(title, [attempt(outcome === 'passed' ? 'passed' : 'failed', outcome === 'passed' ? undefined : VALUE)]);
+    item.id = `each.spec.ts::chromium::${title}`;
+    item.file = 'each.spec.ts';
+    item.titlePath = [title];
+    item.line = line;
+    item.outcome = outcome;
+    return item;
+  };
+  const shared = planReruns([row('row 1', 2), row('row 2', 2), row('row 3', 2)], {
+    times: 1,
+    modes: ['isolated'],
+    only: ['each.spec.ts::chromium::row 1'],
+  });
+  assert.equal(shared.runs.length, 1);
+  assert.equal(shared.runs[0].line, undefined);
+  assert.equal(shared.runs[0].args.includes('-g'), true);
+  assert.equal(shared.runs[0].args.at(-1).includes(':2'), false);
+
+  const passing = row('neighbor', 4, 'passed');
+  const blocked = planReruns([row('only', 4), passing], { times: 1, modes: ['isolated'] });
+  assert.equal(blocked.runs.length, 1);
+  assert.equal(blocked.runs[0].args.includes('-g'), true);
+
+  const alone = row('only', 4);
+  const otherLine = row('later', 9, 'passed');
+  const unique = planReruns([alone, otherLine], { times: 1, modes: ['isolated'] });
+  assert.equal(unique.runs[0].line, 4);
+  assert.equal(unique.runs[0].args.includes('-g'), false);
+  assert.equal(unique.runs[0].args.at(-1).endsWith(':4'), true);
+
+  const firefox = row('only', 4);
+  firefox.project = 'firefox';
+  firefox.id = 'each.spec.ts::firefox::only';
+  const byProject = planReruns([alone, firefox], { times: 1, modes: ['isolated'] });
+  assert.equal(byProject.runs.every((run) => run.line === 4 && run.args.at(-1).endsWith(':4')), true);
+});
+
+test('a newline in a title is a newline escape in the grep', () => {
+  const pattern = anchoredGrep('chromium', 'tests/a.spec.ts', ['row\n2']);
+  assert.equal(pattern.includes('\n'), false);
+  assert.match(pattern, /row\\n2/);
+  const expression = new RegExp(pattern.slice(1, -1));
+  assert.equal(expression.test('chromium tests/a.spec.ts row\n2'), true);
+  assert.equal(expression.test('chromium tests/a.spec.ts row 2'), false);
+});
+
 test('isolated runs one command per time and in-order runs the file once', () => {
   const first = record('same value', [attempt('failed', VALUE)]);
   const second = {
@@ -195,6 +244,33 @@ test('a redacted title is omitted from the printed command and kept in the args'
   assert.equal(printed.includes("'-g'"), false);
   assert.match(printed, /the title was redacted, so -g is omitted here/);
   assert.equal(printed.includes('alice'), false);
+});
+
+test('a printed file filter hides a POSIX or Windows home', () => {
+  const filters = [
+    ['/^\\/home\\/bob\\/p\\/a\\.spec\\.ts$/:3', '/^<home>/p/a.spec.ts$/:3'],
+    ['/^\\/home\\/bob\\/p\\/a\\.spec\\.ts$/', '/^<home>/p/a.spec.ts$/'],
+    ['/^C:\\/Users\\/bob\\/p\\/a\\.spec\\.ts$/:3', '/^<home>/p/a.spec.ts$/:3'],
+    ['/^C:\\/Users\\/bob\\/p\\/a\\.spec\\.ts$/', '/^<home>/p/a.spec.ts$/'],
+  ];
+  for (const [filter, expected] of filters) {
+    const printed = formatPrintedCommand(['--retries', '0', '--', filter]);
+    assert.equal(printed.includes('bob'), false, printed);
+    assert.equal(printed.includes(expected), true, printed);
+  }
+  const raw = [
+    ['/^/home/bob/p/a.spec.ts$/:3', '/^<home>/p/a.spec.ts$/:3'],
+    ['/^/home/bob/p/a.spec.ts$/', '/^<home>/p/a.spec.ts$/'],
+    ['/^C:/Users/bob/p/a.spec.ts$/:3', '/^<home>/p/a.spec.ts$/:3'],
+    ['/^C:/Users/bob/p/a.spec.ts$/', '/^<home>/p/a.spec.ts$/'],
+  ];
+  for (const [filter, expected] of raw) {
+    assert.equal(redactHomeText(filter), expected, filter);
+  }
+  assert.equal(redactHomeText(String.raw`/^\/home\/bob\/p\/a\.spec\.ts$/:3`).includes('bob'), false);
+  assert.equal(redactHomeText(String.raw`/^\/home\/bob\/p\/a\.spec\.ts$/`).includes('bob'), false);
+  assert.equal(redactHomeText(String.raw`/^C:\/Users\/bob\/p\/a\.spec\.ts$/:3`).includes('bob'), false);
+  assert.equal(redactHomeText(String.raw`/^C:\/Users\/bob\/p\/a\.spec\.ts$/`).includes('bob'), false);
 });
 
 test('a stored home file cannot be rerun', () => {
@@ -327,16 +403,19 @@ test('stopping a rerun deletes the temp directory after the kill', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-stop-'));
   fs.writeFileSync(path.join(dir, 'note.txt'), 'x');
   let killed = 0;
-  await releaseRun({
+  const state = {
     pid: 4242,
     dir,
     kill: () => {
       killed += 1;
       throw new Error('already gone');
     },
-  });
+  };
+  await Promise.all([releaseRun(state), releaseRun(state)]);
   assert.equal(killed, 1);
   assert.equal(fs.existsSync(dir), false);
+  await releaseRun(state);
+  assert.equal(killed, 1);
 
   const again = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-signal-'));
   let raised;
@@ -459,64 +538,100 @@ test('times, max-tests, command count, and duplicate modes are capped', () => {
   );
 });
 
-test('an isolated report that is not exactly the requested test is an error', async () => {
+test('an isolated report that is not exactly the requested test is recorded and the rerun continues', async () => {
   const reader = orderReader();
-  const plan = planReruns([reader], { times: 1, modes: ['isolated'] });
-  await assert.rejects(
-    executePlan({
-      records: [reader],
-      plan,
-      cwd: process.cwd(),
-      print: () => {},
-      runner: async (_args, _cwd, stdoutFile) => {
+  const other = record('other', [attempt('failed', 'Error: gave up')]);
+  const plan = planReruns([reader, other], { times: 1, modes: ['isolated'] });
+  let calls = 0;
+  const merged = await executePlan({
+    records: [reader, other],
+    plan,
+    cwd: process.cwd(),
+    print: () => {},
+    runner: async (_args, _cwd, stdoutFile) => {
+      calls += 1;
+      if (calls === 1) {
         fs.copyFileSync('fixtures/reports/rerun/in-order-pass.json', stdoutFile);
         return { code: 0, stderr: '' };
-      },
-    }),
-    (error) => {
-      assert.match(error.message, /did not run exactly that test/);
-      assert.match(error.message, /Playwright exited with code 0/);
-      return true;
+      }
+      fs.writeFileSync(stdoutFile, oneResult('tests/a.spec.ts', 'other', 'failed'));
+      return { code: 1, stderr: '' };
     },
-  );
+  });
+  assert.equal(calls, 2);
+  const reason = merged.find((item) => item.id === reader.id).attempts.at(-1);
+  assert.equal(reason.rerun.mode, 'isolated');
+  assert.match(reason.errors[0].message, /Could not select this test/);
+  assert.match(reason.errors[0].message, /did not run exactly that test/);
+  assert.match(reason.errors[0].message, /Playwright exited with code 0/);
+  const kept = merged.find((item) => item.id === other.id);
+  assert.equal(kept.attempts.some((item) => item.rerun?.mode === 'isolated' && item.status === 'failed'), true);
+  assert.equal(buildTriageReport(merged).entries.length >= 2, true);
 });
 
-test('a child that exits 0 after running nothing is an error', async () => {
+test('a child that exits 0 after running nothing is recorded', async () => {
   const item = record('tagged', [attempt('failed', VALUE)]);
   const plan = planReruns([item], { times: 1, modes: ['isolated'] });
-  await assert.rejects(
-    executePlan({
-      records: [item],
-      plan,
-      cwd: process.cwd(),
-      print: () => {},
-      runner: async (_args, _cwd, stdoutFile) => {
-        fs.writeFileSync(stdoutFile, '{"suites":[]}\n');
-        return { code: 0, stderr: 'No tests found\n' };
-      },
-    }),
-    (error) => {
-      assert.match(error.message, /did not run exactly that test/);
-      assert.match(error.message, /Playwright exited with code 0/);
-      assert.match(error.message, /No tests found/);
-      return true;
+  const merged = await executePlan({
+    records: [item],
+    plan,
+    cwd: process.cwd(),
+    print: () => {},
+    runner: async (_args, _cwd, stdoutFile) => {
+      fs.writeFileSync(stdoutFile, '{"suites":[]}\n');
+      return { code: 0, stderr: 'No tests found\n' };
     },
-  );
+  });
+  const message = merged[0].attempts.at(-1).errors[0].message;
+  assert.match(message, /Could not select this test/);
+  assert.match(message, /did not run exactly that test/);
+  assert.match(message, /Playwright exited with code 0/);
+  assert.match(message, /No tests found/);
+  assert.equal(buildTriageReport(merged).entries.length, 1);
 });
 
-test('a wrong attempt count is an error', async () => {
+test('a wrong attempt count is recorded and the original attempts stay', async () => {
   const item = record('same value', [attempt('failed', VALUE)]);
   const plan = planReruns([item], { times: 2, modes: ['repeat'] });
-  await assert.rejects(
-    executePlan({
-      records: [item],
-      plan,
-      cwd: process.cwd(),
-      print: () => {},
-      runner: copyRunner('fixtures/reports/rerun/repeat-pass.json'),
-    }),
-    /expected 2 attempts/,
-  );
+  const merged = await executePlan({
+    records: [item],
+    plan,
+    cwd: process.cwd(),
+    print: () => {},
+    runner: copyRunner('fixtures/reports/rerun/repeat-pass.json'),
+  });
+  assert.equal(merged[0].attempts[0].rerun, undefined);
+  assert.match(merged[0].attempts.at(-1).errors[0].message, /expected 2 attempts/);
+  assert.equal(merged[0].attempts.at(-1).rerun.mode, 'repeat');
+});
+
+test('a selection failure hides a home and still runs the next test', async () => {
+  const item = record('reads /home/bob/data.csv', [attempt('failed', VALUE)]);
+  const other = record('other', [attempt('failed', 'Error: gave up')]);
+  const plan = planReruns([item, other], { times: 1, modes: ['isolated'] });
+  const lines = [];
+  let calls = 0;
+  const merged = await executePlan({
+    records: [item, other],
+    plan,
+    cwd: process.cwd(),
+    print: (line) => lines.push(line),
+    runner: async (_args, _cwd, stdoutFile) => {
+      calls += 1;
+      if (calls === 1) {
+        fs.writeFileSync(stdoutFile, '{"suites":[]}\n');
+        return { code: 0, stderr: 'No tests found in /home/bob/data.csv\n' };
+      }
+      fs.writeFileSync(stdoutFile, oneResult('tests/a.spec.ts', 'other', 'failed'));
+      return { code: 1, stderr: '' };
+    },
+  });
+  const reason = merged.find((entry) => entry.id === item.id).attempts.at(-1).errors[0].message;
+  assert.equal(reason.includes('bob'), false);
+  assert.match(reason, /<home>/);
+  assert.match(reason, /Could not select this test/);
+  assert.equal(lines.join('\n').includes('bob'), false);
+  assert.equal(merged.find((entry) => entry.id === other.id).attempts.some((attemptRow) => attemptRow.rerun), true);
 });
 
 test('printed paths and errors do not contain the username from the title', async () => {
@@ -672,13 +787,57 @@ test('a stop signal leaves no profile and no child', { skip: process.platform !=
 const HOLD_SCRIPT = `import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => {});
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(signal, () => {
+    process.exit(0);
+  });
+}
 const tmp = process.env.TMPDIR;
 fs.mkdirSync(path.join(tmp, 'playwright_chromiumdev_profile-' + process.pid), { recursive: true });
-const grand = spawn(process.execPath, ['-e', 'for (const signal of ["SIGINT","SIGTERM","SIGHUP"]) process.on(signal, () => {}); setInterval(() => {}, 1000);'], { detached: false, stdio: 'ignore' });
+const out = path.join(tmp, 'out-0');
+fs.mkdirSync(out, { recursive: true });
+const artifact = path.join(out, 'error-context.md');
+const grand = spawn(process.execPath, ['-e', 'const fs=require("node:fs"); const path=require("node:path"); for (const signal of ["SIGINT","SIGTERM","SIGHUP"]) process.on(signal, () => {}); const file=process.env.ARTIFACT; setInterval(() => { try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, String(Date.now())); } catch (error) {} }, 15);'], {
+  detached: false,
+  stdio: 'ignore',
+  env: { ...process.env, ARTIFACT: artifact },
+});
 fs.writeFileSync(process.env.PID_FILE, process.pid + '\\n' + grand.pid + '\\n');
 setInterval(() => {}, 1000);
 `;
+
+function oneResult(file, title, status) {
+  return `${JSON.stringify({
+    config: { rootDir: '.' },
+    suites: [
+      {
+        title: file,
+        file,
+        specs: [
+          {
+            title,
+            ok: status === 'passed',
+            tests: [
+              {
+                projectName: 'chromium',
+                expectedStatus: 'passed',
+                status: status === 'passed' ? 'expected' : 'unexpected',
+                results: [
+                  {
+                    retry: 0,
+                    status,
+                    duration: 3,
+                    errors: status === 'failed' ? [{ message: 'Error: gave up' }] : [],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  })}\n`;
+}
 
 function compileGrep(pattern) {
   assert.equal(pattern.startsWith('/'), true);
@@ -704,7 +863,7 @@ function profileCount(dir) {
   return fs.readdirSync(dir).filter((name) => name.startsWith('playwright_chromiumdev_profile-')).length;
 }
 
-function waitFor(ready) {
+function waitFor(ready, ms = 2000) {
   const start = Date.now();
   return new Promise((resolve, reject) => {
     const tick = () => {
@@ -712,7 +871,7 @@ function waitFor(ready) {
         resolve();
         return;
       }
-      if (Date.now() - start > 2000) {
+      if (Date.now() - start > ms) {
         reject(new Error('timed out waiting for the child'));
         return;
       }
@@ -720,6 +879,211 @@ function waitFor(ready) {
     };
     tick();
   });
+}
+
+test(
+  'a stop signal during a browser run leaves no files and no processes',
+  { skip: process.env.QA_CORE_FLAKY_SIGNALS !== '1' || process.platform !== 'linux', timeout: 600_000 },
+  async () => {
+    const signals = [
+      ['SIGINT', 130],
+      ['SIGTERM', 143],
+      ['SIGHUP', 129],
+    ];
+    for (const [signal, code] of signals) {
+      for (let time = 0; time < 5; time += 1) {
+        await runSignalProbe(signal, code);
+      }
+    }
+  },
+);
+
+async function runSignalProbe(signal, expected) {
+  const privateTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-sigtmp-'));
+  const project = path.join(process.cwd(), `.signal-probe-${process.pid}-${signal}`);
+  const stdout = [];
+  const stderr = [];
+  let child;
+  try {
+    fs.rmSync(project, { recursive: true, force: true });
+    fs.mkdirSync(path.join(project, 'tests'), { recursive: true });
+    const spec = [
+      "import { test } from '@playwright/test';",
+      "import fs from 'node:fs';",
+      '',
+      "test('slow artifact', async ({ page }, testInfo) => {",
+      "  await page.setContent('<main>slow</main>');",
+      "  const file = testInfo.outputPath('error-context.md');",
+      '  fs.mkdirSync(testInfo.outputDir, { recursive: true });',
+      "  fs.writeFileSync(file, 'context');",
+      '  const timer = setInterval(() => {',
+      '    try { fs.writeFileSync(file, String(Date.now())); } catch (error) {}',
+      '  }, 20);',
+      '  try {',
+      '    await page.waitForTimeout(25000);',
+      '  } finally {',
+      '    clearInterval(timer);',
+      '  }',
+      '});',
+      '',
+    ].join('\n');
+    fs.writeFileSync(path.join(project, 'tests', 'slow.spec.ts'), spec);
+    const config = [
+      "import { defineConfig, devices } from '@playwright/test';",
+      'export default defineConfig({',
+      '  retries: 0,',
+      '  workers: 1,',
+      '  timeout: 60000,',
+      "  testMatch: ['**/slow.spec.ts'],",
+      "  outputDir: 'test-results',",
+      '  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],',
+      '});',
+      '',
+    ].join('\n');
+    fs.writeFileSync(path.join(project, 'playwright.config.ts'), config);
+    const reportPath = path.join(project, 'report.json');
+    fs.writeFileSync(
+      reportPath,
+      `${JSON.stringify({
+        config: { rootDir: project },
+        suites: [
+          {
+            title: 'tests/slow.spec.ts',
+            file: 'tests/slow.spec.ts',
+            specs: [
+              {
+                title: 'slow artifact',
+                ok: false,
+                line: 4,
+                tests: [
+                  {
+                    projectName: 'chromium',
+                    expectedStatus: 'passed',
+                    status: 'unexpected',
+                    results: [{ retry: 0, status: 'failed', duration: 1, errors: [{ message: 'Error: slow' }] }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      })}\n`,
+    );
+    const configPath = path.join(project, 'playwright.config.ts');
+    child = spawn(
+      process.execPath,
+      [
+        path.join(process.cwd(), 'dist', 'cli.js'),
+        'rerun',
+        '--from',
+        reportPath,
+        '--only',
+        'tests/slow.spec.ts::chromium::slow artifact',
+        '--modes',
+        'isolated',
+        '--times',
+        '1',
+        '--config',
+        configPath,
+        '--fail-on',
+        'never',
+      ],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          TMPDIR: privateTmp,
+          TMP: privateTmp,
+          TEMP: privateTmp,
+          NODE_DISABLE_COMPILE_CACHE: '1',
+        },
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    child.stdout.on('data', (chunk) => stdout.push(chunk.toString('utf8')));
+    child.stderr.on('data', (chunk) => stderr.push(chunk.toString('utf8')));
+    await waitFor(() => findNamed(privateTmp, 'error-context.md'), 40000);
+    await delayMs(200);
+    process.kill(child.pid, signal);
+    const status = await waitExit(child, 20000);
+    const err = stderr.join('');
+    assert.equal(status, expected, `${signal} exit ${status}\n${err}\n${stdout.join('')}`);
+    assert.equal(err.includes('ENOTEMPTY'), false, err);
+    assert.equal(err.includes('Playwright wrote no JSON report'), false, err);
+    assert.equal(/at releaseRun|UnhandledPromiseRejection|Error: ENOTEMPTY/.test(err), false, err);
+    assert.equal(stdout.join('').includes('schemaVersion'), false);
+    await waitFor(() => !fs.existsSync(`/proc/${child.pid}`) && pidsUsing(privateTmp).length === 0, 5000);
+    assert.deepEqual(fs.readdirSync(privateTmp), []);
+    assert.deepEqual(pidsUsing(privateTmp), []);
+  } finally {
+    if (child?.pid) {
+      try {
+        process.kill(child.pid, 'SIGKILL');
+      } catch {
+        // The rerun process is already gone.
+      }
+      for (const pid of pidsUsing(privateTmp)) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // That process is already gone.
+        }
+      }
+    }
+    fs.rmSync(privateTmp, { recursive: true, force: true, maxRetries: 5 });
+    fs.rmSync(project, { recursive: true, force: true, maxRetries: 5 });
+  }
+}
+
+function findNamed(dir, name) {
+  if (!fs.existsSync(dir)) return false;
+  const stack = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.name === name) return true;
+      if (entry.isDirectory()) stack.push(path.join(current, entry.name));
+    }
+  }
+  return false;
+}
+
+function pidsUsing(dir) {
+  if (process.platform !== 'linux') return [];
+  const found = [];
+  for (const name of fs.readdirSync('/proc')) {
+    if (!/^\d+$/.test(name)) continue;
+    try {
+      const cwd = fs.readlinkSync(`/proc/${name}/cwd`);
+      const cmd = fs.readFileSync(`/proc/${name}/cmdline`).toString('utf8');
+      if (cwd.startsWith(dir) || cmd.includes(dir)) found.push(Number(name));
+    } catch {
+      // The process exited, or its cwd is not readable.
+    }
+  }
+  return found;
+}
+
+function waitExit(child, ms) {
+  if (child.exitCode !== null) return Promise.resolve(child.exitCode);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('rerun still running')), ms);
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      resolve(code);
+    });
+  });
+}
+
+function delayMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function waitForClose(child) {

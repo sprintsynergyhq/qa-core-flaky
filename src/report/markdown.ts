@@ -84,7 +84,12 @@ function renderNextStep(nextStep: string): string {
   const marker = 'qa-core-flaky rerun ';
   const at = nextStep.indexOf(marker);
   if (at === -1) return escapeHtml(nextStep);
-  const command = nextStep.slice(at).replaceAll('`', "'");
+  const command = nextStep
+    .slice(at)
+    .replaceAll('`', "'")
+    .replaceAll('\r\n', '\\n')
+    .replaceAll('\n', '\\n')
+    .replaceAll('\r', '\\n');
   return `${escapeHtml(nextStep.slice(0, at))}\`${command}\``;
 }
 

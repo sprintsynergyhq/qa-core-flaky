@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { TestRecord } from '../model.js';
+import type { Attempt, TestRecord } from '../model.js';
 import { parsePlaywrightJson } from '../parsers/playwright-json.js';
 import { redactHomeText } from '../report-path.js';
 import { commitFor, mergeRerunRecords, tagRerunAttempts } from './merge.js';
@@ -13,6 +13,30 @@ export const STOP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
 
 /** How long to wait after SIGTERM before SIGKILL. */
 export const SIGNAL_WAIT_MS = 300;
+
+/** Exit status for a stop signal: 128 plus the signal number. No stack is printed. */
+export const SIGNAL_EXIT: Readonly<Record<(typeof STOP_SIGNALS)[number], number>> = {
+  SIGINT: 130,
+  SIGTERM: 143,
+  SIGHUP: 129,
+};
+
+/** Thrown after cleanup when a stop signal ends the plan. The report is not written. */
+export class StoppedRun extends Error {
+  readonly signal: NodeJS.Signals;
+  readonly exitCode: number;
+
+  constructor(signal: NodeJS.Signals) {
+    super(`Stopped by ${signal}`);
+    this.name = 'StoppedRun';
+    this.signal = signal;
+    this.exitCode = SIGNAL_EXIT[signal as (typeof STOP_SIGNALS)[number]] ?? 1;
+  }
+}
+
+export function isStoppedRun(error: unknown): error is StoppedRun {
+  return error instanceof StoppedRun;
+}
 
 const guardedPipes = new WeakSet<object>();
 
@@ -31,7 +55,14 @@ export type CommandRunner = (
 export type ReleaseState = {
   pid?: number;
   dir?: string;
+  /** The direct child, when this process spawned it. Cleanup waits for `close`. */
+  child?: ChildProcess;
   kill?: (pid: number) => void | Promise<void>;
+  /** Set synchronously on a stop signal. The plan starts nothing further and prints nothing further. */
+  stopping?: boolean;
+  stopSignal?: NodeJS.Signals;
+  /** One in-flight cleanup. A second call awaits this same promise. */
+  release?: Promise<void>;
 };
 
 /**
@@ -56,22 +87,30 @@ export function rerunChildEnv(dir: string, base: NodeJS.ProcessEnv = process.env
 /**
  * Kill the child process group, then delete the temp directory.
  * SIGTERM is sent first. After `SIGNAL_WAIT_MS`, SIGKILL follows.
- * A kill that throws still deletes the directory.
+ * A second call awaits the same cleanup. `ENOENT` and `ENOTEMPTY` from
+ * the delete are not thrown. A kill that throws still deletes the directory.
  */
-export async function releaseRun(state: ReleaseState): Promise<void> {
+export function releaseRun(state: ReleaseState): Promise<void> {
+  if (state.release) return state.release;
   const pid = state.pid;
   const dir = state.dir;
+  const child = state.child;
+  const kill = state.kill ?? ((id: number) => killProcessGroup(id, child));
   state.pid = undefined;
   state.dir = undefined;
-  if (pid !== undefined) {
-    const kill = state.kill ?? killProcessGroup;
-    try {
-      await kill(pid);
-    } catch {
-      // The directory is still removed.
+  state.child = undefined;
+  const job = (async () => {
+    if (pid !== undefined) {
+      try {
+        await kill(pid);
+      } catch {
+        // The directory is still removed.
+      }
     }
-  }
-  if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    if (dir) await removeTree(dir);
+  })();
+  state.release = job;
+  return job;
 }
 
 /** Call `release`, then re-raise the signal. Tests pass their own re-raise. */
@@ -84,10 +123,13 @@ export async function onStopSignal(
   reraise(signal);
 }
 
-export async function killProcessGroup(pid: number): Promise<void> {
-  signalGroup(pid, 'SIGTERM');
-  const gone = await waitUntilGone(pid, SIGNAL_WAIT_MS);
-  if (!gone) signalGroup(pid, 'SIGKILL');
+export async function killProcessGroup(pid: number, child?: ChildProcess): Promise<void> {
+  const tracked = signalTree(pid, 'SIGTERM', child);
+  const gone = await waitUntilGone(pid, SIGNAL_WAIT_MS, child, tracked);
+  if (!gone) {
+    tracked.push(...signalTree(pid, 'SIGKILL', child));
+    await waitUntilGone(pid, SIGNAL_WAIT_MS, child, tracked);
+  }
 }
 
 /**
@@ -131,33 +173,53 @@ export async function executePlan(input: {
   if (useSignals) {
     for (const signal of STOP_SIGNALS) {
       const handler = () => {
-        void onStopSignal(signal, () => releaseRun(state), (raised) => {
-          process.removeListener(raised, handler);
-          process.kill(process.pid, raised);
+        if (state.stopping) return;
+        state.stopping = true;
+        state.stopSignal = signal;
+        void releaseRun(state).catch(() => {
+          // Cleanup errors must not become a stack trace. The exit code is the signal.
         });
       };
       handlers.set(signal, handler);
       process.on(signal, handler);
     }
   }
-  const runner = input.runner ?? ((args, cwd, stdoutFile, setPid) => defaultRunner(args, cwd, stdoutFile, setPid, dir));
+  const runner =
+    input.runner ??
+    ((args, cwd, stdoutFile, setPid) => defaultRunner(args, cwd, stdoutFile, setPid, dir, state));
   let merged = input.records.map((record) => ({ ...record, attempts: [...record.attempts] }));
   try {
     let commandIndex = 0;
     for (const run of input.plan.runs) {
+      if (state.stopping) break;
       const outputDir = path.join(dir, `out-${commandIndex}`);
       const stdoutFile = path.join(dir, `report-${commandIndex}.json`);
       commandIndex += 1;
       fs.mkdirSync(outputDir, { recursive: true });
-      const args = await prepareArgs(run, withOutput(run.args, outputDir), input.cwd, input.runner === undefined);
+      const args = await prepareArgs(
+        run,
+        withOutput(run.args, outputDir),
+        input.cwd,
+        input.runner === undefined,
+        dir,
+      );
+      if (state.stopping) break;
       const record =
         input.records.find((item) => item.id === run.testId) ??
         input.records.find((item) => item.file === run.file && item.project === run.project);
       safePrint(input.print, formatPrintedCommand(args, record, input.runner ? [] : launcherPrefix(input.cwd)));
-      const result = await runner(args, input.cwd, stdoutFile, (pid) => {
-        state.pid = pid;
-      });
+      if (state.stopping) break;
+      let result: CommandResult;
+      try {
+        result = await runner(args, input.cwd, stdoutFile, (pid) => {
+          state.pid = pid;
+        });
+      } catch (error) {
+        if (state.stopping) break;
+        throw error;
+      }
       state.pid = undefined;
+      if (state.stopping) break;
       if (!fs.existsSync(stdoutFile) || fs.statSync(stdoutFile).size === 0) {
         throw new Error(failureLine(result, 'Playwright wrote no JSON report.'));
       }
@@ -169,22 +231,65 @@ export async function executePlan(input: {
         const why = error instanceof Error ? error.message : 'Could not parse the rerun report';
         throw new Error(failureLine(result, why));
       }
+      if (state.stopping) break;
       let picked: TestRecord[];
       try {
         picked = selectRecords(run, parsed.records, input.plan.cap.times);
       } catch (error) {
         const why = error instanceof Error ? error.message : 'The rerun report did not match the requested test';
-        throw new Error(failureLine(result, why));
+        const reason = failureLine(result, `Could not select this test. ${why}`);
+        safePrint(input.print, reason);
+        merged = recordUnselectable(merged, run, input.plan, reason);
+        continue;
       }
       const commit = run.commitSha ?? commitFor(input.records, run.testId ?? picked[0]?.id ?? '', input.commitSha);
       const tagged = tagRerunAttempts(picked, run.mode, run.runIndex, commit);
       merged = mergeRerunRecords(merged, tagged);
     }
-    return merged;
+  } catch (error) {
+    // A signal can land while this command is finishing. Do not report that
+    // failure, and do not replace the signal exit with this error.
+    if (!state.stopping) throw error;
   } finally {
     for (const [signal, handler] of handlers) process.removeListener(signal, handler);
-    await releaseRun(state);
+    try {
+      await releaseRun(state);
+    } catch (error) {
+      if (!state.stopping) throw error;
+    }
   }
+  if (state.stopping && state.stopSignal) throw new StoppedRun(state.stopSignal);
+  return merged;
+}
+
+function recordUnselectable(
+  merged: TestRecord[],
+  run: PlannedRun,
+  plan: RerunPlan,
+  reason: string,
+): TestRecord[] {
+  const message = redactHomeText(reason);
+  const attempt: Attempt = {
+    retry: 0,
+    status: 'failed',
+    durationMs: 0,
+    errors: [{ message }],
+    attachments: [],
+    rerun: { mode: run.mode, runIndex: run.runIndex },
+  };
+  const selected = new Set(plan.tests.map((record) => record.id));
+  const ids = new Set<string>();
+  if (run.testId) ids.add(run.testId);
+  else {
+    for (const record of merged) {
+      if (record.file === run.file && record.project === run.project && selected.has(record.id)) ids.add(record.id);
+    }
+  }
+  if (ids.size === 0) return merged;
+  return merged.map((record) => {
+    if (!ids.has(record.id)) return record;
+    return { ...record, attempts: [...record.attempts, { ...attempt, errors: [{ message }] }] };
+  });
 }
 
 function safePrint(print: (line: string) => void, line: string): void {
@@ -206,12 +311,13 @@ async function prepareArgs(
   args: string[],
   cwd: string,
   requireFile: boolean,
+  rerunDir: string,
 ): Promise<string[]> {
   const copy = [...args];
   const at = copy.lastIndexOf('--');
   if (at === -1 || copy[at + 1] === undefined) return copy;
   const config = flagValue(copy, '--config');
-  const absolute = await resolveProjectFile(run.file, cwd, config);
+  const absolute = await resolveProjectFile(run.file, cwd, config, path.join(rerunDir, 'tmp'));
   if (!absolute) {
     if (requireFile) {
       throw new Error(redactHomeText(`Cannot find test file ${run.file} under the Playwright project.`));
@@ -224,14 +330,20 @@ async function prepareArgs(
 }
 
 const rootCache = new Map<string, string>();
+let playwrightLoaded = false;
 
-export async function resolveProjectFile(file: string, cwd: string, config?: string): Promise<string | undefined> {
+export async function resolveProjectFile(
+  file: string,
+  cwd: string,
+  config?: string,
+  cacheRoot?: string,
+): Promise<string | undefined> {
   const normalized = file.replaceAll('\\', '/');
   if (path.isAbsolute(file)) return fs.existsSync(file) ? path.resolve(file) : undefined;
   const roots: string[] = [];
   if (config) {
     const resolvedConfig = path.resolve(cwd, config);
-    const loaded = await loadRootDir(resolvedConfig);
+    const loaded = await loadRootDir(resolvedConfig, cacheRoot);
     if (loaded) roots.push(loaded);
     roots.push(path.dirname(resolvedConfig));
   }
@@ -248,14 +360,29 @@ export async function resolveProjectFile(file: string, cwd: string, config?: str
   return undefined;
 }
 
-async function loadRootDir(configFile: string): Promise<string | undefined> {
+async function loadRootDir(configFile: string, cacheRoot?: string): Promise<string | undefined> {
   const cached = rootCache.get(configFile);
   if (cached) return cached;
+  // Playwright chooses `playwright-transform-cache-<uid>` when its module
+  // is first loaded, from `PWTEST_CACHE_DIR` or `os.tmpdir()`. Point that
+  // at the rerun directory so the parent does not leave the cache in the
+  // real temp directory. A process that already loaded Playwright keeps
+  // the directory chosen by that first load.
+  const redirect = cacheRoot !== undefined && !playwrightLoaded;
+  const saved = redirect ? snapshotTempEnv() : undefined;
+  if (redirect && cacheRoot) {
+    fs.mkdirSync(cacheRoot, { recursive: true });
+    process.env.PWTEST_CACHE_DIR = path.join(cacheRoot, 'playwright-transform-cache');
+    process.env.TMPDIR = cacheRoot;
+    process.env.TMP = cacheRoot;
+    process.env.TEMP = cacheRoot;
+  }
   try {
     const specifier: string = 'playwright/lib/common';
     const common = (await import(specifier)) as {
       configLoader?: { loadConfigFromFile?: (file: string) => Promise<{ config?: { rootDir?: string } }> };
     };
+    playwrightLoaded = true;
     const loaded = await common.configLoader?.loadConfigFromFile?.(configFile);
     const root = loaded?.config?.rootDir;
     if (typeof root !== 'string' || root === '') return undefined;
@@ -263,6 +390,25 @@ async function loadRootDir(configFile: string): Promise<string | undefined> {
     return root;
   } catch {
     return undefined;
+  } finally {
+    if (saved) restoreTempEnv(saved);
+  }
+}
+
+function snapshotTempEnv(): NodeJS.ProcessEnv {
+  return {
+    PWTEST_CACHE_DIR: process.env.PWTEST_CACHE_DIR,
+    TMPDIR: process.env.TMPDIR,
+    TMP: process.env.TMP,
+    TEMP: process.env.TEMP,
+  };
+}
+
+function restoreTempEnv(saved: NodeJS.ProcessEnv): void {
+  for (const key of ['PWTEST_CACHE_DIR', 'TMPDIR', 'TMP', 'TEMP'] as const) {
+    const value = saved[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
   }
 }
 
@@ -357,6 +503,7 @@ function defaultRunner(
   stdoutFile: string,
   setPid: (pid: number) => void,
   dir: string,
+  state: ReleaseState,
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     let bin: string;
@@ -367,6 +514,7 @@ function defaultRunner(
       return;
     }
     const child = launchRerunChild({ command: bin, args: ['test', ...args], cwd, dir });
+    state.child = child;
     if (child.pid !== undefined) setPid(child.pid);
     const stdout = fs.createWriteStream(stdoutFile);
     const ignorePipe = (error: NodeJS.ErrnoException) => {
@@ -395,9 +543,12 @@ function defaultRunner(
   });
 }
 
-function signalGroup(pid: number, signal: NodeJS.Signals): void {
+function signalTree(pid: number, signal: NodeJS.Signals, child?: ChildProcess): number[] {
   // pid 1 and a negative broadcast are not this child. `kill(-1)` signals every process.
-  if (!Number.isInteger(pid) || pid <= 1) return;
+  // Descendants are collected only for the child this run spawned. A caller-supplied
+  // pid may not be that child, and walking it would signal unrelated processes.
+  if (!Number.isInteger(pid) || pid <= 1) return [];
+  const tracked = child?.pid === pid ? descendantPids(pid) : [];
   try {
     process.kill(-pid, signal);
   } catch {
@@ -407,24 +558,111 @@ function signalGroup(pid: number, signal: NodeJS.Signals): void {
       // The process is already gone.
     }
   }
+  for (const extra of tracked) {
+    try {
+      process.kill(extra, signal);
+    } catch {
+      // That process is already gone, or it is not ours.
+    }
+  }
+  return tracked;
 }
 
-function processAlive(pid: number): boolean {
+function descendantPids(root: number): number[] {
+  if (process.platform !== 'linux') return [];
+  const children = new Map<number, number[]>();
+  let names: string[];
+  try {
+    names = fs.readdirSync('/proc');
+  } catch {
+    return [];
+  }
+  for (const name of names) {
+    if (!/^\d+$/.test(name)) continue;
+    const id = Number(name);
+    try {
+      const text = fs.readFileSync(`/proc/${name}/status`, 'utf8');
+      const match = /^PPid:\s+(\d+)/m.exec(text);
+      const parent = match ? Number(match[1]) : 0;
+      const list = children.get(parent) ?? [];
+      list.push(id);
+      children.set(parent, list);
+    } catch {
+      // The process exited while we were reading.
+    }
+  }
+  const out: number[] = [];
+  const stack = [...(children.get(root) ?? [])];
+  const seen = new Set<number>();
+  while (stack.length > 0) {
+    const next = stack.pop();
+    if (next === undefined || seen.has(next) || next <= 1) continue;
+    seen.add(next);
+    out.push(next);
+    stack.push(...(children.get(next) ?? []));
+  }
+  return out;
+}
+
+function groupAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    // ESRCH means the group is gone. EPERM is not our child.
+    const code = errnoCode(error);
+    return code !== 'ESRCH' && code !== 'EPERM';
+  }
+}
+
+function pidAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 1) return false;
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    // EPERM is a process this user must not signal. Treat it as not our child.
-    return false;
+  } catch (error) {
+    return errnoCode(error) !== 'ESRCH' && errnoCode(error) !== 'EPERM';
   }
 }
 
-function waitUntilGone(pid: number, ms: number): Promise<boolean> {
+function errnoCode(error: unknown): string {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return '';
+  const code = error.code;
+  return typeof code === 'string' ? code : '';
+}
+
+function childClosed(child: ChildProcess | undefined): Promise<void> {
+  if (!child) return Promise.resolve();
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => resolve();
+    child.once('close', done);
+    if (child.exitCode !== null || child.signalCode !== null) {
+      child.removeListener('close', done);
+      resolve();
+    }
+  });
+}
+
+function waitUntilGone(
+  pid: number,
+  ms: number,
+  child: ChildProcess | undefined,
+  tracked: readonly number[],
+): Promise<boolean> {
+  let closed = child === undefined || child.exitCode !== null || child.signalCode !== null;
+  if (!closed && child) {
+    void childClosed(child).then(() => {
+      closed = true;
+    });
+  }
   const start = Date.now();
   return new Promise((resolve) => {
     const tick = () => {
-      if (!processAlive(pid)) {
+      const groupGone = !groupAlive(pid);
+      const treeGone = tracked.every((id) => !pidAlive(id));
+      if (closed && groupGone && treeGone) {
         resolve(true);
         return;
       }
@@ -435,5 +673,29 @@ function waitUntilGone(pid: number, ms: number): Promise<boolean> {
       setTimeout(tick, 20);
     };
     tick();
+  });
+}
+
+async function removeTree(dir: string): Promise<void> {
+  let last: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 40 });
+      return;
+    } catch (error) {
+      last = error;
+      const code = errnoCode(error);
+      if (code === 'ENOENT') return;
+      if (code !== 'ENOTEMPTY' && code !== 'EBUSY' && code !== 'EPERM') throw error;
+      await delay(50);
+    }
+  }
+  const code = errnoCode(last);
+  if (code === 'ENOENT' || code === 'ENOTEMPTY') return;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
   });
 }

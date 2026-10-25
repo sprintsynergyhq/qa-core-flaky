@@ -39,7 +39,7 @@
  * and prose such as `/and/or` stay as written.
  * `http://` and `https://` URLs are left alone, including a query such as
  * `?x=/home/a` and a root prefix that sits inside the URL. A token may start
- * after whitespace, a quote, `=`, `(`, a backtick, `[`, `{`, `:`, or
+ * after whitespace, a quote, `=`, `(`, a backtick, `[`, `{`, `:`, `^`, or
  * `file://`. Trailing `,`, `.`, `;`, and `)` stay outside the rewritten
  * path. The report root is also removed wherever it still appears as its
  * own prefix, but not inside a URL. The root matches when the next character
@@ -233,7 +233,12 @@ export type HomeMarks = ReadonlyMap<string, string>;
  * the rest of the path. A separator is one `/` or a run of one or more `\`,
  * so `C:\Users\alice\x.json` and `C:\\Users\\alice\\x.json` are the same path.
  * A path tail stops at whitespace, a quote, `)`, `]`, `>`, or `?`, `*`,
- * `#`, `=`, `,`. It does not stop at `:`.
+ * `#`, `=`, `,`. It does not stop at `:`. A space that is followed by a
+ * backslash-separated segment stays in the tail, and that backslash is
+ * written as `/`, so `/home/bob/my project\a.spec.ts` becomes
+ * `<home>/my project/a.spec.ts`. A space that is not followed by a
+ * backslash still ends the tail. `\/` is read as `/`, and `^` is a path
+ * boundary, so a file filter `/^\/home\/name\/...$/` hides the username.
  *
  * A letter before `:` is a drive letter only at the start of the text or
  * after a character that is not a letter or digit. `file:///` and `\\?\`
@@ -247,7 +252,8 @@ export type HomeMarks = ReadonlyMap<string, string>;
  * starts with a letter, a digit, or `_`, and a `/` or the end of the path
  * follows. `~/proj` is not, because it has no username. `~` inside
  * `locator('...')` or `locator("...")` is a CSS combinator and stays.
- * A path boundary may be `,`, `;`, `<`, or `>`.
+ * A path boundary may be `,`, `;`, `<`, `>`, or `^`. An escaped slash
+ * (`\/`) is a slash.
  * `file://localhost/home/...` is a home. `../../../home/bob/...` is a home.
  * `\\server\Users\bob`, `\\?\UNC\server\Users\bob`, `//server/Users/bob`,
  * `smb://server/Users/bob`, `SMB://server/users/bob`, `x\\Users\\bob`, and
@@ -270,7 +276,7 @@ export type HomeMarks = ReadonlyMap<string, string>;
  * add a warning.
  */
 export function redactHomeText(value: string, marks?: HomeMarks): string {
-  const masked = maskUrls(value);
+  const masked = maskUrls(openEscapedSlashes(value));
   const text = tagLiteralMarks(masked.text);
   let out = '';
   let cursor = 0;
@@ -313,7 +319,7 @@ export function homeMarks(texts: readonly string[]): HomeMarks {
 }
 
 function homeUsernames(value: string): string[] {
-  const text = maskUrls(value).text;
+  const text = maskUrls(openEscapedSlashes(value)).text;
   const users: string[] = [];
   let cursor = 0;
   while (cursor < text.length) {
@@ -416,12 +422,17 @@ function matchDotDotHome(text: string, index: number): HomeMatch | undefined {
 
 function isMarkedStart(text: string, index: number): boolean {
   if (index === 0) return true;
-  return /[\s"'=(`\[{:,;<>]/.test(text[index - 1] ?? '');
+  return /[\s"'=(`\[{:,;<>^]/.test(text[index - 1] ?? '');
 }
 
 function isDotDotStart(text: string, index: number): boolean {
   if (index === 0) return true;
-  return /[\s"'=(`\[{:,;<>/\\]/.test(text[index - 1] ?? '');
+  return /[\s"'=(`\[{:,;<>^/\\]/.test(text[index - 1] ?? '');
+}
+
+/** A printed file filter escapes slashes as `\/`. Read that as one slash. */
+function openEscapedSlashes(value: string): string {
+  return value.replaceAll('\\/', '/');
 }
 
 /**
@@ -467,8 +478,8 @@ function slashContextOk(text: string, index: number): boolean {
   if (isKnownHomePrefix(before)) return true;
   if (before.endsWith('file://localhost')) return true;
   // `//server/Users/...` and `\\server\Users\...` keep the server.
-  if (/(?:^|[\s"'=(`\[{:,;<>])[/\\]{2}[^/\\]+$/.test(before)) return true;
-  if (/(?:^|[\s"'=(`\[{:,;<>])smb:\/\/[^/\\]+$/i.test(before)) return true;
+  if (/(?:^|[\s"'=(`\[{:,;<>^])[/\\]{2}[^/\\]+$/.test(before)) return true;
+  if (/(?:^|[\s"'=(`\[{:,;<>^])smb:\/\/[^/\\]+$/i.test(before)) return true;
   return isPathStart(text, index);
 }
 
@@ -613,7 +624,7 @@ function isPathStart(text: string, index: number): boolean {
   if (index === 0) return true;
   if (text.slice(Math.max(0, index - 7), index) === 'file://') return true;
   const prev = text[index - 1] ?? '';
-  if (!/[\s"'=(`\[{:,;<>]/.test(prev)) return false;
+  if (!/[\s"'=(`\[{:,;<>^]/.test(prev)) return false;
   if (/\s/.test(prev)) {
     const method = /([A-Za-z]+)\s+$/.exec(lookbehind(text, index, 80));
     if (method && /^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(method[1] ?? '')) return false;
@@ -626,7 +637,7 @@ function readPathTail(value: string, start: number): { text: string; next: numbe
   let index = start;
   while (index < value.length) {
     const ch = value[index] ?? '';
-    if (/[?*#=,;]/.test(ch) || /[\s"'`()<>|[\]{}]/.test(ch)) break;
+    if (isTailStop(ch) || /\s/.test(ch)) break;
     if (ch === '\\') {
       text += '/';
       while (value[index + 1] === '\\') index += 1;
@@ -635,7 +646,59 @@ function readPathTail(value: string, start: number): { text: string; next: numbe
     }
     index += 1;
   }
+  const mixed = readMixedTail(value, index);
+  if (mixed) {
+    text += mixed.text;
+    index = mixed.next;
+  }
   return { text, next: index };
+}
+
+function isTailStop(ch: string): boolean {
+  return /[?*#=,;]/.test(ch) || /["'`()<>|[\]{}]/.test(ch);
+}
+
+/**
+ * `/home/name/my project\a.spec.ts` stops at the space, then a backslash
+ * continues the same path. Keep that space and write the backslash as `/`.
+ * A space with no following backslash still ends the tail, so a later
+ * `/home/other` stays a separate home. `;C:\\Windows` is not this case.
+ */
+function readMixedTail(value: string, start: number): { text: string; next: number } | undefined {
+  if (start >= value.length || !/[\t ]/.test(value[start] ?? '')) return undefined;
+  let index = start;
+  let text = '';
+  let sawBackslash = false;
+  while (index < value.length) {
+    const ch = value[index] ?? '';
+    if (ch === ' ' || ch === '\t') {
+      if (!backslashFollows(value, index)) break;
+      text += ch;
+      index += 1;
+      continue;
+    }
+    if (isTailStop(ch) || /\s/.test(ch) || ch === '/') break;
+    if (ch === '\\') {
+      sawBackslash = true;
+      text += '/';
+      while (value[index + 1] === '\\') index += 1;
+      index += 1;
+      continue;
+    }
+    text += ch;
+    index += 1;
+  }
+  if (!sawBackslash) return undefined;
+  return { text, next: index };
+}
+
+function backslashFollows(value: string, start: number): boolean {
+  for (let index = start; index < value.length; index += 1) {
+    const ch = value[index] ?? '';
+    if (ch === '\\') return true;
+    if (ch === '\n' || ch === '\r' || ch === '/' || ch === ';' || ch === ',') return false;
+  }
+  return false;
 }
 
 /**

@@ -13,7 +13,7 @@ import { parsePlaywrightJson } from './parsers/playwright-json.js';
 import { homeMarks, redactHomeText } from './report-path.js';
 import { redactParseResult } from './redact.js';
 import { writeReportPair } from './report/pair.js';
-import { executePlan, guardPipe } from './rerun/run.js';
+import { executePlan, guardPipe, isStoppedRun } from './rerun/run.js';
 import { formatCap, planReruns } from './rerun/plan.js';
 import { renderTriageMarkdown } from './report/markdown.js';
 import { buildTriageReport, renderTriageJson } from './report/json.js';
@@ -36,6 +36,8 @@ import { buildTriageReport, renderTriageJson } from './report/json.js';
  * triage exits 0 when the report has no entries, 2 when it has entries
  * (unless --fail-on never), and 1 on a tool error.
  * rerun uses the same exit codes as triage after the new attempts are merged.
+ * A stop signal exits 130 for SIGINT, 143 for SIGTERM, or 129 for SIGHUP,
+ * writes no triage report, and prints no stack.
  * The cap and each Playwright command go to stderr. The triage report goes
  * to stdout. Error text is one line on stderr.
  */
@@ -107,6 +109,10 @@ function main(): void {
     if (pending instanceof Promise) {
       pending.catch((error: unknown) => {
         if (error instanceof ExitRequest) return;
+        if (isStoppedRun(error)) {
+          process.exitCode = error.exitCode;
+          return;
+        }
         const message = error instanceof Error ? error.message : 'Could not rerun';
         process.stderr.write(`${oneLine(message)}\n`);
         process.exitCode = 1;
@@ -291,6 +297,10 @@ async function runRerun(extra: readonly string[], values: FlagValues): Promise<v
       });
     } catch (error) {
       if (error instanceof ExitRequest) throw error;
+      if (isStoppedRun(error)) {
+        process.exitCode = error.exitCode;
+        return;
+      }
       const detail = error instanceof Error ? error.message : 'The rerun failed';
       fail(redactHomeText(oneLine(detail)));
     }

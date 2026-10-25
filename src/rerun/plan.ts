@@ -23,7 +23,11 @@ export type PlannedRun = {
   testId?: string;
   file: string;
   project: string;
-  /** Spec line from the report, when it has one. Isolated and repeat prefer this. */
+  /**
+   * Spec line, only when that line is unique for this file and project in
+   * the report. Isolated and repeat then use `file:line`. A shared line is
+   * omitted and `-g` is used instead.
+   */
   line?: number;
   /** Arguments after the Playwright binary. An array, never a shell string. */
   args: string[];
@@ -99,7 +103,7 @@ export function planReruns(records: readonly TestRecord[], options: PlanOptions 
     failing.push(record);
   }
   const selected = failing.slice(0, maxTests);
-  const runs = buildRuns(selected, modes, times, options.config, options.outputDir);
+  const runs = buildRuns(records, selected, modes, times, options.config, options.outputDir);
   if (runs.length > RERUN_LIMITS.commands) {
     throw new Error(
       `The plan has ${runs.length} commands. The limit is ${RERUN_LIMITS.commands}. Lower --times or --max-tests.`,
@@ -128,9 +132,11 @@ export function formatCap(cap: RunCap): string {
  * Repeat uses `--repeat-each`. Isolated repeats the invocation `times` times.
  * In-order runs the file once with no title filter. Every mode uses
  * `--retries 0` and `--workers 1`. `--update-snapshots` is never set.
- * A line from the report selects that test with `file:line`. Otherwise `-g`
- * is a fully anchored, case-sensitive pattern over the project, the file,
- * and the title path, with room for trailing tags.
+ * Pass `line` only when that line is unique for the file and project.
+ * `file:line` then selects that location. Otherwise `-g` is a fully
+ * anchored, case-sensitive pattern over the project, the file, and the
+ * title path, with room for trailing tags. A newline in a title is the
+ * escape `\\n` inside that pattern.
  */
 export function buildPlaywrightArgs(input: {
   file: string;
@@ -176,6 +182,9 @@ export function buildPlaywrightArgs(input: {
  * Tags may follow any of those parts. `^` and `$` keep `save` from matching
  * `autosave`, and a full path keeps `Outer child` from matching both a
  * describe child and a different test when the title paths differ.
+ * A newline in a part is written as `\\n`. Playwright's `.` does not match
+ * a newline, and a raw newline would keep this value from being read as
+ * `/pattern/`.
  */
 export function anchoredGrep(project: string, file: string, titlePath: readonly string[]): string {
   const parts = [project, file.replaceAll('\\', '/'), ...titlePath];
@@ -211,7 +220,9 @@ export function formatPrintedCommand(
   prefix: readonly string[] = [],
 ): string {
   const marks = record ? marksFor(record) : undefined;
-  const show = (part: string) => shellQuote(part.replaceAll('\\/', '/'));
+  // `\/` and `\.` are regex escapes in the file filter. Show them as `/` and
+  // `.` before redaction so `^/home/...` is a real path and a dot stays a dot.
+  const show = (part: string) => shellQuote(part.replaceAll('\\/', '/').replaceAll('\\.', '.'));
   const redact = (value: string) => (marks ? redactHomeText(value, marks) : redactHomeText(value));
   const grepAt = args.indexOf('-g');
   const title = grepAt === -1 ? undefined : args[grepAt + 1];
@@ -232,16 +243,22 @@ export function shellCommand(reportPath: string, id: string, configFile?: string
 }
 
 function escapeSlash(value: string): string {
-  return escapeRegex(value).replaceAll('/', '\\/');
+  return escapeRegex(value)
+    .replaceAll('/', '\\/')
+    .replaceAll('\r\n', '\\n')
+    .replaceAll('\n', '\\n')
+    .replaceAll('\r', '\\n');
 }
 
 function buildRuns(
+  records: readonly TestRecord[],
   tests: readonly TestRecord[],
   modes: readonly RerunMode[],
   times: number,
   config: string | undefined,
   outputDir: string | undefined,
 ): PlannedRun[] {
+  const lines = lineOwners(records);
   const runs: PlannedRun[] = [];
   for (const mode of modes) {
     if (mode === 'in-order') {
@@ -273,6 +290,7 @@ function buildRuns(
     for (const record of tests) {
       assertRunnableFile(record.file);
       assertProject(record.project);
+      const line = uniqueLine(lines, record);
       const copies = mode === 'isolated' ? times : 1;
       for (let runIndex = 0; runIndex < copies; runIndex += 1) {
         runs.push({
@@ -280,13 +298,13 @@ function buildRuns(
           testId: record.id,
           file: record.file,
           project: record.project,
-          line: record.line,
+          line,
           runIndex,
           commitSha: record.source.commitSha,
           args: buildPlaywrightArgs({
             file: record.file,
             titlePath: record.titlePath,
-            line: record.line,
+            line,
             mode,
             times,
             config,
@@ -298,6 +316,38 @@ function buildRuns(
     }
   }
   return runs;
+}
+
+/**
+ * `file:line` selects every test on that line, and every test in a describe
+ * that starts on that line. Use it only when one report id has that file,
+ * project, and line. A passing neighbor counts. Otherwise the plan uses `-g`.
+ */
+function lineOwners(records: readonly TestRecord[]): Map<string, Set<string>> {
+  const owners = new Map<string, Set<string>>();
+  for (const record of records) {
+    if (!usableLine(record.line)) continue;
+    const key = lineKey(record.project, record.file, record.line);
+    const ids = owners.get(key) ?? new Set<string>();
+    ids.add(record.id);
+    owners.set(key, ids);
+  }
+  return owners;
+}
+
+function uniqueLine(owners: Map<string, Set<string>>, record: TestRecord): number | undefined {
+  if (!usableLine(record.line)) return undefined;
+  const ids = owners.get(lineKey(record.project, record.file, record.line));
+  if (!ids || ids.size !== 1) return undefined;
+  return record.line;
+}
+
+function lineKey(project: string, file: string, line: number): string {
+  return `${project}\0${file.replaceAll('\\', '/')}\0${line}`;
+}
+
+function usableLine(line: number | undefined): line is number {
+  return line !== undefined && Number.isInteger(line) && line > 0;
 }
 
 function assertRunnableFile(file: string): void {

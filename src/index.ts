@@ -47,10 +47,13 @@ export {
 export type { PlanOptions, PlannedRun, RerunPlan, RunCap } from './rerun/plan.js';
 export { commitFor, mergeRerunRecords, tagRerunAttempts } from './rerun/merge.js';
 export {
+  SIGNAL_EXIT,
   SIGNAL_WAIT_MS,
   STOP_SIGNALS,
+  StoppedRun,
   executePlan,
   guardPipe,
+  isStoppedRun,
   killProcessGroup,
   launchRerunChild,
   onStopSignal,

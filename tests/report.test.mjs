@@ -374,6 +374,20 @@ test('a newline or a pipe in a title stays inside one summary row', () => {
   assert.equal(heading.includes('\n'), false);
 });
 
+test('a newline in the rerun command stays inside one code span', () => {
+  const message = 'Error: element(s) not found';
+  const item = oneRecord('line\nbreak', [
+    attempt('failed', message, 0),
+    attempt('failed', message, 1),
+    attempt('failed', message, 2),
+  ]);
+  const markdown = renderTriageMarkdown(buildTriageReport([item]));
+  const next = markdown.split('\n').find((line) => line.includes('qa-core-flaky rerun'));
+  assert.ok(next);
+  assert.match(next, /line\\nbreak/);
+  assert.equal(next.includes('`qa-core-flaky rerun'), true);
+});
+
 test('markdown escapes home and title brackets in the table, heading, and next step', () => {
   const message = 'Error: element(s) not found';
   const item = oneRecord('renders <Cart> & qty', [

@@ -772,6 +772,28 @@ test('a quoted home mark does not collide with a generated mark', () => {
   assert.match(out, /<home~2>\/a/);
 });
 
+test('a file filter and a mixed separator hide the username', () => {
+  const cases = [
+    ['/^/home/bob/p/a.spec.ts$/:3', '/^<home>/p/a.spec.ts$/:3'],
+    ['/^/home/bob/p/a.spec.ts$/', '/^<home>/p/a.spec.ts$/'],
+    ['/^C:/Users/bob/p/a.spec.ts$/:3', '/^<home>/p/a.spec.ts$/:3'],
+    ['/^C:/Users/bob/p/a.spec.ts$/', '/^<home>/p/a.spec.ts$/'],
+    ['/home/bob/my project\\a.spec.ts', '<home>/my project/a.spec.ts'],
+    ['C:\\Users\\bob\\my project\\a.spec.ts', '<home>/my project/a.spec.ts'],
+  ];
+  for (const [input, expected] of cases) {
+    assert.equal(redactHomeText(input), expected, input);
+  }
+  assert.equal(redactHomeText(String.raw`/^\/home\/bob\/p\/a\.spec\.ts$/:3`).includes('bob'), false);
+  assert.equal(redactHomeText(String.raw`/^\/home\/bob\/p\/a\.spec\.ts$/`).includes('bob'), false);
+  assert.equal(redactHomeText(String.raw`/^C:\/Users\/bob\/p\/a\.spec\.ts$/:3`).includes('bob'), false);
+  assert.equal(redactHomeText(String.raw`/^C:\/Users\/bob\/p\/a\.spec\.ts$/`).includes('bob'), false);
+  const later = redactHomeText('/home/bob/file see /home/alice/x');
+  assert.equal(later.includes('bob'), false);
+  assert.equal(later.includes('alice'), false);
+  assert.equal(redactHomeText('C:\\Users\\bob\\a;C:\\\\Windows'), '<home>/a;C:\\\\Windows');
+});
+
 test('homeMarks stays linear for many usernames', () => {
   const lines = Array.from({ length: 20000 }, (_item, index) => `/home/user${index}/a`);
   const started = Date.now();
