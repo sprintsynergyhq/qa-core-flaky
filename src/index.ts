@@ -29,12 +29,36 @@ export { fixTemplates, suggestFix } from './fixes/templates.js';
 export { buildTriageReport, renderTriageJson } from './report/json.js';
 export type { BuildTriageOptions } from './report/json.js';
 export { renderTriageMarkdown } from './report/markdown.js';
+export { writeReportPair } from './report/pair.js';
+export type { PairOps } from './report/pair.js';
 export { orderDependencyEvidence } from './signals/order.js';
 export { escapeRegex, shellQuote } from './rerun/quote.js';
-export { buildPlaywrightArgs, formatCap, formatPrintedCommand, planReruns, shellCommand } from './rerun/plan.js';
+export {
+  RERUN_LIMITS,
+  anchoredGrep,
+  buildPlaywrightArgs,
+  exactFileArg,
+  fileFilterArg,
+  formatCap,
+  formatPrintedCommand,
+  planReruns,
+  shellCommand,
+} from './rerun/plan.js';
 export type { PlanOptions, PlannedRun, RerunPlan, RunCap } from './rerun/plan.js';
 export { commitFor, mergeRerunRecords, tagRerunAttempts } from './rerun/merge.js';
-export { STOP_SIGNALS, executePlan, onStopSignal, releaseRun } from './rerun/run.js';
+export {
+  SIGNAL_WAIT_MS,
+  STOP_SIGNALS,
+  executePlan,
+  guardPipe,
+  killProcessGroup,
+  launchRerunChild,
+  onStopSignal,
+  releaseRun,
+  rerunChildEnv,
+  resolveProjectFile,
+  selectRecords,
+} from './rerun/run.js';
 export type { CommandRunner, ReleaseState } from './rerun/run.js';
 export type {
   TriageAttempts,

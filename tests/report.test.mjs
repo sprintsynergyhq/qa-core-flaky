@@ -358,6 +358,22 @@ test('markdown evidence escapes html from an overlay error', () => {
   assert.equal(report.entries[0].evidence.some((line) => line.includes('<div id="cover">')), true);
 });
 
+test('a newline or a pipe in a title stays inside one summary row', () => {
+  const message = 'Error: element(s) not found';
+  const item = oneRecord('left | right\nnext', [
+    attempt('failed', message, 0),
+    attempt('failed', message, 1),
+    attempt('failed', message, 2),
+  ]);
+  const markdown = renderTriageMarkdown(buildTriageReport([item]));
+  const table = markdown.split('\n').filter((line) => line.startsWith('|'));
+  assert.equal(table.length, 3);
+  assert.match(table[2], /left \\| right\\nnext/);
+  const heading = markdown.split('\n').find((line) => line.startsWith('## ') && line.includes('left'));
+  assert.match(heading, /left \\| right\\nnext/);
+  assert.equal(heading.includes('\n'), false);
+});
+
 test('markdown escapes home and title brackets in the table, heading, and next step', () => {
   const message = 'Error: element(s) not found';
   const item = oneRecord('renders <Cart> & qty', [

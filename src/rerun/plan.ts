@@ -22,7 +22,10 @@ export type PlannedRun = {
   /** Set for repeat and isolated. Omitted for an in-order file run. */
   testId?: string;
   file: string;
-  /** Arguments after `npx playwright test`. An array, never a shell string. */
+  project: string;
+  /** Spec line from the report, when it has one. Isolated and repeat prefer this. */
+  line?: number;
+  /** Arguments after the Playwright binary. An array, never a shell string. */
   args: string[];
   /** 0-based index of this invocation inside the mode for this test or file. */
   runIndex: number;
@@ -46,6 +49,16 @@ export type RerunPlan = {
   cap: RunCap;
 };
 
+/**
+ * Safety caps. Defaults stay inside these limits.
+ * `--times` 5 and `--max-tests` 20 with repeat and isolated is 120 commands.
+ */
+export const RERUN_LIMITS = {
+  times: 20,
+  maxTests: 50,
+  commands: 400,
+} as const;
+
 const DEFAULT_TIMES = 5;
 const DEFAULT_MAX_TESTS = 20;
 const DEFAULT_MODES: readonly RerunMode[] = ['repeat', 'isolated'];
@@ -58,8 +71,8 @@ const MODE_NAMES: readonly RerunMode[] = ['repeat', 'isolated', 'in-order'];
  * Selection order is the order of first appearance in `records`.
  */
 export function planReruns(records: readonly TestRecord[], options: PlanOptions = {}): RerunPlan {
-  const times = readPositive(options.times, DEFAULT_TIMES, 'times');
-  const maxTests = readPositive(options.maxTests, DEFAULT_MAX_TESTS, 'max-tests');
+  const times = readPositive(options.times, DEFAULT_TIMES, 'times', RERUN_LIMITS.times);
+  const maxTests = readPositive(options.maxTests, DEFAULT_MAX_TESTS, 'max-tests', RERUN_LIMITS.maxTests);
   const modes = readModes(options.modes);
   const known = new Map<string, TestRecord[]>();
   for (const record of records) {
@@ -87,6 +100,11 @@ export function planReruns(records: readonly TestRecord[], options: PlanOptions 
   }
   const selected = failing.slice(0, maxTests);
   const runs = buildRuns(selected, modes, times, options.config, options.outputDir);
+  if (runs.length > RERUN_LIMITS.commands) {
+    throw new Error(
+      `The plan has ${runs.length} commands. The limit is ${RERUN_LIMITS.commands}. Lower --times or --max-tests.`,
+    );
+  }
   return {
     tests: selected,
     runs,
@@ -107,33 +125,43 @@ export function formatCap(cap: RunCap): string {
 
 /**
  * One Playwright invocation.
- * Repeat uses `--repeat-each`. Isolated repeats the invocation `times` times
- * with `-g`. In-order runs the file once with no `-g`. Every mode uses
+ * Repeat uses `--repeat-each`. Isolated repeats the invocation `times` times.
+ * In-order runs the file once with no title filter. Every mode uses
  * `--retries 0` and `--workers 1`. `--update-snapshots` is never set.
+ * A line from the report selects that test with `file:line`. Otherwise `-g`
+ * is a fully anchored, case-sensitive pattern over the project, the file,
+ * and the title path, with room for trailing tags.
  */
 export function buildPlaywrightArgs(input: {
   file: string;
-  title?: string;
+  titlePath?: readonly string[];
+  line?: number;
   mode: RerunMode;
   times: number;
   config?: string;
   project?: string;
   outputDir?: string;
 }): string[] {
+  const project = input.project ?? '';
+  if (project.includes('*') || project.includes('?')) {
+    throw new Error(`Project name ${project} contains a wildcard. Pass the exact project name.`);
+  }
   const args: string[] = [];
   if (input.config) args.push('--config', input.config);
   args.push('--retries', '0', '--workers', '1', '--reporter', 'json');
   if (input.mode === 'repeat') args.push('--repeat-each', String(input.times));
-  // Playwright 1.60.0 declares `--project <project-name...>`. A separate
-  // value would swallow the file filter that follows. One `--project=name`
-  // argument keeps the file as a positional test filter.
-  if (input.project && input.project !== 'default') args.push(`--project=${input.project}`);
+  // Playwright 1.60.0 declares `--project <project-name...>`. One
+  // `--project=name` argument keeps the following file filter positional.
+  // A project named `default` is still passed. Playwright treats `*` as a
+  // wildcard, so a name with `*` or `?` is refused above.
+  if (project !== '') args.push(`--project=${project}`);
   if (input.outputDir) args.push('--output', input.outputDir);
-  args.push(escapeRegex(input.file));
-  // Playwright 1.60.0 matches `-g` against the file title, describe titles,
-  // and the test title joined by spaces. `$` keeps the match at the end of
-  // that string. The title is escaped first, so `$` is the anchor.
-  if (input.title !== undefined) args.push('-g', `${escapeRegex(input.title)}$`);
+  const useLine = input.line !== undefined && Number.isInteger(input.line) && input.line > 0;
+  if (!useLine && input.titlePath && input.titlePath.length > 0 && project !== '') {
+    args.push('-g', anchoredGrep(project, input.file, input.titlePath));
+  }
+  // `--` keeps a file name that starts with `-` from being read as an option.
+  args.push('--', fileFilterArg(input.file, useLine ? input.line : undefined));
   if (args.includes('--update-snapshots') || args.includes('-u')) {
     throw new Error('Refusing to pass --update-snapshots');
   }
@@ -141,27 +169,70 @@ export function buildPlaywrightArgs(input: {
 }
 
 /**
- * The command a person can copy. Homes are redacted. When redaction changes
- * the `-g` title, the printed command omits `-g` and says the title was redacted.
- * The process still receives the raw title.
+ * Case-sensitive grep for Playwright 1.60.0.
+ * A value wrapped in slashes is compiled with those flags only, so this
+ * pattern does not use `i`. The grep title is the project, the file, the
+ * describe titles, the test title, and any tags, joined by spaces.
+ * Tags may follow any of those parts. `^` and `$` keep `save` from matching
+ * `autosave`, and a full path keeps `Outer child` from matching both a
+ * describe child and a different test when the title paths differ.
  */
-export function formatPrintedCommand(args: readonly string[], record?: TestRecord): string {
-  const raw = ['npx', 'playwright', 'test', ...args].map((part) => shellQuote(part)).join(' ');
+export function anchoredGrep(project: string, file: string, titlePath: readonly string[]): string {
+  const parts = [project, file.replaceAll('\\', '/'), ...titlePath];
+  const body = parts.map((part) => `${escapeSlash(part)}(?: @\\S+)*`).join(' ');
+  return `/^${body}$/`;
+}
+
+/**
+ * File filter. `line` selects that spec line. The pattern is anchored.
+ * `executePlan` replaces a relative path with the absolute file when it
+ * can resolve one, so `tests/login.spec.ts` does not also match
+ * `old/tests/login.spec.ts`.
+ */
+export function fileFilterArg(file: string, line?: number): string {
+  return exactFileArg(file.replaceAll('\\', '/'), line);
+}
+
+/** Exact path, anchored, with an optional `:line`. Slashes are escaped inside `/.../`. */
+export function exactFileArg(filePath: string, line?: number): string {
+  const wrapped = `/^${escapeSlash(filePath)}$/`;
+  if (line === undefined) return wrapped;
+  return `${wrapped}:${line}`;
+}
+
+/**
+ * The command a person can copy. Every argument is redacted. When redaction
+ * changes the `-g` title, the printed command omits `-g` and says the title
+ * was redacted. The process still receives the raw title.
+ */
+export function formatPrintedCommand(
+  args: readonly string[],
+  record?: TestRecord,
+  prefix: readonly string[] = [],
+): string {
   const marks = record ? marksFor(record) : undefined;
-  const printed = marks ? redactHomeText(raw, marks) : redactHomeText(raw);
+  const show = (part: string) => shellQuote(part.replaceAll('\\/', '/'));
+  const redact = (value: string) => (marks ? redactHomeText(value, marks) : redactHomeText(value));
   const grepAt = args.indexOf('-g');
   const title = grepAt === -1 ? undefined : args[grepAt + 1];
-  const titleChanged = title !== undefined && marks !== undefined && redactHomeText(title, marks) !== title;
-  if (!titleChanged) return printed;
-  if (grepAt === -1) return printed;
+  // The grep is escaped, so `\/home\/name` would not match a home. Check the
+  // unescaped title, and omit `-g` when that title contains one.
+  const visibleTitle = title?.replaceAll('\\/', '/');
+  const titleChanged = visibleTitle !== undefined && redact(visibleTitle) !== visibleTitle;
+  if (!titleChanged) return redact([...prefix, ...args].map(show).join(' '));
   const kept = args.filter((part, index) => part !== '-g' && args[index - 1] !== '-g');
-  const again = ['npx', 'playwright', 'test', ...kept].map((part) => shellQuote(part)).join(' ');
-  const shown = marks ? redactHomeText(again, marks) : redactHomeText(again);
+  const shown = redact([...prefix, ...kept].map(show).join(' '));
   return `${shown} (the title was redacted, so -g is omitted here)`;
 }
 
-export function shellCommand(reportPath: string, id: string): string {
-  return `qa-core-flaky rerun --from ${shellQuote(reportPath)} --only ${shellQuote(id)}`;
+export function shellCommand(reportPath: string, id: string, configFile?: string): string {
+  const parts = ['qa-core-flaky rerun', '--from', shellQuote(reportPath), '--only', shellQuote(id)];
+  if (configFile) parts.push('--config', shellQuote(configFile));
+  return parts.join(' ');
+}
+
+function escapeSlash(value: string): string {
+  return escapeRegex(value).replaceAll('/', '\\/');
 }
 
 function buildRuns(
@@ -176,12 +247,15 @@ function buildRuns(
     if (mode === 'in-order') {
       const seen = new Set<string>();
       for (const record of tests) {
-        if (seen.has(record.file)) continue;
-        seen.add(record.file);
+        const key = `${record.project}\0${record.file}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
         assertRunnableFile(record.file);
+        assertProject(record.project);
         runs.push({
           mode,
           file: record.file,
+          project: record.project,
           runIndex: 0,
           commitSha: record.source.commitSha,
           args: buildPlaywrightArgs({
@@ -198,18 +272,21 @@ function buildRuns(
     }
     for (const record of tests) {
       assertRunnableFile(record.file);
-      const title = record.titlePath.join(' ');
+      assertProject(record.project);
       const copies = mode === 'isolated' ? times : 1;
       for (let runIndex = 0; runIndex < copies; runIndex += 1) {
         runs.push({
           mode,
           testId: record.id,
           file: record.file,
+          project: record.project,
+          line: record.line,
           runIndex,
           commitSha: record.source.commitSha,
           args: buildPlaywrightArgs({
             file: record.file,
-            title,
+            titlePath: record.titlePath,
+            line: record.line,
             mode,
             times,
             config,
@@ -229,10 +306,16 @@ function assertRunnableFile(file: string): void {
   }
 }
 
-function readPositive(value: number | undefined, fallback: number, name: string): number {
+function assertProject(project: string): void {
+  if (project.includes('*') || project.includes('?')) {
+    throw new Error(`Project name ${project} contains a wildcard. Pass the exact project name.`);
+  }
+}
+
+function readPositive(value: number | undefined, fallback: number, name: string, max: number): number {
   const picked = value === undefined ? fallback : value;
-  if (!Number.isSafeInteger(picked) || picked < 1) {
-    throw new Error(`${name} must be a positive integer`);
+  if (!Number.isSafeInteger(picked) || picked < 1 || picked > max) {
+    throw new Error(`${name} must be from 1 to ${max}. Got ${String(value)}.`);
   }
   return picked;
 }
@@ -240,8 +323,11 @@ function readPositive(value: number | undefined, fallback: number, name: string)
 function readModes(modes: readonly RerunMode[] | undefined): RerunMode[] {
   const picked = modes === undefined ? [...DEFAULT_MODES] : [...modes];
   if (picked.length === 0) throw new Error('At least one mode is required');
+  const seen = new Set<string>();
   for (const mode of picked) {
     if (!MODE_NAMES.includes(mode)) throw new Error(`Unknown mode ${mode}`);
+    if (seen.has(mode)) throw new Error(`Duplicate mode ${mode}`);
+    seen.add(mode);
   }
   return picked;
 }

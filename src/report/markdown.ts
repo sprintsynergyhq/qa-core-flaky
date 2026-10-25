@@ -21,7 +21,7 @@ export function renderTriageMarkdown(report: TriageReport): string {
 
 function renderEntry(entry: TriageEntry): string[] {
   const lines = [
-    `## ${escapeHtml(entry.id)}`,
+    `## ${cell(entry.id)}`,
     '',
     `Verdict: ${entry.verdict}`,
     `Confidence: ${entry.confidence}`,
@@ -89,7 +89,11 @@ function renderNextStep(nextStep: string): string {
 }
 
 function cell(value: string): string {
-  return escapeHtml(value).replaceAll('|', '\\|');
+  return escapeHtml(value)
+    .replaceAll('|', '\\|')
+    .replaceAll('\r\n', '\\n')
+    .replaceAll('\n', '\\n')
+    .replaceAll('\r', '\\n');
 }
 
 /**

@@ -103,7 +103,7 @@ export type TriageEntry = {
   suggestedFix: string;
   /** Reserved for a later heal diff. Always null in this version. */
   healProposal: null;
-  /** A sentence that contains `qa-core-flaky rerun --from <report> --only <id>`. */
+  /** A sentence that contains `qa-core-flaky rerun --from <report> --only <id>`, plus `--config` when the report recorded one. */
   nextStep: string;
   /**
    * Set when every rerun attempt passed.

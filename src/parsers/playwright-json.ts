@@ -53,7 +53,7 @@ export function parsePlaywrightJson(
   const warnings: string[] = [];
   const records: TestRecord[] = [];
   const rawFiles: string[] = [];
-  const source = buildSource(reportPath, meta, readGitCommit(data));
+  const source = buildSource(reportPath, meta, readGitCommit(data), readConfigFile(data));
 
   for (const suite of suites) {
     walkSuite(suite, [], undefined, undefined, rootDir, source, reportPath, records, rawFiles, warnings);
@@ -80,7 +80,12 @@ function parseJson(text: string, reportPath: string): JsonObject {
   return value;
 }
 
-function buildSource(reportPath: string, meta: Partial<SourceInfo> | undefined, gitCommit: string | undefined): SourceInfo {
+function buildSource(
+  reportPath: string,
+  meta: Partial<SourceInfo> | undefined,
+  gitCommit: string | undefined,
+  configFile: string | undefined,
+): SourceInfo {
   const source: SourceInfo = {
     format: 'playwright-json',
     reportPath,
@@ -90,7 +95,19 @@ function buildSource(reportPath: string, meta: Partial<SourceInfo> | undefined, 
   if (commit) source.commitSha = commit;
   if (meta?.branch !== undefined) source.branch = meta.branch;
   if (meta?.createdAt !== undefined) source.createdAt = meta.createdAt;
+  if (meta?.configFile) source.configFile = meta.configFile;
+  else if (configFile) source.configFile = configFile;
   return source;
+}
+
+function readConfigFile(data: JsonObject): string | undefined {
+  const config = data.config;
+  if (!isObject(config)) return undefined;
+  const file = config.configFile;
+  if (typeof file !== 'string') return undefined;
+  const trimmed = file.trim();
+  if (trimmed === '' || trimmed === '.') return undefined;
+  return trimmed;
 }
 
 /** Playwright JSON stores the commit on `config.metadata.gitCommit`, or on the top-level metadata. */

@@ -249,8 +249,9 @@ export type HomeMarks = ReadonlyMap<string, string>;
  * `locator('...')` or `locator("...")` is a CSS combinator and stays.
  * A path boundary may be `,`, `;`, `<`, or `>`.
  * `file://localhost/home/...` is a home. `../../../home/bob/...` is a home.
- * `\\server\Users\bob`, `\\?\UNC\server\Users\bob`, `smb://server/Users/bob`,
- * `x\\Users\\bob`, and `\\home\\alice` are homes. The server name stays.
+ * `\\server\Users\bob`, `\\?\UNC\server\Users\bob`, `//server/Users/bob`,
+ * `smb://server/Users/bob`, `SMB://server/users/bob`, `x\\Users\\bob`, and
+ * `\\home\\alice` are homes. The server name stays. `smb` matches in any case.
  * A path tail stops at `;`, so `;C:\\Windows` keeps its backslashes.
  * A quoted mark that the text already contains, such as `"<home~2>"`, is
  * tagged `<text:home~2>` before numbering so it does not look like a
@@ -388,7 +389,7 @@ function matchTildeHome(text: string, index: number): HomeMatch | undefined {
 
 /** True when `index` sits inside `locator('...')` or `locator("...")`. */
 function insideQuotedLocator(text: string, index: number): boolean {
-  const before = text.slice(0, index);
+  const before = lookbehind(text, index, 8000);
   const open = before.lastIndexOf('locator(');
   if (open === -1) return false;
   const afterCall = before.slice(open + 'locator('.length);
@@ -456,10 +457,18 @@ function isDriveLetter(text: string, index: number): boolean {
   return !/[A-Za-z0-9]/.test(text[index - 1] ?? '');
 }
 
+/** A short tail keeps each home check O(1). The full prefix would be quadratic. */
+function lookbehind(text: string, index: number, width = 240): string {
+  return text.slice(Math.max(0, index - width), index);
+}
+
 function slashContextOk(text: string, index: number): boolean {
-  if (isKnownHomePrefix(text.slice(0, index))) return true;
-  if (endsWithAt(text, index, 'file://localhost')) return true;
-  if (/(?:^|[\s"'=(`\[{:,;<>])smb:\/\/[^/\\]+$/.test(text.slice(0, index))) return true;
+  const before = lookbehind(text, index);
+  if (isKnownHomePrefix(before)) return true;
+  if (before.endsWith('file://localhost')) return true;
+  // `//server/Users/...` and `\\server\Users\...` keep the server.
+  if (/(?:^|[\s"'=(`\[{:,;<>])[/\\]{2}[^/\\]+$/.test(before)) return true;
+  if (/(?:^|[\s"'=(`\[{:,;<>])smb:\/\/[^/\\]+$/i.test(before)) return true;
   return isPathStart(text, index);
 }
 
@@ -501,10 +510,11 @@ function homeToken(text: string, index: number, hasSep: boolean, mark: string): 
 }
 
 /**
- * Words that are not a second name token when no separator follows.
- * The first token is always the username. One following word is part of
- * the name unless it is in this list. Further words stay, so prose is not
- * eaten and a lowercase surname is not left behind.
+ * Words that end a display name when no separator follows.
+ * Every earlier token is part of the name, including a lowercase surname
+ * and a 3- or 4-token name. A word in this list stops the name, so
+ * `Failed Again` stays. This hides extra words on purpose so no part of
+ * a name leaks.
  */
 const SECOND_WORD_PROSE = new Set([
   'a',
@@ -534,7 +544,6 @@ const SECOND_WORD_PROSE = new Set([
 function readUsernameEnd(text: string, start: number): number {
   const allowSpace = separatorFollowsOnLine(text, start);
   let index = start;
-  let words = 1;
   while (index < text.length) {
     const ch = text[index] ?? '';
     if (ch === '/' || ch === '\\' || ch === '\n' || ch === '\r') break;
@@ -543,12 +552,10 @@ function readUsernameEnd(text: string, start: number): number {
         index += 1;
         continue;
       }
-      if (words >= 2) break;
-      const word = /^[ \t]+(\p{L}[\p{L}\p{M}]*)/u.exec(text.slice(index));
+      const word = /^[ \t]+(\p{L}[\p{L}\p{M}0-9_'.-]*)/u.exec(text.slice(index));
       const token = word?.[1];
       if (!word || token === undefined || SECOND_WORD_PROSE.has(token.toLowerCase())) break;
       index += word[0].length;
-      words += 1;
       continue;
     }
     if (
@@ -608,7 +615,7 @@ function isPathStart(text: string, index: number): boolean {
   const prev = text[index - 1] ?? '';
   if (!/[\s"'=(`\[{:,;<>]/.test(prev)) return false;
   if (/\s/.test(prev)) {
-    const method = /([A-Za-z]+)\s+$/.exec(text.slice(0, index));
+    const method = /([A-Za-z]+)\s+$/.exec(lookbehind(text, index, 80));
     if (method && /^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(method[1] ?? '')) return false;
   }
   return true;

@@ -757,6 +757,10 @@ test('home folders match in any case, and UNC and SMB keep the server', () => {
   assert.equal(redactHomeText("locator('li ~li >> nth=1')"), "locator('li ~li >> nth=1')");
   assert.equal(redactHomeText('C:\\Users\\Jo Smith Failed Again'), '<home> Failed Again');
   assert.equal(redactHomeText('C:\\Users\\jo smith failed'), '<home> failed');
+  assert.equal(redactHomeText('C:\\Users\\Mary Ann Lee failed'), '<home> failed');
+  assert.equal(redactHomeText('C:\\Users\\Jo De La Cruz failed'), '<home> failed');
+  assert.equal(redactHomeText('//server/Users/bob/x'), '//server<home>/x');
+  assert.equal(redactHomeText('SMB://server/users/bob/a'), 'SMB://server<home>/a');
 });
 
 test('a quoted home mark does not collide with a generated mark', () => {
@@ -773,6 +777,15 @@ test('homeMarks stays linear for many usernames', () => {
   const started = Date.now();
   const marks = homeMarks(lines);
   assert.equal(Date.now() - started < 2000, true);
+  assert.equal(marks.size, 20000);
+});
+
+test('homeMarks stays linear on one line of 20000 homes', () => {
+  const line = Array.from({ length: 20000 }, (_item, index) => `/home/user${index}/a`).join(' ');
+  const started = Date.now();
+  const marks = homeMarks([line]);
+  const elapsed = Date.now() - started;
+  assert.equal(elapsed < 2000, true, `elapsed ${elapsed}`);
   assert.equal(marks.size, 20000);
 });
 

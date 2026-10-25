@@ -12,7 +12,8 @@ import { parseJunit } from './parsers/junit.js';
 import { parsePlaywrightJson } from './parsers/playwright-json.js';
 import { homeMarks, redactHomeText } from './report-path.js';
 import { redactParseResult } from './redact.js';
-import { executePlan } from './rerun/run.js';
+import { writeReportPair } from './report/pair.js';
+import { executePlan, guardPipe } from './rerun/run.js';
 import { formatCap, planReruns } from './rerun/plan.js';
 import { renderTriageMarkdown } from './report/markdown.js';
 import { buildTriageReport, renderTriageJson } from './report/json.js';
@@ -65,11 +66,13 @@ Options:
   --timestamp                 triage: include generatedAt. Output then changes every run
   --test-timeout <ms>         Test timeout for the near-timeout rule
   --from <report>             rerun: Playwright JSON, JUnit, or parse JSON
-  --times <n>                 rerun: repeat and isolated count (default 5)
-  --modes <list>              rerun: repeat, isolated, in-order (default repeat,isolated)
+  --times <n>                 rerun: repeat and isolated count (default 5, from 1 to 20)
+  --modes <list>              rerun: repeat, isolated, in-order (default repeat,isolated).
+                              A mode cannot be listed twice.
   --config <file>             rerun: Playwright config passed to the test command
   --only <id>                 rerun: limit to this test id. Repeat for more than one.
-  --max-tests <n>             rerun: how many failing tests to keep (default 20)
+  --max-tests <n>             rerun: how many failing tests to keep (default 20, from 1 to 50).
+                              The plan allows at most 400 commands.
   -h, --help                  Show this help
   --version                   Print the version
 `;
@@ -97,6 +100,8 @@ type FlagValues = {
 };
 
 function main(): void {
+  guardPipe(process.stdout);
+  guardPipe(process.stderr);
   try {
     const pending = run(process.argv.slice(2));
     if (pending instanceof Promise) {
@@ -290,6 +295,12 @@ async function runRerun(extra: readonly string[], values: FlagValues): Promise<v
       fail(redactHomeText(oneLine(detail)));
     }
   }
+  if (values.config) {
+    merged = merged.map((record) => ({
+      ...record,
+      source: { ...record.source, configFile: values.config },
+    }));
+  }
   const report = buildTriageReport(merged, {
     testTimeoutMs: readTimeout(values['test-timeout']),
     timestamp: values.timestamp === true ? new Date().toISOString() : undefined,
@@ -379,6 +390,7 @@ function readModesFlag(value: string | undefined): RerunMode[] | undefined {
     if (!allowed.includes(mode as RerunMode)) {
       fail(`Unknown mode ${mode}. Expected repeat, isolated, or in-order.`);
     }
+    if (picked.includes(mode as RerunMode)) fail(`Duplicate mode ${mode}`);
     picked.push(mode as RerunMode);
   }
   return picked;
@@ -405,61 +417,19 @@ function readFailOn(value: string | undefined): 'findings' | 'never' {
  * not a regular file, such as a directory named triage.json, is left as it
  * is. When both destinations are missing or are files, they are moved aside,
  * the temp names are renamed into place, and the copies are removed. If the
- * second rename fails, the previous files are moved back.
+ * second rename fails, the previous files are moved back. A new file created
+ * in an empty directory is removed, so the pair is not left half written.
  * A directory under /proc is not detected here. Node can hang while creating
  * one, which is documented on --out-dir instead of probed.
  */
 function writeTriagePair(dir: string, json: string, markdown: string): void {
   if (dir.trim() === '') fail('The output directory is empty.');
-  const resolved = path.resolve(dir);
-  const jsonPath = path.join(resolved, 'triage.json');
-  const mdPath = path.join(resolved, 'triage.md');
-  const jsonTmp = path.join(resolved, `.triage.json.${process.pid}.tmp`);
-  const mdTmp = path.join(resolved, `.triage.md.${process.pid}.tmp`);
-  const jsonBak = path.join(resolved, `.triage.json.${process.pid}.bak`);
-  const mdBak = path.join(resolved, `.triage.md.${process.pid}.bak`);
-  let mdMoved = false;
-  let jsonMoved = false;
   try {
-    fs.mkdirSync(resolved, { recursive: true });
-    fs.writeFileSync(mdTmp, markdown);
-    fs.writeFileSync(jsonTmp, json);
-    if (blocksReplace(mdPath) || blocksReplace(jsonPath)) {
-      throw new Error('triage.json and triage.md must be files');
-    }
-    mdMoved = moveAside(mdPath, mdBak);
-    jsonMoved = moveAside(jsonPath, jsonBak);
-    fs.renameSync(mdTmp, mdPath);
-    fs.renameSync(jsonTmp, jsonPath);
-    fs.rmSync(mdBak, { force: true });
-    fs.rmSync(jsonBak, { force: true });
+    writeReportPair(dir, json, markdown);
   } catch (error) {
-    restoreMoved(mdPath, mdBak, mdMoved);
-    restoreMoved(jsonPath, jsonBak, jsonMoved);
-    fs.rmSync(jsonTmp, { force: true });
-    fs.rmSync(mdTmp, { force: true });
-    fs.rmSync(jsonBak, { force: true });
-    fs.rmSync(mdBak, { force: true });
     const detail = error instanceof Error ? error.message : 'unknown error';
     fail(`Cannot write ${dir}: ${oneLine(detail)}`);
   }
-}
-
-function blocksReplace(file: string): boolean {
-  if (!fs.existsSync(file)) return false;
-  return !fs.statSync(file).isFile();
-}
-
-function moveAside(file: string, bak: string): boolean {
-  if (!fs.existsSync(file)) return false;
-  fs.renameSync(file, bak);
-  return true;
-}
-
-function restoreMoved(file: string, bak: string, moved: boolean): void {
-  if (!moved || !fs.existsSync(bak)) return;
-  if (fs.existsSync(file)) fs.rmSync(file, { force: true });
-  fs.renameSync(bak, file);
 }
 
 function formatCauses(result: ParseResult, testTimeoutMs: number | undefined, asJson: boolean): string {
@@ -613,7 +583,12 @@ class ExitRequest extends Error {
 }
 
 function fail(message: string): never {
-  process.stderr.write(`${oneLine(message)}\n`);
+  try {
+    process.stderr.write(`${oneLine(message)}\n`);
+  } catch (error) {
+    const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : '';
+    if (code !== 'EPIPE' && code !== 'ERR_STREAM_PREMATURE_CLOSE') throw error;
+  }
   process.exitCode = 1;
   throw new ExitRequest();
 }

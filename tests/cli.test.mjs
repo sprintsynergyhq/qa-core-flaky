@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { redactHomeText } from '../dist/index.js';
+import { redactHomeText, writeReportPair } from '../dist/index.js';
 
 const cli = 'dist/cli.js';
 const fixture = 'fixtures/reports/pw-1.60.0-outcomes.json';
@@ -489,6 +489,36 @@ test('a pretty copy, a compact copy, and a CRLF copy are one run', (t) => {
   const entry = JSON.parse(result.stdout).entries[0];
   assert.equal(entry.attempts.total, 1);
   assert.equal(entry.verdict, 'needs-more-runs');
+});
+
+test('a failed json rename in an empty folder removes the new markdown', (t) => {
+  const dir = keepTemp(t, 'qa-core-flaky-eio-');
+  const renameSync = (from, to) => {
+    if (to.endsWith(`${path.sep}triage.json`)) {
+      const error = new Error('EIO');
+      error.code = 'EIO';
+      throw error;
+    }
+    fs.renameSync(from, to);
+  };
+  assert.throws(() => writeReportPair(dir, '{"ok":true}\n', '# T\n', { renameSync }), /EIO/);
+  assert.equal(fs.existsSync(path.join(dir, 'triage.md')), false);
+  assert.equal(fs.existsSync(path.join(dir, 'triage.json')), false);
+  assert.deepEqual(fs.readdirSync(dir), []);
+});
+
+test('rerun rejects a huge times value, a huge max-tests value, and a repeated mode', () => {
+  const times = run(['rerun', '--from', fixture, '--times', '1000000', '--fail-on', 'never']);
+  assert.equal(times.status, 1);
+  assert.equal(times.stdout, '');
+  assert.match(times.stderr, /times must be from 1 to 20/);
+  assert.match(times.stderr, /1000000/);
+  const maxTests = run(['rerun', '--from', fixture, '--max-tests', '1000000', '--fail-on', 'never']);
+  assert.equal(maxTests.status, 1);
+  assert.match(maxTests.stderr, /max-tests must be from 1 to 50/);
+  const modes = run(['rerun', '--from', fixture, '--modes', 'repeat,repeat', '--fail-on', 'never']);
+  assert.equal(modes.status, 1);
+  assert.match(modes.stderr, /Duplicate mode repeat/);
 });
 
 test('a failed rename keeps the previous triage pair', (t) => {

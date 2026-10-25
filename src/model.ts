@@ -98,6 +98,8 @@ export type SourceInfo = {
   branch?: string;
   /** Creation time, when the caller passes one. */
   createdAt?: string;
+  /** Playwright config path recorded on the report, when it has one. */
+  configFile?: string;
 };
 
 /** One test from a report, with every retry attempt kept. */

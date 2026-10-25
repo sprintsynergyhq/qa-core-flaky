@@ -3,7 +3,7 @@ import type { Cause, CauseFinding } from '../causes/types.js';
 import { suggestFix } from '../fixes/templates.js';
 import type { Attempt, RerunMode, TestRecord } from '../model.js';
 import { homeMarks, redactHomeText } from '../report-path.js';
-import { shellQuote } from '../rerun/quote.js';
+import { shellCommand } from '../rerun/plan.js';
 import { collapseRunRecords, decideVerdict, VERDICT_ORDER } from '../verdict.js';
 import type { RerunCounts, TriageAttempts, TriageEntry, TriageReport } from './schema.js';
 
@@ -80,12 +80,14 @@ function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefi
   // the error text changes. Later usernames are `<home~2>`, `<home~3>`.
   const rawEvidence = flattenEvidence(ordered, decision.note);
   const titleRaw = base.titlePath[base.titlePath.length - 1] ?? base.id;
+  const configFile = base.source.configFile;
   const marks = homeMarks([
     base.id,
     titleRaw,
     base.file,
     ...rawEvidence,
     ...ordered.flatMap((finding) => finding.evidence),
+    ...(configFile ? [configFile] : []),
   ]);
   const redact = (value: string) => redactHomeText(value, marks);
   const evidence = rawEvidence.map((line) => redact(line));
@@ -115,7 +117,7 @@ function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefi
     },
     suggestedFix: suggestFix(decision.ruleIds),
     healProposal: null,
-    nextStep: `Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from ${shellQuote(reportPath)} --only ${shellQuote(id)}`,
+    nextStep: `Review the suggested fix. To see the test again, run: ${shellCommand(reportPath, id, configFile ? redact(configFile) : undefined)}`,
     note: decision.note,
     llm: null,
     review: {
