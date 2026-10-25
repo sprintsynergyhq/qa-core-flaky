@@ -290,6 +290,41 @@ test('a root-shaped absolute path is rewritten when the next character is not a 
   }
 });
 
+test('Unicode home paths and CI work folders are rewritten when JUnit has no root', () => {
+  const input = [
+    '/home/bob/file#1.json',
+    '/home/józef/secret.txt',
+    '/Users/李/a.ts',
+    '/__w/repo/a.ts',
+    '/github/workspace/repo/a.ts',
+    '/Volumes/CI/a.ts',
+    '/agent/_work/1/a.ts',
+    '/app/foo/bar.json',
+    '/data/foo/bar.json',
+  ].join(' ');
+  // No report root, so a blocked token such as file#1.json stays absolute.
+  // A path with no blocked character is still rewritten, including Unicode names.
+  const expected = [
+    '/home/bob/file#1.json',
+    'home/józef/secret.txt',
+    'Users/李/a.ts',
+    '__w/repo/a.ts',
+    'github/workspace/repo/a.ts',
+    'Volumes/CI/a.ts',
+    'agent/_work/1/a.ts',
+    '/app/foo/bar.json',
+    '/data/foo/bar.json',
+  ].join(' ');
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="paths" classname="a.spec.ts">
+      <failure message="${input}">kept</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/blocked.xml');
+  const message = result.records[0].attempts[0].errors[0].message;
+  assert.equal(message, expected);
+});
+
 test('queries, globs, url paths, and prose stay as written', () => {
   const input = [
     'Received string: "/api/search?q=1&x=2"',

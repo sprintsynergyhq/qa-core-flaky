@@ -519,6 +519,45 @@ test('a report root followed by a non-name character is rewritten', () => {
   }
 });
 
+test('a known folder is rewritten up to a blocked character, including Unicode names and CI roots', () => {
+  const input = [
+    'home /home/bob/file#1.json',
+    'list /home/bob/report,final.json',
+    'user /home/józef/secret.txt',
+    'mac /Users/李/a.ts',
+    'w /__w/repo/a.ts',
+    'gh /github/workspace/repo/a.ts',
+    'vol /Volumes/CI/a.ts',
+    'agent /agent/_work/1/a.ts',
+    'app /app/foo/bar.json',
+    'data /data/foo/bar.json',
+    'glob /src/**/*.ts',
+  ].join(' ');
+  const expected = [
+    'home ../../home/bob/file#1.json',
+    'list ../../home/bob/report,final.json',
+    'user ../../home/józef/secret.txt',
+    'mac ../../Users/李/a.ts',
+    'w ../../__w/repo/a.ts',
+    'gh ../../github/workspace/repo/a.ts',
+    'vol ../../Volumes/CI/a.ts',
+    'agent ../../agent/_work/1/a.ts',
+    'app /app/foo/bar.json',
+    'data /data/foo/bar.json',
+    'glob /src/**/*.ts',
+  ].join(' ');
+  const result = parsePlaywrightJson(errorReport(input), 'outside-blocked.json');
+  const message = result.records[0].attempts[0].errors[0].message;
+  assert.equal(message, expected);
+  for (const absolute of ['/home/bob', '/home/józef', '/Users/李', '/__w/', '/github/workspace/', '/Volumes/CI', '/agent/_work']) {
+    assert.equal(leaksAbsolute(message, absolute), false, absolute);
+  }
+  for (const warning of result.warnings) {
+    assert.equal(leaksAbsolute(warning, '/home/bob'), false);
+    assert.equal(leaksAbsolute(warning, '/home/józef'), false);
+  }
+});
+
 test('queries, globs, url paths, and prose stay as written', () => {
   const input = [
     'Received string: "/api/search?q=1&x=2"',

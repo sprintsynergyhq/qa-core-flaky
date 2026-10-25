@@ -6,10 +6,11 @@ const NET = /net::ERR_[A-Z0-9_]+|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|soc
 /**
  * An HTTP status from 500 to 599. A bare number is not enough: `5000ms` and
  * an expected value of 512 do not match. The status needs a status word, an
- * HTTP reason phrase, or an `apiRequestContext` error.
+ * HTTP reason phrase, an `apiRequestContext` error, or a `Received:` line
+ * whose value is the status (`Received: 503`, including a quoted `503`).
  */
 const HTTP_5XX =
-  /\b(?:status(?:\s+code)?|HTTP\/\d(?:\.\d)?)\s*[:=]?\s*5\d\d\b|\b5\d\d\s+(?:Internal Server Error|Not Implemented|Bad Gateway|Service Unavailable|Gateway Timeout|HTTP Version Not Supported)\b|apiRequestContext\.\w+:\s*5\d\d\b/i;
+  /\b(?:status(?:\s+code)?|HTTP\/\d(?:\.\d)?)\s*[:=]?\s*5\d\d\b|\b5\d\d\s+(?:Internal Server Error|Not Implemented|Bad Gateway|Service Unavailable|Gateway Timeout|HTTP Version Not Supported)\b|apiRequestContext\.\w+:\s*5\d\d\b|^[ \t]*Received:[ \t]*"?5\d\d"?(?=$|[\s"])/i;
 
 const LAUNCH = /browserType\.launch/;
 const CLOSED = /Target page, context or browser has been closed/;

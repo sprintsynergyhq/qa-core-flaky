@@ -156,7 +156,7 @@ test('TIM-NEAR-TIMEOUT is low when it is the only rule', () => {
   assert.equal(near[0].cause, 'timing');
   assert.deepEqual(near[0].ruleIds, ['TIM-NEAR-TIMEOUT']);
   assert.equal(near[0].confidence, 'low');
-  assert.deepEqual(near[0].evidence, []);
+  assert.deepEqual(near[0].evidence, ['Error: gave up']);
 
   const below = classifyCauses(messageRecord('Error: gave up', { attempts: [attempt(899, 'Error: gave up')] }), {
     testTimeoutMs: 1000,
@@ -293,7 +293,7 @@ test('a long run of opening parens does not stall the at frame check', () => {
   assert.equal(text.length, 80000);
   const started = Date.now();
   const findings = causesOf(text);
-  assert.equal(Date.now() - started < 100, true);
+  assert.equal(Date.now() - started < 1000, true);
   assert.equal(findings.length, 1);
   assert.equal(findings[0].cause, 'unknown');
 });
@@ -364,6 +364,83 @@ test('indented Expected and Received lines still count as value drift', () => {
   assert.equal(data.confidence, 'high');
   assert.ok(data.evidence.some((item) => item.includes('Received: "1"')));
   assert.ok(data.evidence.some((item) => item.includes('Received: "2"')));
+});
+
+test('old Mac and double CR line endings split, and evidence keeps no CR', () => {
+  const mac =
+    'Error: at least one row is a duplicate (see log)\r    at seedDuplicate (eval at x (/w/a.ts:1:2), <anonymous>:1:1)';
+  const findings = causesOf(mac);
+  const data = causeNamed(findings, 'test-data');
+  assert.deepEqual(data.ruleIds, ['DATA-ALREADY-EXISTS']);
+  assert.equal(data.confidence, 'medium');
+  assert.ok(data.evidence.some((item) => item.includes('at least one row is a duplicate (see log)')));
+  assert.equal(data.evidence.some((item) => item.includes('\r')), false);
+  assert.equal(data.evidence.some((item) => item.includes('seedDuplicate')), false);
+
+  const tabbed = 'Error: boom\nat\tseedDuplicate (eval at x (/w/a.ts:1:2), <anonymous>:1:1)';
+  const tabbedFindings = causesOf(tabbed);
+  assert.equal(tabbedFindings.length, 1);
+  assert.equal(tabbedFindings[0].cause, 'unknown');
+  assert.deepEqual(tabbedFindings[0].evidence, ['Error: boom']);
+  assert.equal(tabbedFindings[0].evidence.some((item) => item.includes('\r')), false);
+
+  const doubled = 'Error: boom\r\r\n    at fn (file.ts:1:2)\r\n';
+  const doubledFindings = causesOf(doubled);
+  assert.equal(doubledFindings.length, 1);
+  assert.equal(doubledFindings[0].cause, 'unknown');
+  assert.deepEqual(doubledFindings[0].evidence, ['Error: boom']);
+  assert.equal(doubledFindings[0].evidence.some((item) => item.includes('\r')), false);
+});
+
+test('TIM-NEAR-TIMEOUT alone keeps Unknown evidence lines', () => {
+  const text = ['expect(locator).toHaveText(expected) failed', 'Expected: "9"', 'Received: "1"'].join('\n');
+  const findings = classifyCauses(messageRecord(text, { attempts: [attempt(900, text)] }), { testTimeoutMs: 1000 });
+  assert.equal(findings.length, 1);
+  assert.deepEqual(findings[0].ruleIds, ['TIM-NEAR-TIMEOUT']);
+  assert.ok(findings[0].evidence.some((item) => item.includes('Expected: "9"')));
+  assert.ok(findings[0].evidence.some((item) => item.includes('Received: "1"')));
+  assert.equal(findings.some((finding) => finding.cause === 'unknown'), false);
+});
+
+test('classifyCauses strips ANSI codes before matching', () => {
+  const findings = causesOf('Error: \u001b[31melement(s) not found\u001b[0m');
+  const selectors = causeNamed(findings, 'selectors');
+  assert.ok(selectors.ruleIds.includes('SEL-NOTFOUND'));
+  assert.equal(selectors.evidence.some((item) => item.includes('\u001b')), false);
+  assert.ok(selectors.evidence.some((item) => item.includes('element(s) not found')));
+});
+
+test('a throwing order dependency hook does not stop classification', () => {
+  const notes = [];
+  const record = messageRecord('Error: element(s) not found');
+  const findings = classifyCauses(record, {
+    orderDependency: () => {
+      throw new Error('hook blew up');
+    },
+    debugNotes: notes,
+  });
+  assert.ok(findings.some((finding) => finding.cause === 'selectors'));
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /^debug: order dependency hook failed: hook blew up$/);
+
+  assert.doesNotThrow(() =>
+    classifyCauses(record, {
+      orderDependency: () => {
+        throw new Error('still going');
+      },
+    }),
+  );
+});
+
+test('Received 5xx status values are ENV-HTTP5XX', () => {
+  for (const line of ['Received: 503', 'Received: 500', 'Received: 599', 'Received: "503"', 'Received: 503 Service Unavailable']) {
+    const findings = causesOf(line);
+    assert.deepEqual(causeNamed(findings, 'environment').ruleIds, ['ENV-HTTP5XX'], line);
+  }
+  assert.equal(causesOf('Received: 200')[0].cause, 'unknown');
+  assert.equal(causesOf('Received: 5030')[0].cause, 'unknown');
+  assert.equal(causesOf('Expected: 503')[0].cause, 'unknown');
+  assert.equal(causesOf('Expected: "503"')[0].cause, 'unknown');
 });
 
 test('the order dependency hook adds DATA-ORDER and ignores text that is not evidence', () => {

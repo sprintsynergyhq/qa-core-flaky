@@ -19,13 +19,21 @@
  * outside the root is rewritten only when it starts with a known filesystem
  * folder (`/home/`, `/Users/`, `/tmp/`, `/var/`, `/runner/`, `/srv/`,
  * `/opt/`, `/etc/`, `/usr/`, `/root/`, `/mnt/`, `/private/`, `/workspace/`,
- * `/builds/`), when it has a drive letter and a segment, or when it ends in
- * a source location such as `file.ts:12` or `file.ts:12:3`. Those outside
- * tokens may contain `%`, `~`, `$`, `&`, `!`, `@`, and `+`. A token that
- * contains `?`, `*`, `#`, `=`, or `,` stays as written, so a query, a glob,
- * and a comma list are not paths. A single segment such as `/var/`,
- * `/Ready/`, or `"/inventory.html"`, a quoted URL path such as
- * `"/cart/checkout.html"`, and prose such as `/and/or` stay as written.
+ * `/builds/`, `/__w/`, `/github/workspace/`, `/Volumes/`, `/agent/_work/`),
+ * when it has a drive letter and a segment, or when it ends in a source
+ * location such as `file.ts:12` or `file.ts:12:3`. `/app/` and `/data/` are
+ * not known folders. Those outside tokens may contain `%`, `~`, `$`, `&`,
+ * `!`, `@`, `+`, and Unicode letters, so `/home/józef/...` and `/Users/李/...`
+ * are paths. A token that contains `?`, `*`, `#`, `=`, or `,` and does not
+ * start with a known folder stays as written, so a query, a glob, and a
+ * comma list are not paths. When a report root is known, a token outside
+ * that root that starts with a known folder is rewritten up to the first of
+ * those characters, and the rest is kept, so `/home/bob/file#1.json` does
+ * not leave the absolute `/home/bob` path in the text. Without a report
+ * root, a token that contains one of those characters stays as written, so
+ * `query /home/ci/w?` is unchanged. A single segment such as `/var/`, `/Ready/`, or
+ * `"/inventory.html"`, a quoted URL path such as `"/cart/checkout.html"`,
+ * and prose such as `/and/or` stay as written.
  * `http://` and `https://` URLs are left alone, including a query such as
  * `?x=/home/a` and a root prefix that sits inside the URL. A token may start
  * after whitespace, a quote, `=`, `(`, a backtick, `[`, `{`, `:`, or
@@ -75,13 +83,17 @@ const FILESYSTEM_PREFIXES = [
   '/private/',
   '/workspace/',
   '/builds/',
+  '/__w/',
+  '/github/workspace/',
+  '/Volumes/',
+  '/agent/_work/',
 ] as const;
 
 /** Query, glob, and list characters. A token that contains one is not a path. */
 const OUTSIDE_ROOT_BLOCKED = /[?*#=,]/;
 
-/** Base path characters plus `% ~ $ & ! @ +`. */
-const OUTSIDE_ROOT_SEGMENT = /^[A-Za-z0-9._+@%~$&!-]+$/;
+/** Base path characters, Unicode letters, and `% ~ $ & ! @ +`. */
+const OUTSIDE_ROOT_SEGMENT = /^[\p{L}\p{M}0-9._+@%~$&!-]+$/u;
 
 /**
  * Turn Windows separators into forward slashes.
@@ -150,13 +162,9 @@ export function relativizeText(text: string, rootDir: string | undefined, warnin
   const root = normalizeRoot(rootDir);
   const masked = maskUrls(text);
   const tokenized = masked.text.replace(TEXT_TOKEN, (full, prefix: string, token: string) => {
-    const parts = splitErrorToken(token);
-    if (parts.path === '') return full;
-    if (!shouldRewriteErrorToken(parts.path, root)) return full;
-    const portable = toPortablePath(parts.path, root, warnings);
-    if (portable === undefined) return full;
-    const body = portable === '' ? '.' : portable;
-    return `${prefix}${parts.lead}${body}${parts.trailing}`;
+    const rewritten = rewriteErrorToken(token, root, warnings);
+    if (rewritten === undefined) return full;
+    return `${prefix}${rewritten}`;
   });
   return unmaskUrls(replaceRootPrefixes(tokenized, root), masked.urls);
 }
@@ -198,6 +206,46 @@ function splitAbsolute(value: string): { drive: string; parts: string[] } {
 function stripAbsolutePrefix(value: string): string {
   const stripped = value.replace(/^[A-Za-z]:\//, '').replace(/^\/+/, '');
   return stripped === '' ? '.' : stripped;
+}
+
+/**
+ * Rewrite one error-text token, or return undefined to leave it as written.
+ * A token under the report root is rewritten whole, even when it contains
+ * `?`, `*`, `#`, `=`, or `,`. When a report root is known, any other token
+ * that starts with a known folder is rewritten only up to the first of
+ * those characters. Without a report root, a blocked token stays as written.
+ */
+function rewriteErrorToken(token: string, root: string | undefined, warnings: string[]): string | undefined {
+  const whole = rewritePathToken(token, root, warnings);
+  if (whole !== undefined) return whole;
+  // Without a report root, a blocked token stays as written. That keeps
+  // `query /home/ci/w?` and the other false-positive cases unchanged.
+  // With a root, a known folder outside that root is cut at the first
+  // blocked character so the absolute home path does not remain.
+  if (!root) return undefined;
+  const blockedAt = token.search(OUTSIDE_ROOT_BLOCKED);
+  if (blockedAt <= 0) return undefined;
+  const head = token.slice(0, blockedAt);
+  const suffix = token.slice(blockedAt);
+  const headPath = splitErrorToken(head).path;
+  if (!startsWithFilesystemPrefix(normalizeSlashes(headPath))) return undefined;
+  const shortened = rewritePathToken(head, root, warnings);
+  if (shortened === undefined) return undefined;
+  return `${shortened}${suffix}`;
+}
+
+function rewritePathToken(token: string, root: string | undefined, warnings: string[]): string | undefined {
+  const parts = splitErrorToken(token);
+  if (parts.path === '') return undefined;
+  if (!shouldRewriteErrorToken(parts.path, root)) return undefined;
+  const portable = toPortablePath(parts.path, root, warnings);
+  if (portable === undefined) return undefined;
+  const body = portable === '' ? '.' : portable;
+  return `${parts.lead}${body}${parts.trailing}`;
+}
+
+function startsWithFilesystemPrefix(value: string): boolean {
+  return FILESYSTEM_PREFIXES.some((prefix) => value.startsWith(prefix));
 }
 
 function splitErrorToken(token: string): { lead: string; path: string; trailing: string } {

@@ -13,7 +13,7 @@ The cause list follows the categories in the project plan: selectors, timing, te
 | evidence | Exact substrings of `message` or `stack`. Each one is at most 300 characters. Nothing is paraphrased. |
 | ruleIds | The rule ids that matched, in the order listed on this page |
 
-Message and stack are both read. A JUnit `message` attribute is often only the first line. The detailed text is the element body, stored on `stack`. A rule that matches only the stack still matches.
+Message and stack are both read. ANSI escape codes are removed first, including when the record still has them. Line endings are normalized before the rules run: `\r\n`, a lone `\r`, and `\r\r\n` become `\n`. Quoted evidence does not contain `\r`. A JUnit `message` attribute is often only the first line. The detailed text is the element body, stored on `stack`. A rule that matches only the stack still matches.
 
 A failed, timed out, or interrupted attempt with no error text does not throw. It is Unknown, rule `UNK-EMPTY`, with an empty evidence list.
 
@@ -27,7 +27,7 @@ Before any rule runs, these lines are removed:
 | --- | --- |
 | Playwright source frame | A line number, then a pipe, then source. A leading `>` is the same kind of line |
 | Caret line under a source frame | a line of spaces, a pipe, spaces, and `^` |
-| Stack frame | `    at fixtures/pw-project/tests/causes.spec.ts:21:1`, or a line that ends in `(...)`. Prose that only starts with `at`, such as `at least one row is a duplicate`, stays |
+| Stack frame | `at` followed by a space or a tab, then a frame that ends in `:line:col` or in parentheses that hold a location. Nested parentheses count, as in `at seedDuplicate (eval at x (/w/a.ts:1:2), <anonymous>:1:1)`. Prose that only starts with `at`, such as `at least one row is a duplicate (see log)`, stays |
 | JUnit header | `[chromium] › tests/a.spec.ts:21:1 › title` followed by a box-drawing rule |
 
 `DATA-ALREADY-EXISTS`, `ENV-NET`, and `ENV-HTTP5XX` also skip `Locator:` lines, `Expected:` lines, `waiting for ...` lines, and `locator resolved to ...` lines. A button named `Email already exists`, or `Expected: "503 Service Unavailable"`, is Unknown.
@@ -135,7 +135,7 @@ This is not a selector rule. The locator in the captured run resolved to the but
 | | |
 | --- | --- |
 | Check | The attempt status is failed, timed out, or interrupted, and `durationMs * 10 >= testTimeoutMs * 9`. The timeout is known only when the caller passes `testTimeoutMs` |
-| Example | No line of error text. The evidence list is empty |
+| Example | No line of its own. When this is the only finding, the Unknown evidence lines are included so that text is not hidden. When another rule also matches, those Unknown lines are not added |
 | Confidence | Low when it is the only timing rule. Medium together with `TIM-TEST-TIMEOUT`, because that pair is one group. High when an independent timing rule also matches |
 
 Duration is a field on the attempt. It is not copied into evidence, because the evidence list is only exact error text.
@@ -166,7 +166,7 @@ Both lines are evidence. Captured in `fixtures/errors/data-value-1.txt` and `fix
 
 Order dependency is not detected in this version. `classifyCauses` calls `options.orderDependency` when the caller passes one. The hook returns evidence substrings. Strings that are not substrings of `message` or `stack`, and strings that are empty, are dropped. A kept line longer than 300 characters is clipped to 300. The rule id is `DATA-ORDER`.
 
-The default is no hook, which returns nothing. PR 6 is the version that fills the hook in. Passing a hook from outside is supported so that version can attach order evidence without changing the other rules.
+The default is no hook, which returns nothing. PR 6 is the version that fills the hook in. Passing a hook from outside is supported so that version can attach order evidence without changing the other rules. If the hook throws, classification continues. The error is one debug note, `debug: order dependency hook failed: ...`, appended to `options.debugNotes` when that array is present.
 
 ## Environment
 
@@ -184,7 +184,7 @@ Captured in `fixtures/errors/env-net.txt` from `page.goto` to `http://127.0.0.1:
 
 | | |
 | --- | --- |
-| Check | A line has a status from 500 to 599 with a status word, an HTTP reason phrase, or an `apiRequestContext` error. The pattern is `status` or `HTTP/1.x` followed by the code, or the code followed by `Internal Server Error`, `Not Implemented`, `Bad Gateway`, `Service Unavailable`, `Gateway Timeout`, or `HTTP Version Not Supported`, or `apiRequestContext.<method>: <code>`. `Locator:`, `Expected:`, `waiting for`, and `locator resolved to` lines are skipped |
+| Check | A line has a status from 500 to 599 with a status word, an HTTP reason phrase, or an `apiRequestContext` error, or a `Received:` line whose value is that status (`Received: 503` or `Received: "503"`). The pattern is `status` or `HTTP/1.x` followed by the code, or the code followed by `Internal Server Error`, `Not Implemented`, `Bad Gateway`, `Service Unavailable`, `Gateway Timeout`, or `HTTP Version Not Supported`, or `apiRequestContext.<method>: <code>`, or `Received:` and the code. `Locator:`, `Expected:`, `waiting for`, and `locator resolved to` lines are skipped. `Expected: 503` does not match |
 | Example | `Error: apiRequestContext.get: 503 Service Unavailable` |
 | Confidence | Medium on one attempt |
 

@@ -1,4 +1,5 @@
 import type { Attempt, AttemptError, TestRecord } from '../model.js';
+import { stripAnsi } from '../report-path.js';
 import { environmentMatches } from './environment.js';
 import { hasSelectorEvidence, selectorMatches } from './selectors.js';
 import { alreadyExistsMatch, readReceived } from './test-data.js';
@@ -133,7 +134,9 @@ export function classifyCauses(record: TestRecord, options: ClassifyOptions = {}
     return [unknownFinding('UNK-NONE', unknownEvidence(failed))];
   }
 
-  return findingsFromHits(hits, failed.length);
+  const findings = findingsFromHits(hits, failed.length);
+  addUnknownEvidenceWhenNearTimeoutOnly(findings, failed);
+  return findings;
 }
 
 function failedAttempts(record: TestRecord): Attempt[] {
@@ -145,11 +148,24 @@ function failedAttempts(record: TestRecord): Attempt[] {
 
 function errorTexts(error: AttemptError): string[] {
   const texts: string[] = [];
-  const message = error.message ?? '';
-  const stack = error.stack ?? '';
+  const message = prepareCauseText(error.message ?? '');
+  const stack = prepareCauseText(error.stack ?? '');
   if (message.trim().length > 0) texts.push(message);
   if (stack.trim().length > 0 && stack !== message) texts.push(stack);
   return texts;
+}
+
+/** ANSI codes are removed and every CR line ending becomes LF before the rules run. */
+function prepareCauseText(text: string): string {
+  return normalizeNewlines(stripAnsi(text));
+}
+
+/**
+ * `\r\n`, a lone `\r`, and `\r\r\n` all become `\n`.
+ * The pattern is one pass, so a long run of CR characters stays linear.
+ */
+function normalizeNewlines(text: string): string {
+  return text.replace(/\r\n?/g, '\n');
 }
 
 function attemptHasText(attempt: Attempt): boolean {
@@ -215,22 +231,31 @@ function valueDrift(samples: { attemptIndex: number; key: string; receivedLine: 
 function hookEvidence(record: TestRecord, options: ClassifyOptions): string[] {
   const hook = options.orderDependency;
   if (!hook) return [];
-  const returned = hook(record) ?? [];
-  const evidence: string[] = [];
-  for (const line of returned) {
-    if (typeof line !== 'string' || line.length === 0) continue;
-    const clipped = line.length > 300 ? line.slice(0, 300) : line;
-    if (!corpusIncludes(record, clipped)) continue;
-    if (!evidence.includes(clipped)) evidence.push(clipped);
+  try {
+    const returned = hook(record) ?? [];
+    const evidence: string[] = [];
+    for (const line of returned) {
+      if (typeof line !== 'string' || line.length === 0) continue;
+      const clipped = line.length > 300 ? line.slice(0, 300) : line;
+      if (!corpusIncludes(record, clipped)) continue;
+      if (!evidence.includes(clipped)) evidence.push(clipped);
+    }
+    return evidence;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'The hook threw.';
+    const note = `debug: order dependency hook failed: ${detail.replaceAll('\n', ' ').trim()}`;
+    options.debugNotes?.push(note);
+    return [];
   }
-  return evidence;
 }
 
 function corpusIncludes(record: TestRecord, needle: string): boolean {
+  const wanted = prepareCauseText(needle);
+  if (wanted.length === 0) return false;
   for (const attempt of record.attempts) {
     for (const error of attempt.errors ?? []) {
-      if ((error.message ?? '').includes(needle)) return true;
-      if ((error.stack ?? '').includes(needle)) return true;
+      if (prepareCauseText(error.message ?? '').includes(wanted)) return true;
+      if (prepareCauseText(error.stack ?? '').includes(wanted)) return true;
     }
   }
   return false;
@@ -259,21 +284,16 @@ function unknownEvidence(attempts: readonly Attempt[]): string[] {
 
 /**
  * Drop lines that quote the test instead of the failure.
+ * Line endings are normalized first (`\r\n`, a lone `\r`, and `\r\r\n`).
  * Source frames (`  21 | test(...)` and `> 21 |`), the caret line (`|   ^`),
- * `at ...` stack frames, and the JUnit `[project] › ...` header.
- * Each line loses a trailing CR first, so a CRLF frame matches the same way
- * an LF frame does, and evidence does not keep that CR.
+ * `at` stack frames, and the JUnit `[project] › ...` header are removed.
+ * Quoted evidence does not contain `\r`.
  */
 function filterCauseLines(text: string): string {
-  return text
+  return prepareCauseText(text)
     .split('\n')
-    .map(stripTrailingCr)
     .filter((line) => !isIgnoredCauseLine(line))
     .join('\n');
-}
-
-function stripTrailingCr(line: string): string {
-  return line.endsWith('\r') ? line.slice(0, -1) : line;
 }
 
 function isIgnoredCauseLine(line: string): boolean {
@@ -286,22 +306,43 @@ function isIgnoredCauseLine(line: string): boolean {
 }
 
 /**
- * A real stack frame starts with `at ` and ends in `:line:col` or in a
- * parenthesized group with no nested parens. The ending is read from the
- * tail of the line. Prose such as `at least one row` stays.
+ * A stack frame starts with `at` and a space or a tab.
+ * It ends in `:line:col`, or in parentheses whose text is a location.
+ * Nested parentheses are allowed, as in
+ * `at seedDuplicate (eval at x (/w/a.ts:1:2), <anonymous>:1:1)`.
+ * Prose such as `at least one row is a duplicate (see log)` stays.
+ * The parenthesis scan is one reverse pass.
  */
 function isStackFrameLine(line: string): boolean {
   const trimmed = line.trim();
-  if (!trimmed.startsWith('at ')) return false;
+  if (!/^at[ \t]/.test(trimmed)) return false;
   if (LINE_COL_ENDING.test(trimmed)) return true;
-  return endsWithParenGroup(trimmed);
+  if (!trimmed.endsWith(')')) return false;
+  const inside = matchingParenInside(trimmed);
+  if (inside === undefined) return false;
+  return isFrameLocation(inside);
 }
 
-function endsWithParenGroup(value: string): boolean {
-  if (!value.endsWith(')')) return false;
-  const open = value.lastIndexOf('(');
-  if (open < 0) return false;
-  return !value.slice(open + 1, -1).includes(')');
+function matchingParenInside(value: string): string | undefined {
+  let depth = 0;
+  for (let index = value.length - 1; index >= 0; index -= 1) {
+    const ch = value[index];
+    if (ch === ')') {
+      depth += 1;
+      continue;
+    }
+    if (ch !== '(') continue;
+    depth -= 1;
+    if (depth === 0) return value.slice(index + 1, -1);
+  }
+  return undefined;
+}
+
+function isFrameLocation(inside: string): boolean {
+  if (/:\d+:\d+/.test(inside)) return true;
+  if (inside.includes('/') || inside.includes('\\')) return true;
+  const compact = inside.trim();
+  return compact === 'native' || compact === '<anonymous>';
 }
 
 function clipEvidenceLine(line: string): string {
@@ -322,6 +363,17 @@ function lineOf(text: string, pattern: RegExp): string | undefined {
 function pushEvidence(evidence: string[], line: string | undefined): void {
   if (!line || line.length === 0 || evidence.includes(line)) return;
   evidence.push(line);
+}
+
+/**
+ * A lone near-timeout finding has no error line of its own.
+ * Keep the Unknown evidence so that text is not dropped.
+ */
+function addUnknownEvidenceWhenNearTimeoutOnly(findings: CauseFinding[], failed: readonly Attempt[]): void {
+  if (findings.length !== 1) return;
+  const only = findings[0];
+  if (!only || only.ruleIds.length !== 1 || only.ruleIds[0] !== 'TIM-NEAR-TIMEOUT') return;
+  for (const line of unknownEvidence(failed)) pushEvidence(only.evidence, line);
 }
 
 function unknownFinding(ruleId: 'UNK-NONE' | 'UNK-EMPTY', evidence: string[]): CauseFinding {

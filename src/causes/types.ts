@@ -38,6 +38,11 @@ export type ClassifyOptions = {
   testTimeoutMs?: number;
   /** PR 6 hook. Return evidence substrings, or an empty list. */
   orderDependency?: OrderDependencyHook;
+  /**
+   * Filled when the order-dependency hook throws.
+   * Classification continues. The note is one line and starts with `debug:`.
+   */
+  debugNotes?: string[];
 };
 
 /** Returns evidence lines when a failure depends on test order. PR 6 fills this in. */
