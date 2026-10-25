@@ -41,7 +41,7 @@
       },
       "suggestedFix": "The rules did not name a cause. Compare the quoted expected and received values with what the user sees. Do not loosen the assertion to make it pass.",
       "healProposal": null,
-      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun \"tests/outcomes.spec.ts\" -g \"always fails\" --times 10",
+      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from 'fixtures/reports/pw-1.60.0-outcomes.json' --only 'tests/outcomes.spec.ts::chromium::always fails'",
       "note": null,
       "llm": null,
       "review": {
@@ -90,7 +90,7 @@
       },
       "suggestedFix": "The rules did not name a cause. Compare the quoted expected and received values with what the user sees. Do not loosen the assertion to make it pass.",
       "healProposal": null,
-      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun \"tests/outcomes.spec.ts\" -g \"flaky by retry\" --times 10",
+      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from 'fixtures/reports/pw-1.60.0-outcomes.json' --only 'tests/outcomes.spec.ts::chromium::flaky by retry'",
       "note": null,
       "llm": null,
       "review": {
@@ -150,7 +150,7 @@
       },
       "suggestedFix": "The locator never resolved. Check whether the element is missing or the locator is wrong. This is a candidate for qa-core-heal (PR 9).",
       "healProposal": null,
-      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun \"tests/outcomes.spec.ts\" -g \"times out\" --times 10",
+      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from 'fixtures/reports/pw-1.60.0-outcomes.json' --only 'tests/outcomes.spec.ts::chromium::times out'",
       "note": null,
       "llm": null,
       "review": {

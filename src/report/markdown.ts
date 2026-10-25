@@ -46,21 +46,46 @@ function renderEntry(entry: TriageEntry): string[] {
     '### Attempts',
     '',
     `Total ${entry.attempts.total}, failed ${entry.attempts.failed}, passed ${entry.attempts.passed}. Same code for a pass and a fail: ${entry.attempts.sameCommit ? 'yes' : 'no'}.`,
-    '',
-    '### Signals',
-    '',
   );
+  const rerunLine = formatReruns(entry.attempts.reruns);
+  if (rerunLine) lines.push(rerunLine);
+  if (entry.observation) lines.push(entry.observation);
+  lines.push('', '### Signals', '');
   if (entry.signals.length === 0) {
     lines.push('No signal recorded.');
   } else {
     for (const signal of entry.signals) lines.push(`- ${signal.kind}: ${signal.detail}`);
   }
-  lines.push('', '### Suggested Fix', '', entry.suggestedFix, '', '### Next Step', '', escapeHtml(entry.nextStep));
+  lines.push('', '### Suggested Fix', '', entry.suggestedFix, '', '### Next Step', '', renderNextStep(entry.nextStep));
   if (entry.note) {
     lines.push('', '### Note', '', entry.note);
   }
   lines.push('', `Review status: ${entry.review.status}.`);
   return lines;
+}
+
+function formatReruns(reruns: TriageEntry['attempts']['reruns']): string | undefined {
+  if (!reruns) return undefined;
+  const parts: string[] = [];
+  for (const mode of ['repeat', 'isolated', 'in-order'] as const) {
+    const counts = reruns[mode];
+    if (!counts) continue;
+    parts.push(`${mode} total ${counts.total}, failed ${counts.failed}, passed ${counts.passed}`);
+  }
+  if (parts.length === 0) return undefined;
+  return `Reruns: ${parts.join('; ')}.`;
+}
+
+/**
+ * The command sits in a code span so Markdown escaping does not add
+ * backslashes inside it. The sentence before the command is still escaped.
+ */
+function renderNextStep(nextStep: string): string {
+  const marker = 'qa-core-flaky rerun ';
+  const at = nextStep.indexOf(marker);
+  if (at === -1) return escapeHtml(nextStep);
+  const command = nextStep.slice(at).replaceAll('`', "'");
+  return `${escapeHtml(nextStep.slice(0, at))}\`${command}\``;
 }
 
 function cell(value: string): string {

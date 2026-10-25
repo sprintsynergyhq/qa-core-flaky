@@ -393,6 +393,115 @@ test('a test id does not change when only the error text changes', (t) => {
   assert.equal(new Set(ids).size, 1);
 });
 
+test('rerun rejects an unknown id before launching Playwright', () => {
+  const result = run(['rerun', '--from', fixture, '--only', 'missing-id', '--fail-on', 'never']);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Unknown test id missing-id/);
+  assert.equal(result.stderr.includes('npx'), false);
+});
+
+test('rerun of a passing id prints the cap and does not launch Playwright', (t) => {
+  const dir = keepTemp(t, 'qa-core-flaky-rerun-pass-');
+  const report = path.join(dir, 'pass.json');
+  fs.writeFileSync(
+    report,
+    JSON.stringify({
+      config: { rootDir: '.' },
+      suites: [
+        {
+          title: 'tests/a.spec.ts',
+          file: 'tests/a.spec.ts',
+          specs: [
+            {
+              title: 'ok',
+              tests: [
+                {
+                  projectName: 'chromium',
+                  expectedStatus: 'passed',
+                  status: 'expected',
+                  results: [{ retry: 0, status: 'passed', duration: 1, errors: [] }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const result = run(['rerun', '--from', report, '--fail-on', 'never']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /Cap: max-tests 20, times 5, modes repeat,isolated\. Selected 0 of 0 failing tests\. Commands 0\./);
+  assert.equal(result.stderr.includes('npx'), false);
+});
+
+test('a read error names the typed path and not the absolute path', () => {
+  const rel = path.join('fixtures', `no-such-read-${process.pid}.json`);
+  const result = run(['parse', rel]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, new RegExp(rel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.equal(result.stderr.includes(path.resolve(rel)), false);
+  assert.equal(oneLine(result.stderr), true);
+});
+
+test('a pretty copy, a compact copy, and a CRLF copy are one run', (t) => {
+  const dir = keepTemp(t, 'qa-core-flaky-norm-');
+  const body = {
+    config: { rootDir: '.' },
+    suites: [
+      {
+        title: 'tests/a.spec.ts',
+        file: 'tests/a.spec.ts',
+        specs: [
+          {
+            title: 'once',
+            tests: [
+              {
+                projectName: 'chromium',
+                expectedStatus: 'passed',
+                status: 'unexpected',
+                results: [{ retry: 0, status: 'failed', duration: 1, errors: [{ message: 'Error: gave up' }] }],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  const pretty = JSON.stringify(body, null, 2);
+  const compact = JSON.stringify(body);
+  fs.writeFileSync(path.join(dir, 'pretty.json'), pretty);
+  fs.writeFileSync(path.join(dir, 'compact.json'), compact);
+  fs.writeFileSync(path.join(dir, 'crlf.json'), pretty.replace(/\n/g, '\r\n'));
+  fs.writeFileSync(path.join(dir, 'extra.json'), `${pretty}\n`);
+  const result = run([
+    'triage',
+    path.join(dir, 'pretty.json'),
+    path.join(dir, 'compact.json'),
+    path.join(dir, 'crlf.json'),
+    path.join(dir, 'extra.json'),
+    '--commit',
+    'abc',
+    '--json',
+    '--fail-on',
+    'never',
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const entry = JSON.parse(result.stdout).entries[0];
+  assert.equal(entry.attempts.total, 1);
+  assert.equal(entry.verdict, 'needs-more-runs');
+});
+
+test('a failed rename keeps the previous triage pair', (t) => {
+  const dir = keepTemp(t, 'qa-core-flaky-keep-');
+  const previous = 'previous markdown\n';
+  fs.writeFileSync(path.join(dir, 'triage.md'), previous);
+  fs.mkdirSync(path.join(dir, 'triage.json'));
+  const result = run(['triage', fixture, '--out-dir', dir, '--fail-on', 'never']);
+  assert.equal(result.status, 1);
+  assert.equal(fs.readFileSync(path.join(dir, 'triage.md'), 'utf8'), previous);
+  assert.equal(fs.statSync(path.join(dir, 'triage.json')).isDirectory(), true);
+});
+
 test('parsing the JUnit fixture twice is byte identical', () => {
   const first = run(['parse', junitFixture]);
   const second = run(['parse', junitFixture]);

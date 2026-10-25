@@ -1,0 +1,30 @@
+{
+  "config": { "rootDir": "." },
+  "suites": [
+    {
+      "title": "tests/order.spec.ts",
+      "file": "tests/order.spec.ts",
+      "specs": [
+        {
+          "title": "order reader expects the marker",
+          "ok": false,
+          "tests": [
+            {
+              "projectName": "chromium",
+              "expectedStatus": "passed",
+              "status": "unexpected",
+              "results": [
+                {
+                  "retry": 0,
+                  "status": "failed",
+                  "duration": 5,
+                  "errors": [{ "message": "Error: marker missing" }]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

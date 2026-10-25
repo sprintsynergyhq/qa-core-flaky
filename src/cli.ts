@@ -6,12 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { classifyCauses } from './causes/index.js';
 import type { CauseFinding } from './causes/types.js';
-import type { ParseResult, TestRecord } from './model.js';
+import type { ParseResult, RerunMode, TestRecord } from './model.js';
 import { detectFormat } from './parsers/detect.js';
 import { parseJunit } from './parsers/junit.js';
 import { parsePlaywrightJson } from './parsers/playwright-json.js';
 import { homeMarks, redactHomeText } from './report-path.js';
 import { redactParseResult } from './redact.js';
+import { executePlan } from './rerun/run.js';
+import { formatCap, planReruns } from './rerun/plan.js';
 import { renderTriageMarkdown } from './report/markdown.js';
 import { buildTriageReport, renderTriageJson } from './report/json.js';
 
@@ -24,11 +26,17 @@ import { buildTriageReport, renderTriageJson } from './report/json.js';
  *                     [--test-timeout <ms>] [--out <file>]
  *   qa-core-flaky triage <report...> [--out-dir <dir>] [--json]
  *                     [--fail-on findings|never] [--timestamp]
+ *   qa-core-flaky rerun --from <report.json> [--times 5]
+ *                     [--modes repeat,isolated] [--config <playwright.config>]
+ *                     [--only <id>] [--max-tests 20] [--commit <sha>]
+ *                     [--out-dir <dir>]
  *
  * parse and causes exit 0 on success and 1 on error.
  * triage exits 0 when the report has no entries, 2 when it has entries
  * (unless --fail-on never), and 1 on a tool error.
- * Error text is one line on stderr.
+ * rerun uses the same exit codes as triage after the new attempts are merged.
+ * The cap and each Playwright command go to stderr. The triage report goes
+ * to stdout. Error text is one line on stderr.
  */
 
 const HELP = `qa-core-flaky <command> [options]
@@ -37,6 +45,7 @@ Commands:
   parse <report>     Print normalized test records as JSON
   causes <report>    Print likely causes for each failed or flaky test
   triage <report...> Write a triage report as JSON and Markdown
+  rerun              Rerun failing tests and write a triage report
 
 Options:
   --format <json|junit>       Force the report format instead of detecting it
@@ -55,6 +64,12 @@ Options:
   --fail-on <findings|never>  triage: exit 2 when there are entries (default findings)
   --timestamp                 triage: include generatedAt. Output then changes every run
   --test-timeout <ms>         Test timeout for the near-timeout rule
+  --from <report>             rerun: Playwright JSON, JUnit, or parse JSON
+  --times <n>                 rerun: repeat and isolated count (default 5)
+  --modes <list>              rerun: repeat, isolated, in-order (default repeat,isolated)
+  --config <file>             rerun: Playwright config passed to the test command
+  --only <id>                 rerun: limit to this test id. Repeat for more than one.
+  --max-tests <n>             rerun: how many failing tests to keep (default 20)
   -h, --help                  Show this help
   --version                   Print the version
 `;
@@ -73,18 +88,32 @@ type FlagValues = {
   timestamp?: boolean;
   'test-timeout'?: string;
   redact?: boolean;
+  from?: string;
+  times?: string;
+  modes?: string;
+  config?: string;
+  only?: string[];
+  'max-tests'?: string;
 };
 
 function main(): void {
   try {
-    run(process.argv.slice(2));
+    const pending = run(process.argv.slice(2));
+    if (pending instanceof Promise) {
+      pending.catch((error: unknown) => {
+        if (error instanceof ExitRequest) return;
+        const message = error instanceof Error ? error.message : 'Could not rerun';
+        process.stderr.write(`${oneLine(message)}\n`);
+        process.exitCode = 1;
+      });
+    }
   } catch (error) {
     if (error instanceof ExitRequest) return;
     throw error;
   }
 }
 
-function run(args: readonly string[]): void {
+function run(args: readonly string[]): void | Promise<void> {
   let values: FlagValues;
   let positionals: string[];
   try {
@@ -106,6 +135,12 @@ function run(args: readonly string[]): void {
         timestamp: { type: 'boolean' },
         'test-timeout': { type: 'string' },
         redact: { type: 'boolean' },
+        from: { type: 'string' },
+        times: { type: 'string' },
+        modes: { type: 'string' },
+        config: { type: 'string' },
+        only: { type: 'string', multiple: true },
+        'max-tests': { type: 'string' },
       },
     }));
   } catch (error) {
@@ -122,8 +157,10 @@ function run(args: readonly string[]): void {
   }
 
   const [command, ...rest] = positionals;
-  if (command === undefined) fail('Usage: qa-core-flaky <parse|causes|triage> <report>');
+  if (command === undefined) fail('Usage: qa-core-flaky <parse|causes|triage|rerun> <report>');
+  if (command === 'rerun') return runRerun(rest, values);
   if (command === 'triage') {
+    assertNoRerunFlags(values);
     runTriage(rest, values);
     return;
   }
@@ -134,6 +171,7 @@ function run(args: readonly string[]): void {
   if (command !== 'parse' && command !== 'causes') {
     fail(`Unknown command ${command}`);
   }
+  assertNoRerunFlags(values);
   if (values['out-dir'] !== undefined || values['fail-on'] !== undefined || values.timestamp === true) {
     fail('That option is only valid for triage');
   }
@@ -205,6 +243,155 @@ function runTriage(reportPaths: readonly string[], values: FlagValues): void {
   if (code !== 0) process.exitCode = code;
 }
 
+async function runRerun(extra: readonly string[], values: FlagValues): Promise<void> {
+  if (extra.length > 0 || values.from === undefined) {
+    fail('Usage: qa-core-flaky rerun --from <report.json>');
+  }
+  if (values.out !== undefined) fail('--out is not used by rerun. Use --out-dir.');
+  if (values.redact === true) fail('--redact is only valid for parse');
+  const reportPath = values.from;
+  let records: TestRecord[];
+  try {
+    records = loadRerunSource(reportPath, values);
+  } catch (error) {
+    if (error instanceof ExitRequest) throw error;
+    fail(oneLine(error instanceof Error ? error.message : 'Could not parse the report'));
+  }
+  let plan;
+  try {
+    plan = planReruns(records, {
+      only: values.only,
+      maxTests: readOptionalPositive(values['max-tests'], 'max-tests'),
+      times: readOptionalPositive(values.times, 'times'),
+      modes: readModesFlag(values.modes),
+      config: values.config,
+    });
+  } catch (error) {
+    if (error instanceof ExitRequest) throw error;
+    const detail = error instanceof Error ? error.message : 'Could not plan the rerun';
+    fail(redactHomeText(oneLine(detail)));
+  }
+  process.stderr.write(`${formatCap(plan.cap)}\n`);
+  let merged = records;
+  if (plan.runs.length > 0) {
+    try {
+      merged = await executePlan({
+        records,
+        plan,
+        cwd: process.cwd(),
+        commitSha: values.commit,
+        print: (line) => {
+          process.stderr.write(`${line}\n`);
+        },
+      });
+    } catch (error) {
+      if (error instanceof ExitRequest) throw error;
+      const detail = error instanceof Error ? error.message : 'The rerun failed';
+      fail(redactHomeText(oneLine(detail)));
+    }
+  }
+  const report = buildTriageReport(merged, {
+    testTimeoutMs: readTimeout(values['test-timeout']),
+    timestamp: values.timestamp === true ? new Date().toISOString() : undefined,
+  });
+  const json = renderTriageJson(report);
+  const markdown = renderTriageMarkdown(report);
+  if (values['out-dir'] !== undefined) writeTriagePair(values['out-dir'], json, markdown);
+  if (values['out-dir'] === undefined || values.json === true) {
+    process.stdout.write(values.json === true ? json : markdown);
+  }
+  const failOn = readFailOn(values['fail-on']);
+  const code = failOn === 'never' || report.entries.length === 0 ? 0 : 2;
+  if (code !== 0) process.exitCode = code;
+}
+
+function assertNoRerunFlags(values: FlagValues): void {
+  if (
+    values.from !== undefined ||
+    values.times !== undefined ||
+    values.modes !== undefined ||
+    values.config !== undefined ||
+    values.only !== undefined ||
+    values['max-tests'] !== undefined
+  ) {
+    fail('That option is only valid for rerun');
+  }
+}
+
+function loadRerunSource(reportPath: string, values: FlagValues): TestRecord[] {
+  const text = readReport(reportPath);
+  const meta = {
+    commitSha: values.commit,
+    branch: values.branch,
+    runId: values['run-id'],
+  };
+  if (text.trimStart().startsWith('{')) {
+    let data: unknown;
+    try {
+      data = JSON.parse(text) as unknown;
+    } catch {
+      fail(`Invalid JSON in report ${reportPath}`);
+    }
+    if (isParseResult(data)) return applyMeta(data.records, values);
+    if (isTriageDocument(data)) {
+      fail('rerun cannot read a triage report. Pass the Playwright report, the JUnit report, or the JSON from parse.');
+    }
+  }
+  const format = readFormat(values.format);
+  const selected = format ?? detectFormat(text, reportPath);
+  const parsed = selected === 'json' ? parsePlaywrightJson(text, reportPath, meta) : parseJunit(text, reportPath, meta);
+  return parsed.records;
+}
+
+function isParseResult(value: unknown): value is ParseResult {
+  if (!isPlainObject(value)) return false;
+  return value.schemaVersion === 1 && Array.isArray(value.records);
+}
+
+function isTriageDocument(value: unknown): boolean {
+  if (!isPlainObject(value)) return false;
+  return value.schemaVersion === 1 && Array.isArray(value.entries) && !Array.isArray(value.records);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function applyMeta(records: readonly TestRecord[], values: FlagValues): TestRecord[] {
+  return records.map((record) => {
+    const source = { ...record.source };
+    if (values.commit) source.commitSha = values.commit;
+    if (values.branch) source.branch = values.branch;
+    if (values['run-id']) source.runId = values['run-id'];
+    return { ...record, source };
+  });
+}
+
+function readModesFlag(value: string | undefined): RerunMode[] | undefined {
+  if (value === undefined) return undefined;
+  const modes = value
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  const allowed: readonly RerunMode[] = ['repeat', 'isolated', 'in-order'];
+  const picked: RerunMode[] = [];
+  for (const mode of modes) {
+    if (!allowed.includes(mode as RerunMode)) {
+      fail(`Unknown mode ${mode}. Expected repeat, isolated, or in-order.`);
+    }
+    picked.push(mode as RerunMode);
+  }
+  return picked;
+}
+
+function readOptionalPositive(value: string | undefined, name: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!/^[1-9]\d*$/.test(value)) fail(`${name} must be a positive integer. Got ${value}.`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) fail(`${name} must be a positive integer. Got ${value}.`);
+  return parsed;
+}
+
 function readFailOn(value: string | undefined): 'findings' | 'never' {
   if (value === undefined || value === 'findings') return 'findings';
   if (value === 'never') return 'never';
@@ -212,9 +399,13 @@ function readFailOn(value: string | undefined): 'findings' | 'never' {
 }
 
 /**
- * Write both triage files, or neither.
- * The Markdown file is written before the JSON file is put in its final place.
- * If that second step fails, the JSON file is removed.
+ * Write both triage files, or leave the previous pair in place.
+ * Both bodies are written to temp names first. If either write fails, the
+ * temp names are removed and the previous files stay. A destination that is
+ * not a regular file, such as a directory named triage.json, is left as it
+ * is. When both destinations are missing or are files, they are moved aside,
+ * the temp names are renamed into place, and the copies are removed. If the
+ * second rename fails, the previous files are moved back.
  * A directory under /proc is not detected here. Node can hang while creating
  * one, which is documented on --out-dir instead of probed.
  */
@@ -225,23 +416,50 @@ function writeTriagePair(dir: string, json: string, markdown: string): void {
   const mdPath = path.join(resolved, 'triage.md');
   const jsonTmp = path.join(resolved, `.triage.json.${process.pid}.tmp`);
   const mdTmp = path.join(resolved, `.triage.md.${process.pid}.tmp`);
+  const jsonBak = path.join(resolved, `.triage.json.${process.pid}.bak`);
+  const mdBak = path.join(resolved, `.triage.md.${process.pid}.bak`);
+  let mdMoved = false;
+  let jsonMoved = false;
   try {
     fs.mkdirSync(resolved, { recursive: true });
     fs.writeFileSync(mdTmp, markdown);
     fs.writeFileSync(jsonTmp, json);
-    fs.renameSync(mdTmp, mdPath);
-    try {
-      fs.renameSync(jsonTmp, jsonPath);
-    } catch (error) {
-      fs.rmSync(mdPath, { force: true });
-      throw error;
+    if (blocksReplace(mdPath) || blocksReplace(jsonPath)) {
+      throw new Error('triage.json and triage.md must be files');
     }
+    mdMoved = moveAside(mdPath, mdBak);
+    jsonMoved = moveAside(jsonPath, jsonBak);
+    fs.renameSync(mdTmp, mdPath);
+    fs.renameSync(jsonTmp, jsonPath);
+    fs.rmSync(mdBak, { force: true });
+    fs.rmSync(jsonBak, { force: true });
   } catch (error) {
+    restoreMoved(mdPath, mdBak, mdMoved);
+    restoreMoved(jsonPath, jsonBak, jsonMoved);
     fs.rmSync(jsonTmp, { force: true });
     fs.rmSync(mdTmp, { force: true });
+    fs.rmSync(jsonBak, { force: true });
+    fs.rmSync(mdBak, { force: true });
     const detail = error instanceof Error ? error.message : 'unknown error';
     fail(`Cannot write ${dir}: ${oneLine(detail)}`);
   }
+}
+
+function blocksReplace(file: string): boolean {
+  if (!fs.existsSync(file)) return false;
+  return !fs.statSync(file).isFile();
+}
+
+function moveAside(file: string, bak: string): boolean {
+  if (!fs.existsSync(file)) return false;
+  fs.renameSync(file, bak);
+  return true;
+}
+
+function restoreMoved(file: string, bak: string, moved: boolean): void {
+  if (!moved || !fs.existsSync(bak)) return;
+  if (fs.existsSync(file)) fs.rmSync(file, { force: true });
+  fs.renameSync(bak, file);
 }
 
 function formatCauses(result: ParseResult, testTimeoutMs: number | undefined, asJson: boolean): string {
@@ -296,27 +514,52 @@ function loadUniqueReports(reportPaths: readonly string[]): { text: string; repo
     try {
       real = fs.realpathSync(original);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : 'unknown error';
-      fail(`Cannot read report ${original}: ${oneLine(detail)}`);
+      failRead(original, error);
     }
     if (seenPaths.has(real)) continue;
     seenPaths.add(real);
-    const text = readReport(real);
-    const hash = createHash('sha256').update(text).digest('hex');
+    const text = readReport(original);
+    const hash = normalizedReportHash(text);
     if (seenHashes.has(hash)) continue;
     seenHashes.add(hash);
-    loaded.push({ text, reportPath: real });
+    loaded.push({ text, reportPath: original });
   }
   return loaded;
+}
+
+/**
+ * Identity of a report's contents.
+ * Newlines are LF, and trailing newlines are removed. JSON is parsed and
+ * written again with `JSON.stringify`, so a pretty copy and a compact copy
+ * of one document match. A CRLF copy matches too. A second file with that
+ * same normalized content is treated as a copy, including a real second run
+ * whose bytes normalize to the same text.
+ */
+function normalizedReportHash(text: string): string {
+  const lf = text.replace(/\r\n?/g, '\n').replace(/\n+$/, '');
+  let body = lf;
+  try {
+    body = JSON.stringify(JSON.parse(lf) as unknown);
+  } catch {
+    body = lf;
+  }
+  return createHash('sha256').update(body).digest('hex');
 }
 
 function readReport(reportPath: string): string {
   try {
     return fs.readFileSync(reportPath, 'utf8');
   } catch (error) {
-    const detail = error instanceof Error ? error.message : 'unknown error';
-    fail(`Cannot read report ${reportPath}: ${oneLine(detail)}`);
+    failRead(reportPath, error);
   }
+}
+
+function failRead(reportPath: string, error: unknown): never {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+      ? error.code
+      : 'unknown error';
+  fail(`Cannot read report ${reportPath}: ${code}`);
 }
 
 function readTimeout(value: string | undefined): number | undefined {

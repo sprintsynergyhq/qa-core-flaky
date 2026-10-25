@@ -617,7 +617,7 @@ test('a bare home in Expected or Received is redacted, and a route parameter sta
   assert.equal(redactHomeText('Expected: "/Users/:id"'), 'Expected: "/Users/:id"');
   assert.equal(redactHomeText('Expected: "/home/feed"'), 'Expected: "<home>"');
   assert.equal(redactHomeText('Received: "/home/login"'), 'Received: "<home>"');
-  assert.equal(redactHomeText('/users/alice/feed'), '/users/alice/feed');
+  assert.equal(redactHomeText('/users/alice/feed'), '<home>/feed');
   assert.equal(
     redactHomeText('Expected: "/home/alice/notes.txt"'),
     'Expected: "<home>/notes.txt"',
@@ -706,7 +706,7 @@ test('two files that differ only by the home username stay distinct ids', () => 
   assert.equal(result.records.length, 2);
   assert.notEqual(result.records[0].id, result.records[1].id);
   assert.equal(result.records[0].file, '<home>/proj/a.spec.ts');
-  assert.equal(result.records[1].file, '<home~2>/proj/a.spec.ts');
+  assert.equal(result.records[1].file, '<file~2>/proj/a.spec.ts');
   assert.equal(result.records[0].id.includes('alice'), false);
   assert.equal(result.records[1].id.includes('bob'), false);
 });
@@ -744,4 +744,48 @@ test('redactParseResult hides a made-up home in source.reportPath', () => {
     assert.equal(result.records[0].source.reportPath, reportPath);
     assert.equal(hidden.records[0].attempts[0].errors[0].message, 'Error: gave up');
   }
+});
+
+test('home folders match in any case, and UNC and SMB keep the server', () => {
+  assert.equal(redactHomeText('/USERS/alice/x'), '<home>/x');
+  assert.equal(redactHomeText('/users/alice/x'), '<home>/x');
+  assert.equal(redactHomeText('/HOME/alice/x'), '<home>/x');
+  assert.equal(redactHomeText('\\\\?\\UNC\\server\\Users\\bob\\a'), '\\\\?\\UNC\\server<home>/a');
+  assert.equal(redactHomeText('smb://server/Users/bob/a'), 'smb://server<home>/a');
+  assert.equal(redactHomeText("locator('h1 ~p')"), "locator('h1 ~p')");
+  assert.equal(redactHomeText("locator('.a ~.b')"), "locator('.a ~.b')");
+  assert.equal(redactHomeText("locator('li ~li >> nth=1')"), "locator('li ~li >> nth=1')");
+  assert.equal(redactHomeText('C:\\Users\\Jo Smith Failed Again'), '<home> Failed Again');
+  assert.equal(redactHomeText('C:\\Users\\jo smith failed'), '<home> failed');
+});
+
+test('a quoted home mark does not collide with a generated mark', () => {
+  const text = 'Expected: "<home~2>"\nReceived: "/home/bob/a"';
+  const marks = homeMarks(['/home/alice/a', text]);
+  const out = redactHomeText(text, marks);
+  assert.equal(out.includes('<text:home~2>'), true);
+  assert.equal(out.includes('bob'), false);
+  assert.match(out, /<home~2>\/a/);
+});
+
+test('homeMarks stays linear for many usernames', () => {
+  const lines = Array.from({ length: 20000 }, (_item, index) => `/home/user${index}/a`);
+  const started = Date.now();
+  const marks = homeMarks(lines);
+  assert.equal(Date.now() - started < 2000, true);
+  assert.equal(marks.size, 20000);
+});
+
+test('the second home file uses a file mark, not a home mark', () => {
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="reads" classname="a.spec.ts" file="/home/alice/proj/a.spec.ts">
+      <failure message="Error: element(s) not found">Error: element(s) not found</failure>
+    </testcase>
+    <testcase name="reads" classname="a.spec.ts" file="/home/bob/proj/a.spec.ts">
+      <failure message="Error: element(s) not found">Error: element(s) not found</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/two-homes.xml');
+  assert.equal(result.records[1].id.startsWith('<file~2>/'), true);
+  assert.equal(result.records[1].id.includes('<home~2>'), false);
 });

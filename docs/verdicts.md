@@ -8,7 +8,13 @@ When a later run fails on every attempt with one error signature, that consisten
 
 A later code group that only passes removes the earlier consistent verdict. A broken test on commit `aaa`, then a pass on commit `bbb`, is `needs-more-runs`. The pass and the fail are not the same code, so the verdict is not flaky. A pass and a fail on one SHA are still flaky.
 
-Without a commit SHA, a run id is the code key. With neither, the report path with `.json`, `.xml`, or `.junit.xml` removed is the key, so one run's JSON and JUnit files are one group. `collapseRunRecords` resolves `.` and `..` first, so `./report.json` and an absolute spelling of that file are one path. `triage` also resolves each path with `realpath` and drops a repeated path before parsing. A second file with the same bytes is dropped before parsing too, so a copy is not a second run. When both formats are present, the JSON record is kept and the JUnit record is not added again, because the JSON file has the retries.
+Without a commit SHA, a run id is the code key. With neither, the report path with `.json`, `.xml`, or `.junit.xml` removed is the key, so one run's JSON and JUnit files are one group. `collapseRunRecords` resolves `.` and `..` first, so `./report.json` and an absolute spelling of that file are one path. `triage` uses `realpath` only to drop a repeated path before parsing. The error names the path that was typed. A second file with the same normalized contents is dropped before parsing too, so a copy is not a second run. Normalization turns CRLF into LF, drops trailing newlines, and parses JSON before hashing, so a pretty copy and a compact copy of one JSON report are one run. A real second run whose normalized contents are identical is also treated as a copy.
+
+A JSON report and a JUnit report with different stems (`results.json` and `junit.xml`) and no SHA or run id stay two code groups unless their test id sets match and their timestamps match. The timestamp is `createdAt` when every record in the file has the same value, otherwise the sorted `startTime` values. Without a shared timestamp they stay two groups. When they pair, both files share a run id, the JSON record is kept, and the JUnit record is not counted again.
+
+"Later" is `createdAt` when every code group has one. Otherwise it is the earliest `startTime` when every code group has one. Mixed clocks, or a group with neither, stay in command-line order. Ties keep command-line order.
+
+Rerun attempts are attempts. They use the commit stored on the record. Five failing reruns of one signature, added to one earlier failure of that signature, are enough for `likely-real-bug` when the cause is unknown. A passing rerun on that same commit makes the verdict `flaky`. When every rerun attempt passed, the entry also says `no flake observed in N runs`. N is the number of rerun attempts. The report does not call the test anything else for that result.
 
 ## Confidence
 

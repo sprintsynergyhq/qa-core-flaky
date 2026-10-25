@@ -149,7 +149,8 @@ test('a triage entry keeps the review status and a command', (t) => {
   const report = buildTriageReport(fixtureRecords());
   for (const entry of report.entries) {
     assert.equal(entry.review.status, 'Needs Review');
-    assert.match(entry.nextStep, /qa-core-flaky rerun "tests\/outcomes\.spec\.ts"/);
+    assert.match(entry.nextStep, /qa-core-flaky rerun --from 'fixtures\/reports\/pw-1\.60\.0-outcomes\.json' --only '/);
+    assert.equal(entry.nextStep.includes('-g '), false);
     assert.equal(entry.suggestedFix.length > 0, true);
   }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-'));
@@ -369,11 +370,13 @@ test('markdown escapes home and title brackets in the table, heading, and next s
   const report = buildTriageReport([item]);
   const markdown = renderTriageMarkdown(report);
   const json = renderTriageJson(report);
-  assert.equal(markdown.includes('<Cart>'), false);
-  assert.equal(markdown.includes('<home>'), false);
   assert.match(markdown, /\| &lt;home&gt;\/proj\/a\.spec\.ts::chromium::renders &lt;Cart&gt; &amp; qty \|/);
   assert.match(markdown, /^## &lt;home&gt;\/proj\/a\.spec\.ts::chromium::renders &lt;Cart&gt; &amp; qty$/m);
-  assert.match(markdown, /qa-core-flaky rerun "&lt;home&gt;\/proj\/a\.spec\.ts" -g "renders &lt;Cart&gt; &amp; qty"/);
+  assert.match(
+    markdown,
+    /`qa-core-flaky rerun --from 'fixture\.json' --only '<home>\/proj\/a\.spec\.ts::chromium::renders <Cart> & qty'`/,
+  );
+  assert.equal(markdown.includes('\\'), false);
   assert.equal(markdown.includes('&amp;amp;'), false);
   assert.equal(json.includes('renders <Cart> & qty'), true);
   assert.equal(json.includes('<home>/proj/a.spec.ts'), true);

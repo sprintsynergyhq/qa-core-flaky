@@ -52,6 +52,8 @@ type CodeGroup = {
   passed: Attempt[];
   signatures: string[];
   consistent: boolean;
+  /** `c:` plus createdAt, or `s:` plus the earliest startTime. Absent when neither is present. */
+  time?: string;
 };
 
 /**
@@ -349,21 +351,25 @@ function finish(
 function codeGroups(records: readonly TestRecord[]): CodeGroup[] {
   const order: string[] = [];
   const buckets = new Map<string, Attempt[]>();
+  const times = new Map<string, string>();
   for (const record of records) {
     const key = codeKey(record);
     const existing = buckets.get(key);
     if (existing) {
       existing.push(...record.attempts);
-      continue;
+    } else {
+      order.push(key);
+      buckets.set(key, [...record.attempts]);
     }
-    order.push(key);
-    buckets.set(key, [...record.attempts]);
+    const time = recordTime(record);
+    if (time !== undefined && !times.has(key)) times.set(key, time);
   }
-  return order.map((key) => {
+  const groups = order.map((key) => {
     const attempts = buckets.get(key) ?? [];
     const failed = attempts.filter(isFailStatus);
     const passed = attempts.filter((attempt) => attempt.status === 'passed');
     const signatures = unique(failed.map(attemptSignature));
+    const time = times.get(key);
     return {
       key,
       attempts,
@@ -371,8 +377,44 @@ function codeGroups(records: readonly TestRecord[]): CodeGroup[] {
       passed,
       signatures,
       consistent: passed.length === 0 && failed.length > 0 && signatures.length === 1,
+      ...(time === undefined ? {} : { time }),
     };
   });
+  return orderGroupsByTime(groups);
+}
+
+/**
+ * "Later" is createdAt when every group has one, otherwise the earliest
+ * startTime when every group has one. Mixed clocks, or a group with neither,
+ * stay in command-line order. Ties keep command-line order.
+ */
+function orderGroupsByTime(groups: CodeGroup[]): CodeGroup[] {
+  if (groups.length < 2) return groups;
+  if (groups.some((group) => group.time === undefined)) return groups;
+  const kinds = new Set(groups.map((group) => group.time?.slice(0, 2)));
+  if (kinds.size !== 1) return groups;
+  return groups
+    .map((group, index) => ({ group, index }))
+    .sort((left, right) => {
+      const a = left.group.time ?? '';
+      const b = right.group.time ?? '';
+      if (a < b) return -1;
+      if (a > b) return 1;
+      return left.index - right.index;
+    })
+    .map((item) => item.group);
+}
+
+function recordTime(record: TestRecord): string | undefined {
+  const created = record.source.createdAt;
+  if (typeof created === 'string' && created.length > 0) return `c:${created}`;
+  let earliest: string | undefined;
+  for (const attempt of record.attempts) {
+    const start = attempt.startTime;
+    if (typeof start !== 'string' || start.length === 0) continue;
+    if (earliest === undefined || start < earliest) earliest = start;
+  }
+  return earliest === undefined ? undefined : `s:${earliest}`;
 }
 
 function laterPassSupersedes(groups: readonly CodeGroup[], group: CodeGroup): boolean {
@@ -411,9 +453,10 @@ function canonicalReportPath(reportPath: string): string {
  * retry. Counting both would double the attempts and split the run.
  */
 export function collapseRunRecords(records: readonly TestRecord[]): TestRecord[] {
+  const prepared = pairCrossStemReports(records);
   const seen = new Set<string>();
   const unique: TestRecord[] = [];
-  for (const record of records) {
+  for (const record of prepared) {
     const marker = `${record.id}\0${record.source.format}\0${canonicalReportPath(record.source.reportPath)}`;
     if (seen.has(marker)) continue;
     seen.add(marker);
@@ -432,6 +475,84 @@ export function collapseRunRecords(records: readonly TestRecord[]): TestRecord[]
 
 function codeKey(record: TestRecord): string {
   return runIdentity(record);
+}
+
+/**
+ * Pair a JSON report and a JUnit report that do not share a stem, a SHA, or
+ * a run id, when their test id sets match and their timestamps match.
+ * Without a timestamp they stay two groups. The shared key is stored on a
+ * copy as `runId`, so the JSON record is kept and the JUnit record is not
+ * counted again.
+ */
+function pairCrossStemReports(records: readonly TestRecord[]): TestRecord[] {
+  const byPath = new Map<string, TestRecord[]>();
+  for (const record of records) {
+    const list = byPath.get(record.source.reportPath) ?? [];
+    list.push(record);
+    byPath.set(record.source.reportPath, list);
+  }
+  const paths = [...byPath.keys()];
+  const alias = new Map<string, string>();
+  for (let left = 0; left < paths.length; left += 1) {
+    for (let right = left + 1; right < paths.length; right += 1) {
+      const leftPath = paths[left];
+      const rightPath = paths[right];
+      if (leftPath === undefined || rightPath === undefined) continue;
+      if (alias.has(leftPath) || alias.has(rightPath)) continue;
+      const leftRecords = byPath.get(leftPath) ?? [];
+      const rightRecords = byPath.get(rightPath) ?? [];
+      if (!reportsPair(leftRecords, rightRecords)) continue;
+      const key = `paired:${[leftPath, rightPath].sort().join('\0')}`;
+      alias.set(leftPath, key);
+      alias.set(rightPath, key);
+    }
+  }
+  if (alias.size === 0) return [...records];
+  return records.map((record) => {
+    const key = alias.get(record.source.reportPath);
+    if (!key || record.source.runId) return record;
+    return { ...record, source: { ...record.source, runId: key } };
+  });
+}
+
+function reportsPair(left: readonly TestRecord[], right: readonly TestRecord[]): boolean {
+  const leftFormat = left[0]?.source.format;
+  const rightFormat = right[0]?.source.format;
+  if (!leftFormat || !rightFormat || leftFormat === rightFormat) return false;
+  if (left.some((record) => hasText(record.source.commitSha) || hasText(record.source.runId))) return false;
+  if (right.some((record) => hasText(record.source.commitSha) || hasText(record.source.runId))) return false;
+  const leftPath = left[0]?.source.reportPath;
+  const rightPath = right[0]?.source.reportPath;
+  if (!leftPath || !rightPath) return false;
+  if (reportStem(leftPath) === reportStem(rightPath)) return false;
+  if (!sameIdSet(left, right)) return false;
+  const leftTime = reportTimeKey(left);
+  const rightTime = reportTimeKey(right);
+  return leftTime !== undefined && leftTime === rightTime;
+}
+
+function hasText(value: string | undefined): boolean {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function sameIdSet(left: readonly TestRecord[], right: readonly TestRecord[]): boolean {
+  const ids = new Set(left.map((record) => record.id));
+  if (ids.size !== new Set(right.map((record) => record.id)).size) return false;
+  return right.every((record) => ids.has(record.id));
+}
+
+function reportTimeKey(records: readonly TestRecord[]): string | undefined {
+  const created = records.map((record) => record.source.createdAt).filter((value): value is string => hasText(value));
+  if (created.length === records.length && new Set(created).size === 1) return `c:${created[0]}`;
+  const starts: string[] = [];
+  for (const record of records) {
+    for (const attempt of record.attempts) {
+      if (hasText(attempt.startTime)) starts.push(attempt.startTime ?? '');
+    }
+  }
+  if (starts.length === 0) return undefined;
+  starts.sort();
+  return `s:${starts.join('\0')}`;
 }
 
 function classifyGroup(

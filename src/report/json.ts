@@ -1,10 +1,11 @@
 import { classifyCauses } from '../causes/index.js';
 import type { Cause, CauseFinding } from '../causes/types.js';
 import { suggestFix } from '../fixes/templates.js';
-import type { TestRecord } from '../model.js';
+import type { Attempt, RerunMode, TestRecord } from '../model.js';
 import { homeMarks, redactHomeText } from '../report-path.js';
+import { shellQuote } from '../rerun/quote.js';
 import { collapseRunRecords, decideVerdict, VERDICT_ORDER } from '../verdict.js';
-import type { TriageEntry, TriageReport } from './schema.js';
+import type { RerunCounts, TriageAttempts, TriageEntry, TriageReport } from './schema.js';
 
 export type BuildTriageOptions = {
   /** ISO time. Omit it and the report has no timestamp. */
@@ -92,34 +93,29 @@ function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefi
     ...finding,
     evidence: finding.evidence.map((line) => redact(line)),
   }));
-  const failed = attempts.filter(
-    (attempt) => attempt.status === 'failed' || attempt.status === 'timedOut' || attempt.status === 'interrupted',
-  ).length;
+  const failed = attempts.filter(isFailStatus).length;
   const passed = attempts.filter((attempt) => attempt.status === 'passed').length;
-  const title = redact(titleRaw);
-  const file = redact(base.file);
+  const id = redact(base.id);
+  const reportPath = redact(base.source.reportPath);
+  const reruns = rerunCounts(attempts);
+  const observation = rerunObservation(attempts);
 
-  return {
-    id: redact(base.id),
+  const entry: TriageEntry = {
+    id,
     verdict: decision.verdict,
     confidence: decision.confidence,
     ruleId: decision.ruleId,
     signals: decision.signals,
     causes,
     evidence,
-    attempts: {
-      total: attempts.length,
-      failed,
-      passed,
-      sameCommit: decision.signals.some((signal) => signal.kind === 'same-code-flip'),
-    },
+    attempts: attemptCounts(attempts, failed, passed, decision.signals.some((signal) => signal.kind === 'same-code-flip'), reruns),
     history: {
       runsSeen: records.length,
       firstFailingCommit: null,
     },
     suggestedFix: suggestFix(decision.ruleIds),
     healProposal: null,
-    nextStep: `Review the suggested fix. To see the test again, run: qa-core-flaky rerun ${JSON.stringify(file)} -g ${JSON.stringify(title)} --times 10`,
+    nextStep: `Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from ${shellQuote(reportPath)} --only ${shellQuote(id)}`,
     note: decision.note,
     llm: null,
     review: {
@@ -128,6 +124,58 @@ function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefi
       decision: null,
     },
   };
+  if (observation) entry.observation = observation;
+  return entry;
+}
+
+function attemptCounts(
+  attempts: readonly Attempt[],
+  failed: number,
+  passed: number,
+  sameCommit: boolean,
+  reruns: TriageAttempts['reruns'],
+): TriageAttempts {
+  const counts: TriageAttempts = {
+    total: attempts.length,
+    failed,
+    passed,
+    sameCommit,
+  };
+  if (reruns) counts.reruns = reruns;
+  return counts;
+}
+
+const RERUN_MODES: readonly RerunMode[] = ['repeat', 'isolated', 'in-order'];
+
+function rerunCounts(attempts: readonly Attempt[]): TriageAttempts['reruns'] {
+  const reruns: NonNullable<TriageAttempts['reruns']> = {};
+  let any = false;
+  for (const mode of RERUN_MODES) {
+    const rows = attempts.filter((attempt) => attempt.rerun?.mode === mode);
+    if (rows.length === 0) continue;
+    const counts: RerunCounts = {
+      total: rows.length,
+      failed: rows.filter(isFailStatus).length,
+      passed: rows.filter((attempt) => attempt.status === 'passed').length,
+    };
+    if (mode === 'repeat') reruns.repeat = counts;
+    else if (mode === 'isolated') reruns.isolated = counts;
+    else reruns['in-order'] = counts;
+    any = true;
+  }
+  return any ? reruns : undefined;
+}
+
+/** N is the number of rerun attempts. The sentence is omitted when one of them failed. */
+function rerunObservation(attempts: readonly Attempt[]): string | undefined {
+  const rows = attempts.filter((attempt) => attempt.rerun !== undefined);
+  if (rows.length === 0) return undefined;
+  if (rows.some((attempt) => attempt.status !== 'passed')) return undefined;
+  return `no flake observed in ${rows.length} runs`;
+}
+
+function isFailStatus(attempt: Attempt): boolean {
+  return attempt.status === 'failed' || attempt.status === 'timedOut' || attempt.status === 'interrupted';
 }
 
 function orderCauses(findings: readonly CauseFinding[], cause: Cause | null): CauseFinding[] {

@@ -41,7 +41,7 @@
       },
       "suggestedFix": "The rules did not name a cause. Compare the quoted expected and received values with what the user sees. Do not loosen the assertion to make it pass.",
       "healProposal": null,
-      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun \"missing.spec.js\" -g \"reads the seed file\" --times 10",
+      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from 'fixtures/reports/junit-no-root-home.xml' --only 'missing.spec.js::chromium::reads the seed file'",
       "note": null,
       "llm": null,
       "review": {

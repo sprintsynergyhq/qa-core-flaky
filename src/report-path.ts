@@ -240,15 +240,21 @@ export type HomeMarks = ReadonlyMap<string, string>;
  * qualify. `cwd:/home/ci/w` does not: `d` is preceded by a letter, so the
  * path is POSIX `/home/`. A drive-letter path is never an app route.
  *
- * POSIX paths match `home` in any case (`/home/`, `/HOME/`) and `/Users/`
- * with a capital U. Lowercase `users` matches only after a drive letter.
- * A segment that starts with `:` is not a username. `/users/:id`,
- * `/api/home/settings/save`, `GET /home/index/page`, and `/Users/42/orders`
- * stay as written. `~alice/` is a home. `~/proj` is not, because it has no
- * username. A path boundary may be `,`, `;`, `<`, or `>`.
+ * POSIX paths match `home` and `users` in any case, so `/HOME/`, `/USERS/`,
+ * and `/Users/BOB/` are homes. A segment that starts with `:` is not a
+ * username. `/users/:id`, `/api/home/settings/save`, `GET /home/index/page`,
+ * and `/Users/42/orders` stay as written. `~alice/` is a home when the name
+ * starts with a letter, a digit, or `_`, and a `/` or the end of the path
+ * follows. `~/proj` is not, because it has no username. `~` inside
+ * `locator('...')` or `locator("...")` is a CSS combinator and stays.
+ * A path boundary may be `,`, `;`, `<`, or `>`.
  * `file://localhost/home/...` is a home. `../../../home/bob/...` is a home.
- * `\\server\Users\bob`, `x\\Users\\bob`, and `\\home\\alice` are homes.
+ * `\\server\Users\bob`, `\\?\UNC\server\Users\bob`, `smb://server/Users/bob`,
+ * `x\\Users\\bob`, and `\\home\\alice` are homes. The server name stays.
  * A path tail stops at `;`, so `;C:\\Windows` keeps its backslashes.
+ * A quoted mark that the text already contains, such as `"<home~2>"`, is
+ * tagged `<text:home~2>` before numbering so it does not look like a
+ * generated mark.
  *
  * A bare POSIX `/home/<name>` or `/Users/<name>` is redacted inside an
  * Expected or Received value too. An app route such as `/home/feed` has
@@ -264,7 +270,7 @@ export type HomeMarks = ReadonlyMap<string, string>;
  */
 export function redactHomeText(value: string, marks?: HomeMarks): string {
   const masked = maskUrls(value);
-  const text = masked.text;
+  const text = tagLiteralMarks(masked.text);
   let out = '';
   let cursor = 0;
   while (cursor < text.length) {
@@ -289,10 +295,13 @@ export function redactHomeText(value: string, marks?: HomeMarks): string {
  * `<home~2>`, `<home~3>`, in that order. The mark is not the username.
  */
 export function homeMarks(texts: readonly string[]): HomeMarks {
+  const seen = new Set<string>();
   const users: string[] = [];
   for (const value of texts) {
     for (const user of homeUsernames(value)) {
-      if (!users.includes(user)) users.push(user);
+      if (seen.has(user)) continue;
+      seen.add(user);
+      users.push(user);
     }
   }
   const marks = new Map<string, string>();
@@ -357,13 +366,37 @@ function matchSlashHome(text: string, index: number): HomeMatch | undefined {
   return finishHome(text, index, folder.userStart);
 }
 
-/** `~alice` or `~alice/proj`. `~/proj` has no username and stays. */
+/**
+ * `~alice` or `~alice/proj`. `~/proj` has no username and stays.
+ * The name must start with a letter, a digit, or `_`, and a separator or
+ * the end of the path must follow. A `~` inside a quoted `locator(...)`
+ * string is a CSS combinator and is not a home.
+ */
 function matchTildeHome(text: string, index: number): HomeMatch | undefined {
   if (text[index] !== '~') return undefined;
   if (!isMarkedStart(text, index)) return undefined;
+  if (insideQuotedLocator(text, index)) return undefined;
   const next = text[index + 1];
-  if (next === undefined || next === '/' || next === '\\') return undefined;
+  if (next === undefined || !/[A-Za-z0-9_]/.test(next)) return undefined;
+  const userEnd = readUsernameEnd(text, index + 1);
+  if (userEnd === index + 1) return undefined;
+  const after = text[userEnd];
+  const endOfPath = after === undefined || /[\s"'`)\]}>]/.test(after);
+  if (after !== '/' && after !== '\\' && !endOfPath) return undefined;
   return finishHome(text, index, index + 1);
+}
+
+/** True when `index` sits inside `locator('...')` or `locator("...")`. */
+function insideQuotedLocator(text: string, index: number): boolean {
+  const before = text.slice(0, index);
+  const open = before.lastIndexOf('locator(');
+  if (open === -1) return false;
+  const afterCall = before.slice(open + 'locator('.length);
+  const quote = /^\s*(['"])/.exec(afterCall);
+  const mark = quote?.[1];
+  if (!mark || quote === null) return false;
+  const rest = afterCall.slice(quote[0].length);
+  return !rest.includes(mark);
 }
 
 /**
@@ -410,7 +443,7 @@ function readHomeFolder(text: string, start: number, drive: boolean): { userStar
   const name = text.slice(start, end);
   const afterName = readSeparator(text, end);
   if (afterName === undefined) return undefined;
-  const allowed = drive ? /^home$/i.test(name) || /^users$/i.test(name) : /^home$/i.test(name) || name === 'Users';
+  const allowed = /^home$/i.test(name) || /^users$/i.test(name);
   if (!allowed) return undefined;
   return { userStart: afterName };
 }
@@ -426,6 +459,7 @@ function isDriveLetter(text: string, index: number): boolean {
 function slashContextOk(text: string, index: number): boolean {
   if (isKnownHomePrefix(text.slice(0, index))) return true;
   if (endsWithAt(text, index, 'file://localhost')) return true;
+  if (/(?:^|[\s"'=(`\[{:,;<>])smb:\/\/[^/\\]+$/.test(text.slice(0, index))) return true;
   return isPathStart(text, index);
 }
 
@@ -466,9 +500,41 @@ function homeToken(text: string, index: number, hasSep: boolean, mark: string): 
   return written;
 }
 
+/**
+ * Words that are not a second name token when no separator follows.
+ * The first token is always the username. One following word is part of
+ * the name unless it is in this list. Further words stay, so prose is not
+ * eaten and a lowercase surname is not left behind.
+ */
+const SECOND_WORD_PROSE = new Set([
+  'a',
+  'again',
+  'an',
+  'and',
+  'at',
+  'but',
+  'by',
+  'error',
+  'failed',
+  'for',
+  'from',
+  'in',
+  'is',
+  'not',
+  'npm',
+  'of',
+  'on',
+  'or',
+  'the',
+  'to',
+  'was',
+  'with',
+]);
+
 function readUsernameEnd(text: string, start: number): number {
   const allowSpace = separatorFollowsOnLine(text, start);
   let index = start;
+  let words = 1;
   while (index < text.length) {
     const ch = text[index] ?? '';
     if (ch === '/' || ch === '\\' || ch === '\n' || ch === '\r') break;
@@ -477,12 +543,12 @@ function readUsernameEnd(text: string, start: number): number {
         index += 1;
         continue;
       }
-      // `C:\Users\Jo Smith failed` has no separator after the name. A
-      // following capitalized word is still the username. A lowercase word
-      // such as `failed` is prose and stays.
-      const word = /^[ \t]+(\p{Lu}[\p{L}\p{M}]*)/u.exec(text.slice(index));
-      if (!word) break;
+      if (words >= 2) break;
+      const word = /^[ \t]+(\p{L}[\p{L}\p{M}]*)/u.exec(text.slice(index));
+      const token = word?.[1];
+      if (!word || token === undefined || SECOND_WORD_PROSE.has(token.toLowerCase())) break;
       index += word[0].length;
+      words += 1;
       continue;
     }
     if (
@@ -567,10 +633,10 @@ function readPathTail(value: string, start: number): { text: string; next: numbe
 
 /**
  * A `/home/` or `/Users/` path left in the text on purpose.
- * Lowercase `users` is a home folder only after a drive letter.
+ * `home` and `users` match in any case.
  */
 function isBareHomePath(value: string): boolean {
-  return /^\/(?:home|Users)\//.test(value) || /^[A-Za-z]:\/(?:home|users)\//i.test(value);
+  return /^\/(?:home|users)\//i.test(value) || /^[A-Za-z]:\/(?:home|users)\//i.test(value);
 }
 
 function stripAbsolutePrefix(value: string): string {
@@ -739,6 +805,20 @@ function maskUrls(text: string): { text: string; urls: string[] } {
 
 function unmaskUrls(text: string, urls: readonly string[]): string {
   return text.replace(/\uE000(\d+)\uE001/g, (_full, index: string) => urls[Number(index)] ?? '');
+}
+
+/**
+ * A mark the application already wrote, inside quotes, is not a generated
+ * home mark. Tag it before numbering so `Expected: "<home~2>"` and a
+ * redacted second username do not print the same text.
+ * A parser path such as `<home>/proj` is not quoted, so it stays.
+ */
+function tagLiteralMarks(text: string): string {
+  return text.replace(/<(home(?:~\d+)?|file~\d+)>/g, (full, inner: string, offset: number) => {
+    const before = text[offset - 1];
+    if (before !== '"' && before !== "'" && before !== '`') return full;
+    return `<text:${inner}>`;
+  });
 }
 
 function stripTrailingSlash(value: string): string {

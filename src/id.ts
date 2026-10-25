@@ -12,7 +12,8 @@ export function makeTestId(file: string, project: string, titlePath: readonly st
 /**
  * One report can store two files that both redact to the same `<home>` path.
  * The first id stays `<home>`. Later distinct home directories become
- * `<home~2>`, `<home~3>`, in the order the parser saw them. The mark is not
+ * `<file~2>`, `<file~3>`, in the order the parser saw them. `<home~2>` is
+ * reserved for the second username inside one triage entry. The mark is not
  * the username. Records that already have different ids are left alone.
  */
 export function disambiguateHomeFiles<T extends { id: string; file: string }>(
@@ -47,7 +48,7 @@ export function disambiguateHomeFiles<T extends { id: string; file: string }>(
   return records.map((record, index) => {
     const suffix = suffixes.get(index);
     if (!suffix) return record;
-    const mark = `<home${suffix}>`;
+    const mark = `<file${suffix}>`;
     return {
       ...record,
       file: record.file.replace('<home>', mark),

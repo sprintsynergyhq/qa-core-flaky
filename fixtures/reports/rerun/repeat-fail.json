@@ -1,0 +1,29 @@
+{
+  "config": { "rootDir": "." },
+  "suites": [
+    {
+      "title": "tests/a.spec.ts",
+      "file": "tests/a.spec.ts",
+      "specs": [
+        {
+          "title": "same value",
+          "ok": false,
+          "tests": [
+            {
+              "projectName": "chromium",
+              "expectedStatus": "passed",
+              "status": "unexpected",
+              "results": [
+                { "retry": 0, "status": "failed", "duration": 3, "errors": [{ "message": "Error: expect(locator).toHaveText(expected) failed\nExpected: \"a\"\nReceived: \"b\"" }] },
+                { "retry": 1, "status": "failed", "duration": 3, "errors": [{ "message": "Error: expect(locator).toHaveText(expected) failed\nExpected: \"a\"\nReceived: \"b\"" }] },
+                { "retry": 2, "status": "failed", "duration": 3, "errors": [{ "message": "Error: expect(locator).toHaveText(expected) failed\nExpected: \"a\"\nReceived: \"b\"" }] },
+                { "retry": 3, "status": "failed", "duration": 3, "errors": [{ "message": "Error: expect(locator).toHaveText(expected) failed\nExpected: \"a\"\nReceived: \"b\"" }] },
+                { "retry": 4, "status": "failed", "duration": 3, "errors": [{ "message": "Error: expect(locator).toHaveText(expected) failed\nExpected: \"a\"\nReceived: \"b\"" }] }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

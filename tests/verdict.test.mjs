@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { classifyCauses, decideVerdict, parsePlaywrightJson } from '../dist/index.js';
+import { buildTriageReport, classifyCauses, decideVerdict, parsePlaywrightJson } from '../dist/index.js';
 
 function attempt(status, message, retry = 0) {
   return {
@@ -270,4 +270,68 @@ test('the outcomes fixture matches the decision table', () => {
   assert.equal(byTitle('always passes').outcome, 'passed');
   assert.equal(byTitle('skipped test').outcome, 'skipped');
   assert.equal(byTitle('expected to fail').outcome, 'passed');
+});
+
+test('a received continuation that looks like a call log stays needs-more-runs', () => {
+  const received = (count) =>
+    ['Error: expect(locator).toHaveText(expected) failed', 'Expected: "q"', `Received: "hello\n${count} x locator q"`].join('\n');
+  const decision = verdictOf([
+    attempt('failed', received(2), 0),
+    attempt('failed', received(3), 1),
+    attempt('failed', received(4), 2),
+  ]);
+  assert.equal(decision.verdict, 'needs-more-runs');
+  assert.equal(decision.signals.some((signal) => signal.kind === 'consistent-failure'), false);
+});
+
+test('createdAt decides which code is later, and command-line order is the fallback', () => {
+  const text = ['Error: expect(locator).toHaveText(expected) failed', 'Expected: "a"', 'Received: "b"'].join('\n');
+  const failed = record('sample', [attempt('failed', text, 0), attempt('failed', text, 1)], {
+    commitSha: 'aaa',
+    reportPath: 'old.json',
+    createdAt: '2020-01-01T00:00:00.000Z',
+  });
+  const passed = record('sample', [attempt('passed', undefined, 0)], {
+    commitSha: 'bbb',
+    reportPath: 'new.json',
+    createdAt: '2021-01-01T00:00:00.000Z',
+  });
+  passed.outcome = 'passed';
+  const byTime = decideVerdict([passed, failed], []);
+  assert.equal(byTime.verdict, 'needs-more-runs');
+
+  const failedLater = record('sample', [attempt('failed', text, 0), attempt('failed', text, 1)], {
+    commitSha: 'aaa',
+    reportPath: 'old.json',
+  });
+  const passedFirst = record('sample', [attempt('passed', undefined, 0)], {
+    commitSha: 'bbb',
+    reportPath: 'new.json',
+  });
+  passedFirst.outcome = 'passed';
+  const byOrder = decideVerdict([passedFirst, failedLater], []);
+  assert.equal(byOrder.verdict, 'likely-real-bug');
+});
+
+test('a JSON and JUnit pair with different stems joins when the timestamp matches', () => {
+  const failure = (format, reportPath, createdAt) => ({
+    id: 'tests/a.spec.ts::chromium::t',
+    file: 'tests/a.spec.ts',
+    project: 'chromium',
+    titlePath: ['t'],
+    expectedStatus: 'passed',
+    outcome: 'failed',
+    attempts: [attempt('failed', 'Error: gave up', 0)],
+    source: { format, reportPath, ...(createdAt ? { createdAt } : {}) },
+  });
+  const paired = buildTriageReport([
+    failure('playwright-json', 'results.json', '2020-01-01T00:00:00.000Z'),
+    failure('junit', 'junit.xml', '2020-01-01T00:00:00.000Z'),
+  ]);
+  assert.equal(paired.entries[0].attempts.total, 1);
+  const separate = buildTriageReport([
+    failure('playwright-json', 'results.json'),
+    failure('junit', 'junit.xml'),
+  ]);
+  assert.equal(separate.entries[0].attempts.total, 2);
 });

@@ -1,0 +1,29 @@
+{
+  "config": { "rootDir": "." },
+  "suites": [
+    {
+      "title": "tests/a.spec.ts",
+      "file": "tests/a.spec.ts",
+      "specs": [
+        {
+          "title": "same value",
+          "ok": true,
+          "tests": [
+            {
+              "projectName": "chromium",
+              "expectedStatus": "passed",
+              "status": "expected",
+              "results": [
+                { "retry": 0, "status": "passed", "duration": 3, "errors": [] },
+                { "retry": 1, "status": "passed", "duration": 3, "errors": [] },
+                { "retry": 2, "status": "passed", "duration": 3, "errors": [] },
+                { "retry": 3, "status": "passed", "duration": 3, "errors": [] },
+                { "retry": 4, "status": "passed", "duration": 3, "errors": [] }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

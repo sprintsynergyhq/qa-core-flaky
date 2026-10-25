@@ -47,6 +47,23 @@ export type Attachment = {
   contentType: string;
 };
 
+/**
+ * How a rerun attempt was launched.
+ * `repeat` is `--repeat-each`. `isolated` is one test alone. `in-order` is the whole file.
+ */
+export type RerunMode = 'repeat' | 'isolated' | 'in-order';
+
+/**
+ * Marks an attempt that `qa-core-flaky rerun` produced.
+ * `runIndex` starts at 0 for each mode and test. The original report has no `rerun` field.
+ */
+export type RerunInfo = {
+  /** Which rerun mode produced this attempt. */
+  mode: RerunMode;
+  /** Index of this attempt inside that mode, starting at 0. */
+  runIndex: number;
+};
+
 /** One run of a test, including the first run (retry 0) and each retry. */
 export type Attempt = {
   /** Retry index. The first run is 0. */
@@ -63,6 +80,8 @@ export type Attempt = {
   workerIndex?: number;
   /** Start time string from the report, when present. */
   startTime?: string;
+  /** Set when this attempt came from `qa-core-flaky rerun`. Absent on the original report. */
+  rerun?: RerunInfo;
 };
 
 /** Where a record came from. Later parsers reuse this shape. */
