@@ -79,7 +79,7 @@ test('SEL-NOTFOUND and SEL-ZERO match the captured not-found error', () => {
   const findings = causesOf(readError('sel-notfound.txt'));
   const selectors = causeNamed(findings, 'selectors');
   assert.deepEqual(selectors.ruleIds, ['SEL-NOTFOUND', 'SEL-ZERO']);
-  assert.equal(selectors.confidence, 'high');
+  assert.equal(selectors.confidence, 'medium');
   assert.ok(selectors.evidence.some((item) => item.includes('element(s) not found')));
 });
 
@@ -96,7 +96,7 @@ test('SEL-ZERO matches a count assertion that resolved to zero elements', () => 
   const findings = causesOf(readError('sel-zero.txt'));
   const selectors = causeNamed(findings, 'selectors');
   assert.deepEqual(selectors.ruleIds, ['SEL-UNRESOLVED', 'SEL-ZERO']);
-  assert.equal(selectors.confidence, 'high');
+  assert.equal(selectors.confidence, 'medium');
   assert.ok(selectors.evidence.some((item) => item.includes('locator resolved to 0 elements')));
 });
 
@@ -165,11 +165,25 @@ test('TIM-NEAR-TIMEOUT is low when it is the only rule', () => {
   assert.equal(below[0].cause, 'unknown');
 });
 
-test('TIM-NEAR-TIMEOUT plus a test timeout is high', () => {
+test('TIM-NEAR-TIMEOUT plus a test timeout stays medium', () => {
   const text = 'Test timeout of 1000ms exceeded.';
   const findings = classifyCauses(messageRecord(text, { attempts: [attempt(950, text)] }), { testTimeoutMs: 1000 });
   const timing = causeNamed(findings, 'timing');
   assert.deepEqual(timing.ruleIds, ['TIM-TEST-TIMEOUT', 'TIM-NEAR-TIMEOUT']);
+  assert.equal(timing.confidence, 'medium');
+});
+
+test('TIM-NEAR-TIMEOUT plus an expect timeout is high', () => {
+  const text = [
+    'Error: expect(locator).toBeVisible() failed',
+    'Timeout 2000ms exceeded.',
+    'Call log:',
+    "  - waiting for locator('#go')",
+    '    - locator resolved to <button id="go">Go</button>',
+  ].join('\n');
+  const findings = classifyCauses(messageRecord(text, { attempts: [attempt(950, text)] }), { testTimeoutMs: 1000 });
+  const timing = causeNamed(findings, 'timing');
+  assert.deepEqual(timing.ruleIds, ['TIM-EXPECT-TIMEOUT', 'TIM-NEAR-TIMEOUT']);
   assert.equal(timing.confidence, 'high');
 });
 
@@ -198,6 +212,104 @@ test('DATA-ALREADY-EXISTS matches duplicate, unique constraint, and already exis
     const findings = causesOf(`Error: ${phrase}`);
     assert.deepEqual(causeNamed(findings, 'test-data').ruleIds, ['DATA-ALREADY-EXISTS']);
   }
+});
+
+test('titles, source frames, headers, and assertion lines do not choose a cause', () => {
+  const benign = 'Error: the cart total was not a number';
+  const header = `  [chromium] \u203A tests/a.spec.ts:21:1 \u203A rejects duplicate emails ${'\u2500'.repeat(8)}`;
+  const httpHeader = `  [chromium] \u203A tests/a.spec.ts:21:1 \u203A loads the 503 Service Unavailable page ${'\u2500'.repeat(8)}`;
+  const inputs = [
+    `${benign}\n  21 | test('rejects duplicate emails', async ({ page }) => {`,
+    `${benign}\n> 21 | test('rejects duplicate emails', async ({ page }) => {`,
+    `${benign}\n     |                                                               ^`,
+    `${benign}\n    at rejects duplicate emails (tests/a.spec.ts:21:1)`,
+    `${benign}\n${header}`,
+    `${benign}\n  21 | test('loads the 503 Service Unavailable page', async ({ page }) => {`,
+    `${benign}\n${httpHeader}`,
+    `${benign}\nLocator: getByRole('button', { name: 'Email already exists' })`,
+    `${benign}\n  - waiting for getByRole('button', { name: 'Email already exists' })`,
+    `${benign}\n    - locator resolved to <button>Email already exists</button>`,
+    `${benign}\nExpected: "already exists"`,
+    `${benign}\nExpected: "503 Service Unavailable"`,
+    `${benign}\nLocator: getByRole('button', { name: '503 Service Unavailable' })`,
+    `${benign}\n  - waiting for getByRole('button', { name: '503 Service Unavailable' })`,
+    `${benign}\n    - locator resolved to <div>503 Service Unavailable</div>`,
+    `${benign}\nExpected: "ECONNREFUSED"`,
+    `${benign}\nLocator: getByRole('button', { name: 'ECONNREFUSED' })`,
+    `${benign}\n  - waiting for getByRole('button', { name: 'socket hang up' })`,
+    `${benign}\n    - locator resolved to <div>net::ERR_CONNECTION_REFUSED</div>`,
+    "  21 | test('rejects duplicate emails', async ({ page }) => {",
+  ];
+  for (const text of inputs) {
+    const findings = causesOf(text);
+    assert.equal(findings.length, 1, text);
+    assert.equal(findings[0].cause, 'unknown', text);
+    assert.deepEqual(findings[0].ruleIds, ['UNK-NONE'], text);
+  }
+
+  const stillData = causesOf(
+    "Locator: getByRole('button', { name: 'Email already exists' })\nError: duplicate key value violates unique constraint",
+  );
+  const data = causeNamed(stillData, 'test-data');
+  assert.deepEqual(data.ruleIds, ['DATA-ALREADY-EXISTS']);
+  assert.equal(data.evidence.some((item) => item.includes('Locator:')), false);
+
+  const stillHttp = causesOf('Expected: "503 Service Unavailable"\nError: apiRequestContext.get: 503 Service Unavailable');
+  const http = causeNamed(stillHttp, 'environment');
+  assert.deepEqual(http.ruleIds, ['ENV-HTTP5XX']);
+  assert.equal(http.evidence.some((item) => item.startsWith('Expected:')), false);
+});
+
+test('two selector rules on different lines are high', () => {
+  const text = [
+    "Error: strict mode violation: getByRole('button') resolved to 2 elements",
+    'Error: element(s) not found',
+  ].join('\n');
+  const findings = causesOf(text);
+  const selectors = causeNamed(findings, 'selectors');
+  assert.deepEqual(selectors.ruleIds, ['SEL-STRICT', 'SEL-NOTFOUND']);
+  assert.equal(selectors.confidence, 'high');
+});
+
+test('a long line does not stall intercept detection', () => {
+  const text = `${'a'.repeat(80000)}\nError: gave up`;
+  const started = Date.now();
+  const findings = causesOf(text);
+  assert.equal(Date.now() - started < 1000, true);
+  assert.equal(findings[0].cause, 'unknown');
+});
+
+test('UNK-NONE evidence is clipped to 300 characters', () => {
+  const line = 'E'.repeat(1020);
+  const findings = causesOf(line);
+  assert.equal(findings.length, 1);
+  assert.deepEqual(findings[0].ruleIds, ['UNK-NONE']);
+  assert.equal(findings[0].evidence.length, 1);
+  assert.equal(findings[0].evidence[0].length, 300);
+  assert.equal(line.startsWith(findings[0].evidence[0]), true);
+});
+
+test('indented Expected and Received lines still count as value drift', () => {
+  const first = [
+    'expect(locator).toHaveText(expected) failed',
+    "    Locator: locator('#n')",
+    '    Expected: "9"',
+    '    Received: "1"',
+  ].join('\n');
+  const second = [
+    'expect(locator).toHaveText(expected) failed',
+    "    Locator: locator('#n')",
+    '    Expected: "9"',
+    '    Received: "2"',
+  ].join('\n');
+  const findings = classifyCauses(
+    failedRecord([], { attempts: [attempt(10, first, 0), attempt(10, second, 1)] }),
+  );
+  const data = causeNamed(findings, 'test-data');
+  assert.deepEqual(data.ruleIds, ['DATA-VALUE-DRIFT']);
+  assert.equal(data.confidence, 'high');
+  assert.ok(data.evidence.some((item) => item.includes('Received: "1"')));
+  assert.ok(data.evidence.some((item) => item.includes('Received: "2"')));
 });
 
 test('the order dependency hook adds DATA-ORDER and ignores text that is not evidence', () => {
@@ -343,11 +455,13 @@ test('the same rule on every failed attempt is high, and one attempt is medium',
 });
 
 test('findings sort by confidence and then by cause', () => {
-  const text = [
-    readError('sel-notfound.txt'),
-    'Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:54321/',
-  ].join('\n');
-  const findings = causesOf(text);
+  const strict = readError('sel-strict.txt');
+  const net = 'Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:54321/';
+  const findings = classifyCauses(
+    failedRecord([], {
+      attempts: [attempt(10, strict, 0), attempt(10, `${strict}\n${net}`, 1)],
+    }),
+  );
   assert.equal(findings[0].cause, 'selectors');
   assert.equal(findings[0].confidence, 'high');
   assert.equal(findings[1].cause, 'environment');

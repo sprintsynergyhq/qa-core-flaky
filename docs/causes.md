@@ -19,15 +19,28 @@ A failed, timed out, or interrupted attempt with no error text does not throw. I
 
 Passed and skipped attempts are not read. A passed or skipped record returns no findings. A failed or flaky record with no failed attempt returns `UNK-EMPTY`.
 
+## Lines That Are Not Evidence
+
+Before any rule runs, these lines are removed:
+
+| Line | Example |
+| --- | --- |
+| Playwright source frame | A line number, then a pipe, then source. A leading `>` is the same kind of line |
+| Caret line under a source frame | a line of spaces, a pipe, spaces, and `^` |
+| Stack frame | `    at fixtures/pw-project/tests/causes.spec.ts:21:1` |
+| JUnit header | `[chromium] › tests/a.spec.ts:21:1 › title` followed by a box-drawing rule |
+
+`DATA-ALREADY-EXISTS`, `ENV-NET`, and `ENV-HTTP5XX` also skip `Locator:` lines, `Expected:` lines, `waiting for ...` lines, and `locator resolved to ...` lines. A button named `Email already exists`, or `Expected: "503 Service Unavailable"`, is Unknown.
+
 ## How Confidence Is Chosen
 
 | Confidence | When |
 | --- | --- |
-| high | Two or more rules of the same cause matched, or one strong rule matched on every failed attempt and there are at least two failed attempts |
-| medium | One strong rule matched, and it did not match every failed attempt |
+| high | Two or more independent rules of the same cause matched, or one strong rule matched on every failed attempt and there are at least two failed attempts |
+| medium | One strong rule matched on one attempt. Rules that quote the same line, or that sit in one dependent group, count as that one rule |
 | low | The only match is `TIM-NEAR-TIMEOUT` |
 
-`TIM-NEAR-TIMEOUT` together with another timing rule is high, because two rules matched. `TIM-NEAR-TIMEOUT` by itself stays low even when it matches every failed attempt.
+Two rules are independent when their evidence lines differ and they are not in the same group. `SEL-NOTFOUND`, `SEL-ZERO`, and `SEL-UNRESOLVED` are one group, so a single `toBeVisible` miss or a single `toHaveCount` of zero stays medium. `TIM-TEST-TIMEOUT` and `TIM-NEAR-TIMEOUT` are one group, because a test timeout is already past the near-timeout line. `TIM-NEAR-TIMEOUT` by itself stays low even when it matches every failed attempt. `TIM-NEAR-TIMEOUT` with an independent timing rule, such as `TIM-EXPECT-TIMEOUT` or `TIM-INTERCEPT`, is high.
 
 Findings are sorted by confidence (`high`, then `medium`, then `low`). The same confidence is sorted by cause: selectors, environment, timing, test-data. Unknown is returned only when no other rule matched, so it is alone.
 
@@ -51,7 +64,7 @@ A selector rule does not match a resolved locator whose value or count is merely
 | --- | --- |
 | Check | The text contains `strict mode violation` |
 | Example | `Error: locator.click: Error: strict mode violation: getByRole('button', { name: 'Remove' }) resolved to 2 elements:` |
-| Confidence | Medium on one failed attempt. High when this is the only selector rule and it matches every failed attempt (two or more), or when another selector rule also matches |
+| Confidence | Medium on one failed attempt. High when it matches every failed attempt and there are two or more, or when an independent selector rule matches on a different line |
 
 The example is the message from `fixtures/pw-project/tests/causes.spec.ts` under Playwright 1.60.0. The file is `fixtures/errors/sel-strict.txt`.
 
@@ -61,7 +74,7 @@ The example is the message from `fixtures/pw-project/tests/causes.spec.ts` under
 | --- | --- |
 | Check | The text contains `element(s) not found` |
 | Example | `Error: element(s) not found` |
-| Confidence | Medium alone. High when `SEL-ZERO` also matches, which is the usual Playwright 1.60.0 `toBeVisible` miss |
+| Confidence | Medium on one attempt, including when `SEL-ZERO` quotes the same `element(s) not found` line. High when this rule matches every failed attempt and there are two or more |
 
 Captured in `fixtures/errors/sel-notfound.txt`.
 
@@ -71,7 +84,7 @@ Captured in `fixtures/errors/sel-notfound.txt`.
 | --- | --- |
 | Check | `locator resolved to 0 elements`, or a call-log wait (`waiting for locator(` or `waiting for getBy...(`) with `Timeout <digits>ms exceeded` or `Test timeout of <digits>ms exceeded` and no `locator resolved to <` line. A strict mode error is not unresolved |
 | Example | `TimeoutError: locator.click: Timeout 400ms exceeded.` with `waiting for locator('#missing')` |
-| Confidence | Medium alone. High together with `SEL-ZERO` |
+| Confidence | Medium on one attempt, including together with `SEL-ZERO` on the same line. High when this rule matches every failed attempt and there are two or more |
 
 `waiting for getByRole(...)` is included because Playwright 1.60.0 logs `getBy` calls that way, not only `locator(`. Captured in `fixtures/errors/sel-unresolved.txt` and, for the zero-element line, `fixtures/errors/sel-zero.txt`.
 
@@ -81,7 +94,7 @@ Captured in `fixtures/errors/sel-notfound.txt`.
 | --- | --- |
 | Check | `toHaveCount`, `toBeVisible`, or `toBeAttached` (the `expect(locator)` form or `Expect "..."`) and the text reports zero elements: `element(s) not found`, `locator resolved to 0 elements`, or `toHaveCount` with `Received: 0` |
 | Example | `8 × locator resolved to 0 elements` on `expect(locator).toHaveCount(expected) failed` with `Received: 0` |
-| Confidence | High on the captured count failure, because `SEL-UNRESOLVED` matches the same text |
+| Confidence | Medium on the captured count failure. `SEL-UNRESOLVED` quotes the same `locator resolved to 0 elements` line, and the two rules are one group. High when this rule matches every failed attempt and there are two or more |
 
 The `8 ×` count is the count from one local run of the fixture. It is not a benchmark. Captured in `fixtures/errors/sel-zero.txt`.
 
@@ -123,7 +136,7 @@ This is not a selector rule. The locator in the captured run resolved to the but
 | --- | --- |
 | Check | The attempt status is failed, timed out, or interrupted, and `durationMs * 10 >= testTimeoutMs * 9`. The timeout is known only when the caller passes `testTimeoutMs` |
 | Example | No line of error text. The evidence list is empty |
-| Confidence | Low when it is the only timing rule. High when another timing rule also matches |
+| Confidence | Low when it is the only timing rule. Medium together with `TIM-TEST-TIMEOUT`, because that pair is one group. High when an independent timing rule also matches |
 
 Duration is a field on the attempt. It is not copied into evidence, because the evidence list is only exact error text.
 
@@ -133,7 +146,7 @@ Duration is a field on the attempt. It is not copied into evidence, because the 
 
 | | |
 | --- | --- |
-| Check | Two or more failed attempts fail the same assertion with different `Received:` lines. The assertion key is the matcher (`toHaveText` and the rest), the `Locator:` line, and the `Expected:` line |
+| Check | Two or more failed attempts fail the same assertion with different `Received:` lines. The assertion key is the matcher (`toHaveText` and the rest), the `Locator:` line, and the `Expected:` line. Those three lines may be indented |
 | Example | `Received: "1"` on one attempt and `Received: "2"` on the next, both with `Expected: "9"` and `locator('#n')` |
 | Confidence | High when every failed attempt is part of that drift. Medium when some failed attempt is not |
 
@@ -143,7 +156,7 @@ Both lines are evidence. Captured in `fixtures/errors/data-value-1.txt` and `fix
 
 | | |
 | --- | --- |
-| Check | The text matches `already exists`, `duplicate`, or `unique constraint`, case insensitive |
+| Check | A line matches `already exists`, `duplicate`, or `unique constraint`, case insensitive. `Locator:`, `Expected:`, `waiting for`, and `locator resolved to` lines are skipped |
 | Example | `Error: insert failed: duplicate key value violates unique constraint "users_email_key"` |
 | Confidence | Medium on one attempt. High when it matches every failed attempt and there are two or more |
 
@@ -161,7 +174,7 @@ The default is no hook, which returns nothing. PR 6 is the version that fills th
 
 | | |
 | --- | --- |
-| Check | The text contains `net::ERR_` followed by the error name, or `ECONNREFUSED`, `ECONNRESET`, `ENOTFOUND`, `EAI_AGAIN`, or `socket hang up` |
+| Check | A line contains `net::ERR_` followed by the error name, or `ECONNREFUSED`, `ECONNRESET`, `ENOTFOUND`, `EAI_AGAIN`, or `socket hang up`. `Locator:`, `Expected:`, `waiting for`, and `locator resolved to` lines are skipped |
 | Example | `Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:54321/` |
 | Confidence | Medium on one attempt. High when another environment rule also matches, or when this rule matches every failed attempt and there are two or more |
 
@@ -171,7 +184,7 @@ Captured in `fixtures/errors/env-net.txt` from `page.goto` to `http://127.0.0.1:
 
 | | |
 | --- | --- |
-| Check | A status from 500 to 599 with a status word, an HTTP reason phrase, or an `apiRequestContext` error. The pattern is `status` or `HTTP/1.x` followed by the code, or the code followed by `Internal Server Error`, `Not Implemented`, `Bad Gateway`, `Service Unavailable`, `Gateway Timeout`, or `HTTP Version Not Supported`, or `apiRequestContext.<method>: <code>` |
+| Check | A line has a status from 500 to 599 with a status word, an HTTP reason phrase, or an `apiRequestContext` error. The pattern is `status` or `HTTP/1.x` followed by the code, or the code followed by `Internal Server Error`, `Not Implemented`, `Bad Gateway`, `Service Unavailable`, `Gateway Timeout`, or `HTTP Version Not Supported`, or `apiRequestContext.<method>: <code>`. `Locator:`, `Expected:`, `waiting for`, and `locator resolved to` lines are skipped |
 | Example | `Error: apiRequestContext.get: 503 Service Unavailable` |
 | Confidence | Medium on one attempt |
 
@@ -191,7 +204,7 @@ A closed target that still has selector evidence stays a selector finding and is
 
 | Rule | When | Evidence | Confidence |
 | --- | --- | --- | --- |
-| UNK-NONE | Some failed attempt has error text, and no rule matched | The `Expected:` and `Received:` lines when those exist, otherwise the first non-empty line | low |
+| UNK-NONE | Some failed attempt has error text, and no rule matched | The `Expected:` and `Received:` lines when those exist, otherwise the first non-empty line that is still evidence. Each line is clipped to 300 characters. Leading whitespace is allowed | low |
 | UNK-EMPTY | Every failed attempt has no error text, or the record is failed or flaky and has no failed attempt | Empty | low |
 
 A value mismatch on a resolved locator, such as `toHaveText` with `Received: "1"`, is `UNK-NONE` when the received value does not change across attempts. It is not selectors and it is not timing. The captured example is `fixtures/errors/data-value-1.txt`.
@@ -201,7 +214,7 @@ A value mismatch on a resolved locator, such as `toHaveText` with `Received: "1"
 `normalizeErrorSignature` compares errors across attempts and runs. The steps run in this order:
 
 1. ANSI escape codes are removed.
-2. A trailing `:line:column` on a file token becomes `:L:C`.
+2. A trailing `:line:column` on a file token becomes `:L:C`. The match starts where the previous character is not part of a file token.
 3. A duration such as `5000ms` or `1.5ms` becomes `Nms`.
 4. A port on `localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`, or an `http(s)` URL becomes `:PORT`.
 5. Digits inside a `/tmp/`, `/private/tmp/`, or `/var/folders/` path become `N`.

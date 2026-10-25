@@ -59,6 +59,17 @@ const CAUSE_RANK: Readonly<Record<Cause, number>> = {
   unknown: 4,
 };
 
+/** Rules that describe one locator miss. Matching together is still one signal. */
+const SELECTOR_MISS_GROUP = ['SEL-NOTFOUND', 'SEL-ZERO', 'SEL-UNRESOLVED'] as const;
+
+/** A test timeout is already past the near-timeout line, so the pair is one signal. */
+const TEST_TIMEOUT_GROUP = ['TIM-TEST-TIMEOUT', 'TIM-NEAR-TIMEOUT'] as const;
+
+const SOURCE_FRAME_LINE = /^\s*>?\s*\d+\s*\|/;
+const CARET_LINE = /^\s*\|\s*\^/;
+const STACK_FRAME_LINE = /^\s*at\s+/;
+const JUNIT_HEADER_LINE = /^\s*\[[^\]]+\]\s*\u203A.*(?:\u2500|-{3})/;
+
 type Hit = {
   ruleId: string;
   cause: Cause;
@@ -87,8 +98,8 @@ export function classifyCauses(record: TestRecord, options: ClassifyOptions = {}
   failed.forEach((attempt, attemptIndex) => {
     const errors = attempt.errors ?? [];
     for (const error of errors) {
-      const texts = errorTexts(error);
-      if (texts.length === 0) continue;
+      const texts = errorTexts(error).map((text) => filterCauseLines(text));
+      if (texts.every((text) => text.trim().length === 0)) continue;
       collectErrorHits(hits, attemptIndex, texts);
       for (const text of texts) {
         const sample = readReceived(text);
@@ -230,19 +241,45 @@ function unknownEvidence(attempts: readonly Attempt[]): string[] {
   for (const attempt of attempts) {
     for (const error of attempt.errors ?? []) {
       for (const text of errorTexts(error)) {
-        const expected = lineOf(text, /^Expected:\s*.+$/);
-        const received = lineOf(text, /^Received:\s*.+$/);
+        const readable = filterCauseLines(text);
+        const expected = lineOf(readable, /^\s*Expected:\s*.+$/);
+        const received = lineOf(readable, /^\s*Received:\s*.+$/);
         if (expected || received) {
           pushEvidence(evidence, expected);
           pushEvidence(evidence, received);
           continue;
         }
-        const first = text.split('\n').find((line) => line.trim().length > 0);
-        pushEvidence(evidence, first);
+        const first = readable.split('\n').find((line) => line.trim().length > 0);
+        pushEvidence(evidence, first === undefined ? undefined : clipEvidenceLine(first));
       }
     }
   }
   return evidence;
+}
+
+/**
+ * Drop lines that quote the test instead of the failure.
+ * Source frames (`  21 | test(...)` and `> 21 |`), the caret line (`|   ^`),
+ * `at ...` stack frames, and the JUnit `[project] › ...` header.
+ */
+function filterCauseLines(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => !isIgnoredCauseLine(line))
+    .join('\n');
+}
+
+function isIgnoredCauseLine(line: string): boolean {
+  return (
+    SOURCE_FRAME_LINE.test(line) ||
+    CARET_LINE.test(line) ||
+    STACK_FRAME_LINE.test(line) ||
+    JUNIT_HEADER_LINE.test(line)
+  );
+}
+
+function clipEvidenceLine(line: string): string {
+  return line.length > 300 ? line.slice(0, 300) : line;
 }
 
 function lineOf(text: string, pattern: RegExp): string | undefined {
@@ -305,10 +342,55 @@ function findingsFromHits(hits: Hit[], failedCount: number): CauseFinding[] {
 function confidenceFor(ruleIds: readonly string[], hits: readonly Hit[], failedCount: number): CauseFinding['confidence'] {
   const strong = ruleIds.filter((ruleId) => ruleId !== 'TIM-NEAR-TIMEOUT');
   if (strong.length === 0) return 'low';
-  if (ruleIds.length >= 2) return 'high';
+  if (independentRuleCount(ruleIds, hits) >= 2) return 'high';
   const ruleId = strong[0];
   if (!ruleId) return 'low';
   const seen = new Set(hits.filter((hit) => hit.ruleId === ruleId).map((hit) => hit.attemptIndex));
   if (failedCount >= 2 && seen.size === failedCount) return 'high';
   return 'medium';
+}
+
+/**
+ * Rules count as independent when their evidence lines differ and they are
+ * not in the same group. `SEL-NOTFOUND`, `SEL-ZERO`, and `SEL-UNRESOLVED`
+ * are one group. `TIM-TEST-TIMEOUT` and `TIM-NEAR-TIMEOUT` are one group.
+ */
+function independentRuleCount(ruleIds: readonly string[], hits: readonly Hit[]): number {
+  const evidenceByRule = new Map<string, Set<string>>();
+  for (const ruleId of ruleIds) {
+    const lines = new Set<string>();
+    for (const hit of hits) {
+      if (hit.ruleId !== ruleId) continue;
+      for (const line of hit.evidence) lines.add(line);
+    }
+    evidenceByRule.set(ruleId, lines);
+  }
+  const selected: string[] = [];
+  for (const ruleId of ruleIds) {
+    const independent = selected.every((other) => rulesAreIndependent(ruleId, other, evidenceByRule));
+    if (independent) selected.push(ruleId);
+  }
+  return selected.length;
+}
+
+function rulesAreIndependent(
+  left: string,
+  right: string,
+  evidenceByRule: ReadonlyMap<string, Set<string>>,
+): boolean {
+  if (sameDependentGroup(left, right)) return false;
+  const leftLines = evidenceByRule.get(left);
+  const rightLines = evidenceByRule.get(right);
+  if (!leftLines || !rightLines) return true;
+  for (const line of leftLines) {
+    if (rightLines.has(line)) return false;
+  }
+  return true;
+}
+
+function sameDependentGroup(left: string, right: string): boolean {
+  if ((SELECTOR_MISS_GROUP as readonly string[]).includes(left) && (SELECTOR_MISS_GROUP as readonly string[]).includes(right)) {
+    return true;
+  }
+  return (TEST_TIMEOUT_GROUP as readonly string[]).includes(left) && (TEST_TIMEOUT_GROUP as readonly string[]).includes(right);
 }

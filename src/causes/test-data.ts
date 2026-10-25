@@ -1,11 +1,15 @@
 import type { RuleMatch } from './types.js';
-import { lineContaining } from './text.js';
+import { isQuotedContextLine, lineContaining } from './text.js';
 
 const ALREADY = /already exists|duplicate|unique constraint/i;
 
-/** `already exists`, `duplicate`, or `unique constraint`. */
+/**
+ * `already exists`, `duplicate`, or `unique constraint`.
+ * Locator, expected, and call-log lines are skipped. A name such as
+ * `Email already exists` on those lines is the test, not this rule.
+ */
 export function alreadyExistsMatch(text: string): RuleMatch | undefined {
-  const evidence = lineContaining(text, ALREADY);
+  const evidence = lineContaining(text, ALREADY, isQuotedContextLine);
   if (!evidence) return undefined;
   return { ruleId: 'DATA-ALREADY-EXISTS', evidence: [evidence] };
 }
@@ -22,13 +26,13 @@ export type ReceivedSample = {
  * Returns undefined when the text has no received value.
  */
 export function readReceived(text: string): ReceivedSample | undefined {
-  const receivedLine = lineContaining(text, /^Received:\s*.+$/);
-  const expectedLine = lineContaining(text, /^Expected:\s*.+$/);
+  const receivedLine = lineContaining(text, /^\s*Received:\s*.+$/);
+  const expectedLine = lineContaining(text, /^\s*Expected:\s*.+$/);
   if (!receivedLine || !expectedLine) return undefined;
   const matcher =
     /expect\(locator\)\.(\w+)\(/.exec(text)?.[1] ?? /Expect "(\w+)"/.exec(text)?.[1] ?? '';
   if (!matcher) return undefined;
-  const locatorLine = lineContaining(text, /^Locator:\s*.+$/) ?? '';
+  const locatorLine = lineContaining(text, /^\s*Locator:\s*.+$/) ?? '';
   return {
     key: `${matcher}\n${locatorLine}\n${expectedLine}`,
     receivedLine,

@@ -29,6 +29,14 @@ test('different assertions keep different signatures', () => {
   assert.notEqual(normalizeErrorSignature(text), normalizeErrorSignature(otherValue));
 });
 
+test('a long token does not stall line and column normalization', () => {
+  const text = 'a'.repeat(80000);
+  const started = Date.now();
+  const signature = normalizeErrorSignature(text);
+  assert.equal(Date.now() - started < 1000, true);
+  assert.equal(signature, text);
+});
+
 test('a fractional duration and a private tmp path normalize', () => {
   const left = 'Timeout 1.5ms exceeded at /private/tmp/run-12/a.txt';
   const right = 'Timeout 30ms exceeded at /private/tmp/run-9/a.txt';

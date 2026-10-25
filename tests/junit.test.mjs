@@ -242,6 +242,54 @@ test('error text that is not a filesystem path stays unchanged', () => {
   assert.deepEqual(result.warnings, [NO_ATTEMPT]);
 });
 
+test('a root-shaped absolute path is rewritten when the next character is not a name', () => {
+  const input = [
+    'a=/home/ci/w&b',
+    'cd /home/ci/w&&npm test',
+    'bang /home/ci/w!',
+    'query /home/ci/w?',
+    'hash /home/ci/w#x',
+    'star /home/ci/w*',
+    'pct /home/ci/w%20',
+    'tilde /home/ci/w~',
+    'dollar /home/ci/w$HOME',
+    'file /home/ci/w/a%20b.ts',
+    'ampfile /home/ci/w/a&b.ts',
+    'keep /home/ci/w-other/file.ts',
+    'dot /home/ci/w.backup/a.ts',
+    'prose /var/',
+    'url https://x.test/home/ci/w/a?x=/home/ci/w',
+  ].join(' ');
+  const expected = [
+    'a=home/ci/w&b',
+    'cd home/ci/w&&npm test',
+    'bang home/ci/w!',
+    'query home/ci/w?',
+    'hash home/ci/w#x',
+    'star home/ci/w*',
+    'pct home/ci/w%20',
+    'tilde home/ci/w~',
+    'dollar home/ci/w$HOME',
+    'file home/ci/w/a%20b.ts',
+    'ampfile home/ci/w/a&b.ts',
+    'keep home/ci/w-other/file.ts',
+    'dot home/ci/w.backup/a.ts',
+    'prose /var/',
+    'url https://x.test/home/ci/w/a?x=/home/ci/w',
+  ].join(' ');
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="paths" classname="a.spec.ts">
+      <failure message="${input.replaceAll('&', '&amp;')}">kept</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/root-boundary.xml');
+  const message = result.records[0].attempts[0].errors[0].message;
+  assert.equal(message, expected);
+  for (const warning of result.warnings) {
+    assert.equal(warning.includes('/home/ci/w'), false);
+  }
+});
+
 test('an absolute JUnit path is rewritten and does not stay absolute', () => {
   const xml = `<testsuites><testsuite hostname="chromium">
     <testcase name="runs elsewhere" file="/var/data/a.spec.ts">

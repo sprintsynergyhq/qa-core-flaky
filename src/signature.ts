@@ -5,7 +5,8 @@ import { stripAnsi } from './report-path.js';
  *
  * The steps run in this order:
  * 1. ANSI escape codes are removed.
- * 2. A trailing `:line:column` on a file token becomes `:L:C`.
+ * 2. A trailing `:line:column` on a file token becomes `:L:C`. The match starts
+ *    where the previous character is not part of a file token.
  * 3. A duration such as `5000ms` or `1.5ms` becomes `Nms`.
  * 4. A port on `localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`, or an `http(s)`
  *    URL becomes `:PORT`.
@@ -19,7 +20,7 @@ import { stripAnsi } from './report-path.js';
  */
 export function normalizeErrorSignature(text: string): string {
   let out = stripAnsi(text);
-  out = out.replace(/([A-Za-z0-9_.+\-]+):\d+:\d+/g, '$1:L:C');
+  out = out.replace(/(?<![A-Za-z0-9_.+\-])([A-Za-z0-9_.+\-]+):\d+:\d+/g, '$1:L:C');
   out = out.replace(/\d+(?:\.\d+)?ms\b/g, 'Nms');
   out = out.replace(/\b(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):\d+\b/g, '$1:PORT');
   out = out.replace(/(https?:\/\/[^/\s:]+):\d+/gi, '$1:PORT');

@@ -126,6 +126,8 @@ Paths inside error text are rewritten only when the token looks like a real file
 | `http://` or `https://` URL | Left as written, including `?x=/home/a` and a root prefix inside the URL. No warning. |
 | One segment, a regex, or a quoted URL path | Left as written. `/var/`, `/Ready/`, `/\d+/`, and `"/inventory.html"` are examples. No warning. |
 
+The report root matches when the next character does not continue the path name. Letters, digits, `_`, and `-` continue the name. A `.` continues the name only when a name character follows it, so `project-other` and `project.txt` stay whole. `root&b`, `root&&npm`, `root!`, `root?`, `root#x`, `root*`, `root%20`, `root~`, and `root$HOME` are still the root. A path segment may also contain `%`, `~`, `$`, `&`, `!`, `#`, `?`, `*`, `@`, `+`, `,`, or `=`, so `/home/ci/w/a%20b.ts` and `/home/ci/w/a&b.ts` are paths. A regex literal such as `/pattern/` is still left as written.
+
 ## Known Gaps
 
 These gaps were checked against the Playwright 1.60.0 JUnit fixture produced with the reporter's default options. `includeRetries` was left unset. The file has one `testcase` per test. It has no `flakyFailure`, `flakyError`, `rerunFailure`, or `rerunError` elements.

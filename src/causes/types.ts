@@ -7,6 +7,9 @@ export type Cause = 'selectors' | 'timing' | 'test-data' | 'environment' | 'unkn
  * How strongly the quoted evidence supports the cause.
  * `high` means two or more independent rules of that cause matched, or the
  * same strong rule matched on every failed attempt when there are two or more.
+ * Rules that quote the same line are not independent. `SEL-NOTFOUND`,
+ * `SEL-ZERO`, and `SEL-UNRESOLVED` are one group. `TIM-TEST-TIMEOUT` and
+ * `TIM-NEAR-TIMEOUT` are one group.
  * `medium` means one strong rule matched, but not on every failed attempt.
  * `low` means the only match is a weak rule.
  */

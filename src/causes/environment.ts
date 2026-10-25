@@ -1,5 +1,5 @@
 import type { RuleMatch } from './types.js';
-import { lineContaining } from './text.js';
+import { isQuotedContextLine, lineContaining } from './text.js';
 
 const NET = /net::ERR_[A-Z0-9_]+|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|socket hang up/;
 
@@ -21,10 +21,10 @@ const CLOSED = /Target page, context or browser has been closed/;
  */
 export function environmentMatches(text: string, selectorEvidence: boolean): RuleMatch[] {
   const hits: RuleMatch[] = [];
-  const net = lineContaining(text, NET);
+  const net = lineContaining(text, NET, isQuotedContextLine);
   if (net) hits.push({ ruleId: 'ENV-NET', evidence: [net] });
 
-  const http = lineContaining(text, HTTP_5XX);
+  const http = lineContaining(text, HTTP_5XX, isQuotedContextLine);
   if (http) hits.push({ ruleId: 'ENV-HTTP5XX', evidence: [http] });
 
   if (LAUNCH.test(text) || (CLOSED.test(text) && !selectorEvidence)) {

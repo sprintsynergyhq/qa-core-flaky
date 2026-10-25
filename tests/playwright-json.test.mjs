@@ -402,9 +402,9 @@ test('a filesystem path after file, colon, backtick, and brackets is rewritten',
   assert.equal(outside.length, 7);
 });
 
-function errorReport(text) {
+function rootReport(text, rootDir) {
   return JSON.stringify({
-    config: { rootDir: '/tmp/project' },
+    config: { rootDir },
     suites: [
       {
         title: 'sample.spec.ts',
@@ -433,6 +433,10 @@ function errorReport(text) {
       },
     ],
   });
+}
+
+function errorReport(text) {
+  return rootReport(text, '/tmp/project');
 }
 
 test('an http URL is not rewritten, including a query path and the report root', () => {
@@ -470,6 +474,49 @@ test('an absolute path outside the old prefix list is rewritten', () => {
   assert.equal(message, 'wrote ../../srv/ci/out.json and ../../opt/app/data.json');
   assert.equal(/(?:^|\s)\/srv\/ci\/out\.json/.test(message), false);
   assert.equal(/(?:^|\s)\/opt\/app\/data\.json/.test(message), false);
+});
+
+test('a report root followed by a non-name character is rewritten', () => {
+  const input = [
+    'a=/home/ci/w&b',
+    'cd /home/ci/w&&npm test',
+    'bang /home/ci/w!',
+    'query /home/ci/w?',
+    'hash /home/ci/w#x',
+    'star /home/ci/w*',
+    'pct /home/ci/w%20',
+    'tilde /home/ci/w~',
+    'dollar /home/ci/w$HOME',
+    'file /home/ci/w/a%20b.ts',
+    'ampfile /home/ci/w/a&b.ts',
+    'keep /home/ci/w-other/file.ts',
+    'dot /home/ci/w.backup/a.ts',
+    'prose /var/',
+    'url https://x.test/home/ci/w/a?x=/home/ci/w',
+  ].join(' ');
+  const expected = [
+    'a=../w&b',
+    'cd ../w&&npm test',
+    'bang ../w!',
+    'query ../w?',
+    'hash ../w#x',
+    'star ../w*',
+    'pct ../w%20',
+    'tilde ../w~',
+    'dollar ../w$HOME',
+    'file a%20b.ts',
+    'ampfile a&b.ts',
+    'keep ../w-other/file.ts',
+    'dot ../w.backup/a.ts',
+    'prose /var/',
+    'url https://x.test/home/ci/w/a?x=/home/ci/w',
+  ].join(' ');
+  const result = parsePlaywrightJson(rootReport(input, '/home/ci/w'), 'root-boundary.json');
+  const message = result.records[0].attempts[0].errors[0].message;
+  assert.equal(message, expected);
+  for (const warning of result.warnings) {
+    assert.equal(warning.includes('/home/ci/w'), false);
+  }
 });
 
 test('escaped Windows backslashes keep the drive and use single separators', () => {

@@ -25,8 +25,12 @@
  * `(`, a backtick, `[`, `{`, `:`, or `file://`. Trailing `,`, `.`, `;`, and
  * `)` stay outside the rewritten path. The report root is also removed
  * wherever it still appears as its own prefix, but not inside a URL. The
- * character after the root has to be a boundary, so a longer name such as
- * `/tmp/project-other` is not cut apart.
+ * root matches when the next character does not continue the path name.
+ * Letters, digits, `_`, and `-` continue the name. A `.` continues the name
+ * only when a name character follows it, so `project-other` and `project.txt`
+ * stay whole, while `root&b`, `root&&npm`, and `root!` are still the root.
+ * A path segment may also contain `%`, `~`, `$`, `&`, `!`, `#`, `?`, `*`,
+ * `@`, `+`, `,`, or `=`.
  */
 
 const OUTSIDE_ROOT_WARNING =
@@ -192,25 +196,30 @@ function replaceRootBoundaries(text: string, root: string): string {
   while (from <= text.length) {
     const at = text.indexOf(root, from);
     if (at === -1) return out + text.slice(from);
-    const next = text[at + root.length];
-    const boundary =
-      next === undefined ||
-      next === '/' ||
-      next === ':' ||
-      next === '"' ||
-      next === "'" ||
-      next === '`' ||
-      next === '[' ||
-      next === '{' ||
-      next === '<' ||
-      next === '>' ||
-      next === '|' ||
-      /\s/.test(next);
+    const boundary = !continuesPathName(text, at + root.length);
     out += text.slice(from, at);
     out += boundary ? '.' : root;
     from = at + root.length;
   }
   return out;
+}
+
+/**
+ * True when `text[index]` continues a directory or file name.
+ * A name character is a letter, a digit, `_`, or `-`. A dot continues the
+ * name only when a name character follows it.
+ */
+function continuesPathName(text: string, index: number): boolean {
+  const next = text[index];
+  if (next === undefined) return false;
+  if (isPathNameChar(next)) return true;
+  if (next !== '.') return false;
+  const after = text[index + 1];
+  return after !== undefined && isPathNameChar(after);
+}
+
+function isPathNameChar(ch: string): boolean {
+  return /[A-Za-z0-9_-]/.test(ch);
 }
 
 function shouldRewriteErrorToken(token: string, root: string | undefined): boolean {
@@ -224,7 +233,8 @@ function shouldRewriteErrorToken(token: string, root: string | undefined): boole
 }
 
 function pathStartsWithRoot(value: string, root: string): boolean {
-  return value === root || value.startsWith(`${root}/`);
+  if (!value.startsWith(root)) return false;
+  return !continuesPathName(value, root.length);
 }
 
 function stripLocationSuffix(value: string): string {
@@ -251,10 +261,10 @@ function isRegexLiteral(value: string): boolean {
 }
 
 /**
- * An absolute POSIX path with at least two safe segments, such as
- * `/opt/app/data.json`. One segment (`/var/`, `/inventory.html`) is not a
- * filesystem path. A segment that contains regex metacharacters is not one
- * either.
+ * An absolute POSIX path with at least two segments, such as
+ * `/opt/app/data.json` or `/home/ci/w/a%20b.ts`. One segment (`/var/`,
+ * `/inventory.html`) is not a filesystem path. A regex literal is rejected
+ * before this check. A segment may contain `% ~ $ & ! # ? * @ + , =`.
  */
 function isMultiSegmentPosixPath(value: string): boolean {
   if (!value.startsWith('/') || value.startsWith('//')) return false;
@@ -263,7 +273,7 @@ function isMultiSegmentPosixPath(value: string): boolean {
     .split('/')
     .filter((part) => part.length > 0);
   if (segments.length < 2) return false;
-  return segments.every((segment) => /^[A-Za-z0-9._+\-@]+$/.test(segment));
+  return segments.every((segment) => /^[A-Za-z0-9._+@%~$&!#?=*,-]+$/.test(segment));
 }
 
 function maskUrls(text: string): { text: string; urls: string[] } {
