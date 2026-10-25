@@ -1,19 +1,23 @@
 /**
- * Regenerate fixtures/reports/pw-1.60.0-outcomes.json.
+ * Regenerate the Playwright JSON and JUnit fixtures from one run.
  *
  * Runs:
  *   npx playwright test --config fixtures/pw-project/playwright.config.ts
  *
  * The Playwright process is expected to exit non-zero, because some fixture
- * tests fail on purpose. That exit code is ignored when the JSON report was
- * written. Volatile fields are then replaced so the committed file does not
+ * tests fail on purpose. That exit code is ignored when both reports were
+ * written. Volatile fields are then replaced so the committed files do not
  * change between runs:
- *   - startTime strings become 1970-01-01T00:00:00.000Z
- *   - duration numbers become 0
+ *   - startTime strings and JUnit timestamp attributes become
+ *     1970-01-01T00:00:00.000Z
+ *   - duration numbers and JUnit time attributes become 0
  *   - workerIndex and parallelIndex become 0
  *   - metadata objects become {}
  *   - absolute paths under the project, the repo, the home directory, or
  *     the temp directory become relative
+ *   - a JUnit hostname attribute is replaced only when it equals this
+ *     machine's hostname. Playwright 1.60.0 writes the project name there
+ *     (chromium in this fixture), and that value is left as-is
  *   - ANSI escape codes are removed
  *   - repeated locator-log counts ("12 ×") become a fixed "1 ×" line,
  *     including the indented line under them, because the count and its
@@ -28,11 +32,12 @@ import os from 'node:os';
 import path from 'node:path';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
-const reportPath = path.join(repoRoot, 'fixtures/reports/pw-1.60.0-outcomes.json');
+const jsonReportPath = path.join(repoRoot, 'fixtures/reports/pw-1.60.0-outcomes.json');
+const junitReportPath = path.join(repoRoot, 'fixtures/reports/pw-1.60.0-outcomes.junit.xml');
 const START_TIME = '1970-01-01T00:00:00.000Z';
 const ANSI_PATTERN = /\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
 
-fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+fs.mkdirSync(path.dirname(jsonReportPath), { recursive: true });
 
 const result = spawnSync(
   'npx',
@@ -44,20 +49,31 @@ const result = spawnSync(
   },
 );
 
-if (!fs.existsSync(reportPath)) {
+if (!fs.existsSync(jsonReportPath) || !fs.existsSync(junitReportPath)) {
   const code = typeof result.status === 'number' ? result.status : 1;
-  console.error('Playwright did not write the JSON report.');
+  console.error('Playwright did not write both reports.');
   process.exit(code === 0 ? 1 : code);
 }
 
-const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
-const sanitized = sanitizeReport(report, repoRoot);
-fs.writeFileSync(reportPath, `${JSON.stringify(sanitized, null, 2)}\n`);
+const report = JSON.parse(fs.readFileSync(jsonReportPath, 'utf8'));
+const rootDir = typeof report?.config?.rootDir === 'string' ? report.config.rootDir : '';
+const prefixes = uniquePrefixes([rootDir, repoRoot, os.homedir(), os.tmpdir()]);
+const sanitized = walk(report, prefixes);
+fs.writeFileSync(jsonReportPath, `${JSON.stringify(sanitized, null, 2)}\n`);
 
-function sanitizeReport(value, root) {
-  const rootDir = typeof value?.config?.rootDir === 'string' ? value.config.rootDir : '';
-  const prefixes = uniquePrefixes([rootDir, root, os.homedir(), os.tmpdir()]);
-  return walk(value, prefixes);
+const xml = sanitizeJunit(fs.readFileSync(junitReportPath, 'utf8'), prefixes);
+fs.writeFileSync(junitReportPath, xml.endsWith('\n') ? xml : `${xml}\n`);
+
+function sanitizeJunit(xml, prefixes) {
+  let out = sanitizeString(xml, prefixes);
+  out = out.replace(/\btimestamp="[^"]*"/g, `timestamp="${START_TIME}"`);
+  out = out.replace(/\btime="[^"]*"/g, 'time="0"');
+  const host = os.hostname();
+  if (host) {
+    const escaped = host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    out = out.replace(new RegExp(`hostname="${escaped}"`, 'g'), 'hostname="localhost"');
+  }
+  return out;
 }
 
 function walk(node, prefixes) {

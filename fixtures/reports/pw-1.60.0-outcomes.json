@@ -35,6 +35,12 @@
         {
           "outputFile": "../reports/pw-1.60.0-outcomes.json"
         }
+      ],
+      [
+        "junit",
+        {
+          "outputFile": "../reports/pw-1.60.0-outcomes.junit.xml"
+        }
       ]
     ],
     "reportSlowTests": {

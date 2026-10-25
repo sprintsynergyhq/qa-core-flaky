@@ -9,6 +9,8 @@ import type {
   SourceInfo,
   TestRecord,
 } from '../model.js';
+import { stripLeadingBom } from './detect.js';
+import { relativizeText, stripAnsi, toPortablePath } from '../report-path.js';
 
 const ATTEMPT_STATUSES: readonly AttemptStatus[] = [
   'passed',
@@ -25,9 +27,6 @@ const EXPECTED_STATUSES: readonly TestRecord['expectedStatus'][] = [
   'timedOut',
   'interrupted',
 ];
-
-/** CSI and single-character ANSI escapes used by Playwright error text. */
-const ANSI_PATTERN = /\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
 
 type JsonObject = Record<string, unknown>;
 
@@ -67,9 +66,10 @@ export function parsePlaywrightJson(
 }
 
 function parseJson(text: string, reportPath: string): JsonObject {
+  const source = stripLeadingBom(text);
   let value: unknown;
   try {
-    value = JSON.parse(text) as unknown;
+    value = JSON.parse(source) as unknown;
   } catch {
     throw new Error(`Invalid JSON in report ${reportPath}`);
   }
@@ -96,7 +96,9 @@ function readRootDir(data: JsonObject): string | undefined {
   if (!isObject(config)) return undefined;
   const rootDir = config.rootDir;
   if (typeof rootDir !== 'string' || rootDir === '' || rootDir === '.') return undefined;
-  return stripTrailingSlash(rootDir.replaceAll('\\', '/'));
+  const normalized = rootDir.replaceAll('\\', '/').replace(/\/$/, '');
+  if (normalized === '' || normalized === '.') return undefined;
+  return normalized;
 }
 
 function walkSuite(
@@ -111,9 +113,9 @@ function walkSuite(
 ): void {
   if (!isObject(suite)) return;
 
-  const suiteFile = relativePath(asString(suite.file), rootDir) ?? inheritedFile;
+  const suiteFile = toPortablePath(asString(suite.file), rootDir, warnings) ?? inheritedFile;
   const suiteTitle = asString(suite.title) ?? '';
-  const nextStack = isFileSuiteTitle(suiteTitle, suiteFile)
+  const nextStack = isFileSuiteTitle(suiteTitle, suiteFile, suite)
     ? titleStack
     : [...titleStack, suiteTitle];
 
@@ -146,7 +148,7 @@ function readSpec(
 
   const specTitle = asString(spec.title) ?? '';
   const titlePath = [...titleStack, specTitle];
-  const file = relativePath(asString(spec.file), rootDir) ?? inheritedFile ?? '';
+  const file = toPortablePath(asString(spec.file), rootDir, warnings) ?? inheritedFile ?? '';
   const line = asLine(spec.line);
   const tests = spec.tests;
   if (!Array.isArray(tests)) return;
@@ -162,7 +164,7 @@ function readSpec(
 
     const attempts = results
       .filter(isObject)
-      .map((result) => readAttempt(result, rootDir))
+      .map((result) => readAttempt(result, rootDir, warnings))
       .sort((left, right) => left.retry - right.retry);
 
     const record: TestRecord = {
@@ -180,21 +182,21 @@ function readSpec(
   }
 }
 
-function readAttempt(result: JsonObject, rootDir: string | undefined): Attempt {
+function readAttempt(result: JsonObject, rootDir: string | undefined, warnings: string[]): Attempt {
   const status = attemptStatus(result.status);
   const attempt: Attempt = {
     retry: typeof result.retry === 'number' ? result.retry : 0,
     status,
     durationMs: typeof result.duration === 'number' ? result.duration : 0,
-    errors: readErrors(result, rootDir),
-    attachments: readAttachments(result.attachments, rootDir),
+    errors: readErrors(result, rootDir, warnings),
+    attachments: readAttachments(result.attachments, rootDir, warnings),
   };
   if (typeof result.workerIndex === 'number') attempt.workerIndex = result.workerIndex;
   if (typeof result.startTime === 'string') attempt.startTime = result.startTime;
   return attempt;
 }
 
-function readErrors(result: JsonObject, rootDir: string | undefined): AttemptError[] {
+function readErrors(result: JsonObject, rootDir: string | undefined, warnings: string[]): AttemptError[] {
   const raw = Array.isArray(result.errors)
     ? result.errors
     : result.error !== undefined
@@ -202,29 +204,30 @@ function readErrors(result: JsonObject, rootDir: string | undefined): AttemptErr
       : [];
   const errors: AttemptError[] = [];
   for (const item of raw) {
-    const error = readError(item, rootDir);
+    const error = readError(item, rootDir, warnings);
     if (error) errors.push(error);
   }
   return errors;
 }
 
-function readError(item: unknown, rootDir: string | undefined): AttemptError | undefined {
+function readError(item: unknown, rootDir: string | undefined, warnings: string[]): AttemptError | undefined {
   if (typeof item === 'string') {
-    return { message: stripAnsi(item) };
+    return { message: relativizeText(stripAnsi(item), rootDir, warnings) };
   }
   if (!isObject(item)) return undefined;
   const message = stripAnsi(asString(item.message) ?? '');
   const error: AttemptError = { message };
   const stack = asString(item.stack);
-  if (stack !== undefined) error.stack = relativizeText(stripAnsi(stack), rootDir);
-  const location = readLocation(item.location, rootDir);
+  if (stack !== undefined) error.stack = relativizeText(stripAnsi(stack), rootDir, warnings);
+  const location = readLocation(item.location, rootDir, warnings);
   if (location) error.location = location;
-  return { ...error, message: relativizeText(message, rootDir) };
+  return { ...error, message: relativizeText(message, rootDir, warnings) };
 }
 
 function readLocation(
   value: unknown,
   rootDir: string | undefined,
+  warnings: string[],
 ): AttemptError['location'] | undefined {
   if (!isObject(value)) return undefined;
   const file = asString(value.file);
@@ -232,13 +235,13 @@ function readLocation(
   const column = value.column;
   if (file === undefined || typeof line !== 'number' || typeof column !== 'number') return undefined;
   return {
-    file: relativePath(file, rootDir) ?? file.replaceAll('\\', '/'),
+    file: toPortablePath(file, rootDir, warnings) ?? '',
     line,
     column,
   };
 }
 
-function readAttachments(value: unknown, rootDir: string | undefined): Attachment[] {
+function readAttachments(value: unknown, rootDir: string | undefined, warnings: string[]): Attachment[] {
   if (!Array.isArray(value)) return [];
   const attachments: Attachment[] = [];
   for (const item of value) {
@@ -248,7 +251,8 @@ function readAttachments(value: unknown, rootDir: string | undefined): Attachmen
     const attachment: Attachment = { name, contentType };
     const filePath = asString(item.path);
     if (filePath !== undefined) {
-      attachment.path = relativePath(filePath, rootDir) ?? filePath.replaceAll('\\', '/');
+      const portable = toPortablePath(filePath, rootDir, warnings);
+      if (portable !== undefined) attachment.path = portable;
     }
     attachments.push(attachment);
   }
@@ -302,34 +306,19 @@ function projectName(value: unknown): string {
   return trimmed === '' ? 'default' : trimmed;
 }
 
-function isFileSuiteTitle(title: string, file: string | undefined): boolean {
+/**
+ * The file suite's title is the spec path, and Playwright 1.60.0 gives that
+ * suite line 0. A describe has a source line. Its title stays in the path
+ * even when the title equals the spec file name.
+ */
+function isFileSuiteTitle(title: string, file: string | undefined, suite: JsonObject): boolean {
   if (title === '') return true;
+  const line = suite.line;
+  if (typeof line === 'number' && line > 0) return false;
   if (!file) return false;
   const normalizedTitle = title.replaceAll('\\', '/');
   const base = file.split('/').pop() ?? file;
   return normalizedTitle === file || normalizedTitle === base;
-}
-
-function relativePath(file: string | undefined, rootDir: string | undefined): string | undefined {
-  if (file === undefined) return undefined;
-  const normalized = stripTrailingSlash(file.replaceAll('\\', '/'));
-  if (!rootDir) return normalized;
-  if (normalized === rootDir) return '';
-  if (normalized.startsWith(`${rootDir}/`)) return normalized.slice(rootDir.length + 1);
-  return normalized;
-}
-
-function relativizeText(text: string, rootDir: string | undefined): string {
-  if (!rootDir || !text.includes(rootDir)) return text;
-  return text.split(`${rootDir}/`).join('').split(rootDir).join('.');
-}
-
-function stripAnsi(text: string): string {
-  return text.replace(ANSI_PATTERN, '');
-}
-
-function stripTrailingSlash(value: string): string {
-  return value.endsWith('/') ? value.slice(0, -1) : value;
 }
 
 function asString(value: unknown): string | undefined {

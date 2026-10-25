@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 /**
  * Local fixture project. It serves pages/app.html over file:// and does not
- * use the network. The JSON reporter writes the report that
+ * use the network. The JSON and JUnit reporters write the reports that
  * scripts/make-fixtures.mjs then sanitizes.
  *
  * testDir is left unset on purpose. Playwright 1.60.0 stores config.rootDir
@@ -16,7 +16,10 @@ export default defineConfig({
   outputDir: 'test-results',
   // A failing toHaveText should be an assertion error, not the test timeout.
   expect: { timeout: 1000 },
-  reporter: [['json', { outputFile: '../reports/pw-1.60.0-outcomes.json' }]],
+  reporter: [
+    ['json', { outputFile: '../reports/pw-1.60.0-outcomes.json' }],
+    ['junit', { outputFile: '../reports/pw-1.60.0-outcomes.junit.xml' }],
+  ],
   projects: [
     {
       name: 'chromium',

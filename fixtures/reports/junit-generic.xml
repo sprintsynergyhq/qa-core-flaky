@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="generic" tests="3" failures="1" skipped="1">
+    <testcase name="adds an item" classname="CartTest" file="tests/cart.spec.ts">
+    </testcase>
+    <testcase name="checks the total" classname="CartTest" file="tests/cart.spec.ts">
+      <failure message="Expected 1 but saw 2">Expected 1 but saw 2</failure>
+    </testcase>
+    <testcase name="waits for stock" classname="CartTest" file="tests/cart.spec.ts">
+      <skipped></skipped>
+    </testcase>
+  </testsuite>
+</testsuites>
