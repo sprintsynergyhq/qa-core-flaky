@@ -12,6 +12,7 @@ type ModeSummary = {
  * A test that passes in-order and fails isolated, or the reverse, is
  * order-dependent when every failure in that mode shares one error signature.
  * A mode that mixes passes and failures, or mixes signatures, is not this signal.
+ * An unselectable command is not a pass or a failure, so it cannot create this signal.
  * The line names the modes and the counts.
  */
 export function orderDependencyEvidence(record: TestRecord): string[] {
@@ -23,7 +24,7 @@ export function orderDependencyEvidence(record: TestRecord): string[] {
 }
 
 function summarize(attempts: readonly Attempt[], mode: RerunMode): ModeSummary | undefined {
-  const rows = attempts.filter((attempt) => attempt.rerun?.mode === mode);
+  const rows = attempts.filter((attempt) => attempt.rerun?.mode === mode && attempt.status !== 'unselectable');
   if (rows.length === 0) return undefined;
   const failed = rows.filter(isFailStatus);
   const passed = rows.filter((attempt) => attempt.status === 'passed');

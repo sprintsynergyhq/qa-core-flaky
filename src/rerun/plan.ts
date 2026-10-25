@@ -210,9 +210,11 @@ export function exactFileArg(filePath: string, line?: number): string {
 }
 
 /**
- * The command a person can copy. Every argument is redacted. When redaction
- * changes the `-g` title, the printed command omits `-g` and says the title
- * was redacted. The process still receives the raw title.
+ * The command a person can copy. Every argument is redacted. The file
+ * filter keeps the escapes the process received. Only the home segment
+ * becomes `<home>`. When redaction changes the `-g` title, the printed
+ * command omits `-g` and says the title was redacted. The process still
+ * receives the raw title.
  */
 export function formatPrintedCommand(
   args: readonly string[],
@@ -220,19 +222,16 @@ export function formatPrintedCommand(
   prefix: readonly string[] = [],
 ): string {
   const marks = record ? marksFor(record) : undefined;
-  // `\/` and `\.` are regex escapes in the file filter. Show them as `/` and
-  // `.` before redaction so `^/home/...` is a real path and a dot stays a dot.
-  const show = (part: string) => shellQuote(part.replaceAll('\\/', '/').replaceAll('\\.', '.'));
   const redact = (value: string) => (marks ? redactHomeText(value, marks) : redactHomeText(value));
   const grepAt = args.indexOf('-g');
   const title = grepAt === -1 ? undefined : args[grepAt + 1];
-  // The grep is escaped, so `\/home\/name` would not match a home. Check the
-  // unescaped title, and omit `-g` when that title contains one.
+  // The check opens `\/` on a copy so a home in the title is visible.
+  // The printed argument stays escaped.
   const visibleTitle = title?.replaceAll('\\/', '/');
   const titleChanged = visibleTitle !== undefined && redact(visibleTitle) !== visibleTitle;
-  if (!titleChanged) return redact([...prefix, ...args].map(show).join(' '));
-  const kept = args.filter((part, index) => part !== '-g' && args[index - 1] !== '-g');
-  const shown = redact([...prefix, ...kept].map(show).join(' '));
+  const kept = titleChanged ? args.filter((part, index) => part !== '-g' && args[index - 1] !== '-g') : args;
+  const shown = [...prefix, ...kept].map((part) => shellQuote(redact(part))).join(' ');
+  if (!titleChanged) return shown;
   return `${shown} (the title was redacted, so -g is omitted here)`;
 }
 
@@ -387,8 +386,22 @@ function findRecord(records: readonly TestRecord[], id: string): TestRecord | un
 }
 
 function matchesOnly(record: TestRecord, id: string): boolean {
-  if (record.id === id) return true;
-  return redactHomeText(record.id, marksFor(record)) === id;
+  const marks = marksFor(record);
+  const redacted = redactHomeText(record.id, marks);
+  for (const form of onlyForms(id)) {
+    if (record.id === form || redacted === form) return true;
+  }
+  return false;
+}
+
+/**
+ * The Markdown next step writes a newline in the id as `\` and `n`.
+ * `--only` accepts that pair, and a real newline, as the same id.
+ */
+function onlyForms(id: string): string[] {
+  if (!id.includes('\\n') && !id.includes('\\r')) return [id];
+  const unfolded = id.replaceAll('\\r\\n', '\n').replaceAll('\\n', '\n').replaceAll('\\r', '\n');
+  return unfolded === id ? [id] : [id, unfolded];
 }
 
 function marksFor(record: TestRecord) {

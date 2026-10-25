@@ -95,8 +95,9 @@ function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefi
     ...finding,
     evidence: finding.evidence.map((line) => redact(line)),
   }));
-  const failed = attempts.filter(isFailStatus).length;
-  const passed = attempts.filter((attempt) => attempt.status === 'passed').length;
+  const counted = attempts.filter((attempt) => attempt.status !== 'unselectable');
+  const failed = counted.filter(isFailStatus).length;
+  const passed = counted.filter((attempt) => attempt.status === 'passed').length;
   const id = redact(base.id);
   const reportPath = redact(base.source.reportPath);
   const reruns = rerunCounts(attempts);
@@ -110,7 +111,7 @@ function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefi
     signals: decision.signals,
     causes,
     evidence,
-    attempts: attemptCounts(attempts, failed, passed, decision.signals.some((signal) => signal.kind === 'same-code-flip'), reruns),
+    attempts: attemptCounts(counted, failed, passed, decision.signals.some((signal) => signal.kind === 'same-code-flip'), reruns),
     history: {
       runsSeen: records.length,
       firstFailingCommit: null,
@@ -155,11 +156,15 @@ function rerunCounts(attempts: readonly Attempt[]): TriageAttempts['reruns'] {
   for (const mode of RERUN_MODES) {
     const rows = attempts.filter((attempt) => attempt.rerun?.mode === mode);
     if (rows.length === 0) continue;
+    const ran = rows.filter((attempt) => attempt.status !== 'unselectable');
+    const notRun = rows.length - ran.length;
+    if (ran.length === 0 && notRun === 0) continue;
     const counts: RerunCounts = {
-      total: rows.length,
-      failed: rows.filter(isFailStatus).length,
-      passed: rows.filter((attempt) => attempt.status === 'passed').length,
+      total: ran.length,
+      failed: ran.filter(isFailStatus).length,
+      passed: ran.filter((attempt) => attempt.status === 'passed').length,
     };
+    if (notRun > 0) counts.notRun = notRun;
     if (mode === 'repeat') reruns.repeat = counts;
     else if (mode === 'isolated') reruns.isolated = counts;
     else reruns['in-order'] = counts;
@@ -168,9 +173,13 @@ function rerunCounts(attempts: readonly Attempt[]): TriageAttempts['reruns'] {
   return any ? reruns : undefined;
 }
 
-/** N is the number of rerun attempts. The sentence is omitted when one of them failed. */
+/**
+ * N is the number of rerun attempts that ran. An unselectable command is
+ * not a run and does not block the sentence. A ran attempt that did not
+ * pass omits the sentence.
+ */
 function rerunObservation(attempts: readonly Attempt[]): string | undefined {
-  const rows = attempts.filter((attempt) => attempt.rerun !== undefined);
+  const rows = attempts.filter((attempt) => attempt.rerun !== undefined && attempt.status !== 'unselectable');
   if (rows.length === 0) return undefined;
   if (rows.some((attempt) => attempt.status !== 'passed')) return undefined;
   return `no flake observed in ${rows.length} runs`;

@@ -248,29 +248,24 @@ test('a redacted title is omitted from the printed command and kept in the args'
 
 test('a printed file filter hides a POSIX or Windows home', () => {
   const filters = [
-    ['/^\\/home\\/bob\\/p\\/a\\.spec\\.ts$/:3', '/^<home>/p/a.spec.ts$/:3'],
-    ['/^\\/home\\/bob\\/p\\/a\\.spec\\.ts$/', '/^<home>/p/a.spec.ts$/'],
-    ['/^C:\\/Users\\/bob\\/p\\/a\\.spec\\.ts$/:3', '/^<home>/p/a.spec.ts$/:3'],
-    ['/^C:\\/Users\\/bob\\/p\\/a\\.spec\\.ts$/', '/^<home>/p/a.spec.ts$/'],
+    [String.raw`/^\/home\/bob\/p\/a\.spec\.ts$/:3`, String.raw`/^\/<home>\/p\/a\.spec\.ts$/:3`],
+    [String.raw`/^\/home\/bob\/p\/a\.spec\.ts$/`, String.raw`/^\/<home>\/p\/a\.spec\.ts$/`],
+    [String.raw`/^C:\/Users\/bob\/p\/a\.spec\.ts$/:3`, String.raw`/^<home>\/p\/a\.spec\.ts$/:3`],
+    [String.raw`/^C:\/Users\/bob\/p\/a\.spec\.ts$/`, String.raw`/^<home>\/p\/a\.spec\.ts$/`],
   ];
   for (const [filter, expected] of filters) {
     const printed = formatPrintedCommand(['--retries', '0', '--', filter]);
     assert.equal(printed.includes('bob'), false, printed);
-    assert.equal(printed.includes(expected), true, printed);
+    assert.equal(printed.includes(`'${expected}'`), true, printed);
+    assert.equal(printed.includes(expected.replaceAll('\\', '')), false);
   }
-  const raw = [
-    ['/^/home/bob/p/a.spec.ts$/:3', '/^<home>/p/a.spec.ts$/:3'],
-    ['/^/home/bob/p/a.spec.ts$/', '/^<home>/p/a.spec.ts$/'],
-    ['/^C:/Users/bob/p/a.spec.ts$/:3', '/^<home>/p/a.spec.ts$/:3'],
-    ['/^C:/Users/bob/p/a.spec.ts$/', '/^<home>/p/a.spec.ts$/'],
-  ];
-  for (const [filter, expected] of raw) {
-    assert.equal(redactHomeText(filter), expected, filter);
-  }
-  assert.equal(redactHomeText(String.raw`/^\/home\/bob\/p\/a\.spec\.ts$/:3`).includes('bob'), false);
-  assert.equal(redactHomeText(String.raw`/^\/home\/bob\/p\/a\.spec\.ts$/`).includes('bob'), false);
-  assert.equal(redactHomeText(String.raw`/^C:\/Users\/bob\/p\/a\.spec\.ts$/:3`).includes('bob'), false);
-  assert.equal(redactHomeText(String.raw`/^C:\/Users\/bob\/p\/a\.spec\.ts$/`).includes('bob'), false);
+  const weird = exactFileArg('/home/bob/we ird[1]+(x)/m.spec.ts');
+  const printedWeird = formatPrintedCommand(['--', weird]);
+  const expectedWeird = weird.replace(String.raw`\/home\/bob\/`, String.raw`\/<home>\/`);
+  assert.equal(printedWeird, `'--' '${expectedWeird}'`);
+  assert.equal(printedWeird.includes('bob'), false);
+  assert.match(printedWeird, /m\\\.spec\\\.ts/);
+  assert.match(printedWeird, /\\\[1\\\]/);
 });
 
 test('a stored home file cannot be rerun', () => {
@@ -560,6 +555,7 @@ test('an isolated report that is not exactly the requested test is recorded and 
   });
   assert.equal(calls, 2);
   const reason = merged.find((item) => item.id === reader.id).attempts.at(-1);
+  assert.equal(reason.status, 'unselectable');
   assert.equal(reason.rerun.mode, 'isolated');
   assert.match(reason.errors[0].message, /Could not select this test/);
   assert.match(reason.errors[0].message, /did not run exactly that test/);
@@ -582,6 +578,7 @@ test('a child that exits 0 after running nothing is recorded', async () => {
       return { code: 0, stderr: 'No tests found\n' };
     },
   });
+  assert.equal(merged[0].attempts.at(-1).status, 'unselectable');
   const message = merged[0].attempts.at(-1).errors[0].message;
   assert.match(message, /Could not select this test/);
   assert.match(message, /did not run exactly that test/);
@@ -601,8 +598,81 @@ test('a wrong attempt count is recorded and the original attempts stay', async (
     runner: copyRunner('fixtures/reports/rerun/repeat-pass.json'),
   });
   assert.equal(merged[0].attempts[0].rerun, undefined);
+  assert.equal(merged[0].attempts.at(-1).status, 'unselectable');
   assert.match(merged[0].attempts.at(-1).errors[0].message, /expected 2 attempts/);
   assert.equal(merged[0].attempts.at(-1).rerun.mode, 'repeat');
+});
+
+test('an unselectable rerun does not change the verdict or the cause', () => {
+  const original = record('same value', [attempt('failed', VALUE), attempt('failed', VALUE, 1), attempt('failed', VALUE, 2)], {
+    commitSha: 'abc',
+  });
+  const before = buildTriageReport([original]);
+  const onlyGap = record('same value', [...original.attempts], { commitSha: 'abc' });
+  for (let index = 0; index < 3; index += 1) {
+    onlyGap.attempts.push(
+      attempt('unselectable', 'Could not select this test. isolated rerun did not run exactly that test.', 0, {
+        mode: 'isolated',
+        runIndex: index,
+      }),
+    );
+  }
+  const gapOnlyReport = buildTriageReport([onlyGap]);
+  assert.equal(gapOnlyReport.entries[0].verdict, before.entries[0].verdict);
+  assert.equal(gapOnlyReport.entries[0].ruleId, before.entries[0].ruleId);
+  assert.equal(JSON.stringify(gapOnlyReport.entries[0].causes), JSON.stringify(before.entries[0].causes));
+  assert.equal(gapOnlyReport.entries[0].observation, undefined);
+  assert.equal(gapOnlyReport.entries[0].attempts.total, 3);
+  assert.match(renderTriageMarkdown(gapOnlyReport), /isolated not run 3: could not select/);
+  const withGap = record('same value', [...original.attempts], { commitSha: 'abc' });
+  for (let index = 0; index < 3; index += 1) {
+    withGap.attempts.push(
+      attempt('unselectable', 'Could not select this test. isolated rerun did not run exactly that test.', 0, {
+        mode: 'isolated',
+        runIndex: index,
+      }),
+    );
+  }
+  withGap.attempts.push(attempt('passed', undefined, 0, { mode: 'in-order', runIndex: 0 }));
+  const passedOnly = record('same value', [...original.attempts, attempt('passed', undefined, 0, { mode: 'in-order', runIndex: 0 })], {
+    commitSha: 'abc',
+  });
+  const gapReport = buildTriageReport([withGap]);
+  const passedReport = buildTriageReport([passedOnly]);
+  assert.equal(gapReport.entries[0].verdict, passedReport.entries[0].verdict);
+  assert.equal(gapReport.entries[0].ruleId, passedReport.entries[0].ruleId);
+  assert.equal(gapReport.entries[0].causes[0]?.cause, passedReport.entries[0].causes[0]?.cause);
+  assert.equal(JSON.stringify(gapReport.entries[0].causes), JSON.stringify(passedReport.entries[0].causes));
+  assert.equal(gapReport.entries[0].causes.some((finding) => finding.ruleIds.includes('DATA-ORDER')), false);
+  const markdown = renderTriageMarkdown(gapReport);
+  assert.match(markdown, /isolated not run 3: could not select/);
+  assert.equal(markdown.includes('DATA-ORDER'), false);
+  assert.equal(before.entries[0].verdict, 'likely-real-bug');
+  const observed = record(
+    'same value',
+    [
+      attempt('failed', VALUE),
+      attempt('passed', undefined, 0, { mode: 'isolated', runIndex: 0 }),
+      attempt('passed', undefined, 0, { mode: 'isolated', runIndex: 1 }),
+      attempt('unselectable', 'Could not select this test.', 0, { mode: 'isolated', runIndex: 2 }),
+    ],
+    { commitSha: 'abc' },
+  );
+  const observedReport = buildTriageReport([observed]);
+  assert.equal(observedReport.entries[0].observation, 'no flake observed in 2 runs');
+  assert.match(renderTriageMarkdown(observedReport), /isolated total 2, failed 0, passed 2; isolated not run 1: could not select/);
+  assert.equal(observedReport.entries[0].attempts.total, 3);
+});
+
+test('only accepts a newline written as a backslash n', () => {
+  const item = record('line\nbreak', [attempt('failed', VALUE)]);
+  const escaped = item.id.replaceAll('\n', '\\n');
+  const plan = planReruns([item], { only: [escaped], modes: ['isolated'], times: 1 });
+  assert.equal(plan.tests.length, 1);
+  assert.equal(plan.tests[0].id, item.id);
+  const markdown = renderTriageMarkdown(buildTriageReport([item]));
+  const next = markdown.split('\n').find((line) => line.includes('qa-core-flaky rerun'));
+  assert.match(next, /line\\nbreak/);
 });
 
 test('a selection failure hides a home and still runs the next test', async () => {

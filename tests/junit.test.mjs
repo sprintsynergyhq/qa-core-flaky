@@ -780,18 +780,43 @@ test('a file filter and a mixed separator hide the username', () => {
     ['/^C:/Users/bob/p/a.spec.ts$/', '/^<home>/p/a.spec.ts$/'],
     ['/home/bob/my project\\a.spec.ts', '<home>/my project/a.spec.ts'],
     ['C:\\Users\\bob\\my project\\a.spec.ts', '<home>/my project/a.spec.ts'],
+    [String.raw`/^\/home\/bob\/p\/a\.spec\.ts$/:3`, String.raw`/^\/<home>\/p\/a\.spec\.ts$/:3`],
+    [String.raw`/^\/home\/bob\/p\/a\.spec\.ts$/`, String.raw`/^\/<home>\/p\/a\.spec\.ts$/`],
+    [String.raw`/^C:\/Users\/bob\/p\/a\.spec\.ts$/:3`, String.raw`/^<home>\/p\/a\.spec\.ts$/:3`],
+    [String.raw`/^C:\/Users\/bob\/p\/a\.spec\.ts$/`, String.raw`/^<home>\/p\/a\.spec\.ts$/`],
   ];
   for (const [input, expected] of cases) {
     assert.equal(redactHomeText(input), expected, input);
   }
-  assert.equal(redactHomeText(String.raw`/^\/home\/bob\/p\/a\.spec\.ts$/:3`).includes('bob'), false);
-  assert.equal(redactHomeText(String.raw`/^\/home\/bob\/p\/a\.spec\.ts$/`).includes('bob'), false);
-  assert.equal(redactHomeText(String.raw`/^C:\/Users\/bob\/p\/a\.spec\.ts$/:3`).includes('bob'), false);
-  assert.equal(redactHomeText(String.raw`/^C:\/Users\/bob\/p\/a\.spec\.ts$/`).includes('bob'), false);
   const later = redactHomeText('/home/bob/file see /home/alice/x');
   assert.equal(later.includes('bob'), false);
   assert.equal(later.includes('alice'), false);
   assert.equal(redactHomeText('C:\\Users\\bob\\a;C:\\\\Windows'), '<home>/a;C:\\\\Windows');
+});
+
+test('a later Windows or UNC home on the same line is redacted', () => {
+  const mixed = redactHomeText('ENOENT: open /home/bob/cfg.json then C:\\Users\\alice\\cfg.json');
+  assert.equal(mixed, 'ENOENT: open <home>/cfg.json then <home>/cfg.json');
+  const unc = redactHomeText(String.raw`/home/bob/a.txt and \\server\Users\carol\y`);
+  assert.equal(unc.includes('bob'), false);
+  assert.equal(unc.includes('carol'), false);
+  assert.equal(unc, String.raw`<home>/a.txt and \\server<home>/y`);
+  assert.equal(redactHomeText('toMatch(/a\\/b/)'), 'toMatch(/a\\/b/)');
+  assert.equal(
+    redactHomeText('home/alice/proj/test-results/error-context.md'),
+    '<home>/proj/test-results/error-context.md',
+  );
+  assert.equal(redactHomeText('users/carol/notes'), '<home>/notes');
+});
+
+test('a long line after a home stays under the bound', () => {
+  const line = `/home/bob/a ${'word '.repeat(40000)}C:\\x`;
+  const started = Date.now();
+  const out = redactHomeText(line);
+  const elapsed = Date.now() - started;
+  assert.equal(elapsed < 2000, true, `elapsed ${elapsed}`);
+  assert.equal(out.includes('bob'), false);
+  assert.equal(out.startsWith('<home>/a '), true);
 });
 
 test('homeMarks stays linear for many usernames', () => {

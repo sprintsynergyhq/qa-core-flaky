@@ -70,7 +70,10 @@ function formatReruns(reruns: TriageEntry['attempts']['reruns']): string | undef
   for (const mode of ['repeat', 'isolated', 'in-order'] as const) {
     const counts = reruns[mode];
     if (!counts) continue;
-    parts.push(`${mode} total ${counts.total}, failed ${counts.failed}, passed ${counts.passed}`);
+    if (counts.total > 0) {
+      parts.push(`${mode} total ${counts.total}, failed ${counts.failed}, passed ${counts.passed}`);
+    }
+    if (counts.notRun) parts.push(`${mode} not run ${counts.notRun}: could not select`);
   }
   if (parts.length === 0) return undefined;
   return `Reruns: ${parts.join('; ')}.`;

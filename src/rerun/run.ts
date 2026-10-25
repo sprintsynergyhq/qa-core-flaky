@@ -271,7 +271,7 @@ function recordUnselectable(
   const message = redactHomeText(reason);
   const attempt: Attempt = {
     retry: 0,
-    status: 'failed',
+    status: 'unselectable',
     durationMs: 0,
     errors: [{ message }],
     attachments: [],

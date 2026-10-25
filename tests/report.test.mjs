@@ -13,6 +13,7 @@ import {
   parseJunit,
   parsePlaywrightJson,
   redactHomeText,
+  redactParseResult,
   renderTriageJson,
   renderTriageMarkdown,
 } from '../dist/index.js';
@@ -708,4 +709,31 @@ test('markdown escapes stars, underscores, and backticks in a title', () => {
   assert.match(markdown, /\\*bold\\*/);
   assert.match(markdown, /\\_em\\_/);
   assert.match(markdown, /\\`code\\`/);
+});
+
+test('corpus triage text hides the known home usernames', () => {
+  const corpora = [
+    'fixtures/reports/pw-1.60.0-outcomes.json',
+    'fixtures/reports/pw-1.60.0-outcomes.junit.xml',
+    'fixtures/reports/junit-generic.xml',
+    'fixtures/reports/junit-no-root-home.xml',
+    'demo/saucedemo/reports/recorded-seed-443.json',
+    'demo/saucedemo/reports/recorded-seed-443.junit.xml',
+  ];
+  const names = ['alice', 'bob', 'carol'];
+  for (const reportPath of corpora) {
+    const source = fs.readFileSync(reportPath, 'utf8');
+    const parsed = reportPath.endsWith('.json') ? parsePlaywrightJson(source, reportPath) : parseJunit(source, reportPath);
+    const report = buildTriageReport(parsed.records);
+    const outputs = {
+      'triage.json': renderTriageJson(report),
+      'triage.md': renderTriageMarkdown(report),
+      'parse --redact': JSON.stringify(redactParseResult(parsed)),
+    };
+    for (const [label, text] of Object.entries(outputs)) {
+      for (const name of names) {
+        assert.equal(text.includes(name), false, `${reportPath} ${label} contains ${name}`);
+      }
+    }
+  }
 });

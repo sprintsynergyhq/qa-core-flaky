@@ -27,17 +27,19 @@ export type VerdictSignal = {
 
 /** Pass and fail counts for one rerun mode. */
 export type RerunCounts = {
-  /** Attempts tagged with this mode. */
+  /** Attempts in this mode that Playwright actually ran. Unselectable commands are not included. */
   total: number;
   /** Failed, timed out, or interrupted attempts in this mode. */
   failed: number;
   /** Passed attempts in this mode. */
   passed: number;
+  /** Commands that could not select this test. Omitted when there are none. Not part of `total`. */
+  notRun?: number;
 };
 
 /** Pass and fail counts for one test id across every report given to triage. */
 export type TriageAttempts = {
-  /** Every attempt, including skipped attempts. */
+  /** Every attempt that ran, including skipped attempts. An unselectable rerun command is not included. */
   total: number;
   /** Attempts whose status is failed, timedOut, or interrupted. */
   failed: number;
@@ -106,9 +108,10 @@ export type TriageEntry = {
   /** A sentence that contains `qa-core-flaky rerun --from <report> --only <id>`, plus `--config` when the report recorded one. */
   nextStep: string;
   /**
-   * Set when every rerun attempt passed.
-   * The text is `no flake observed in N runs`. Absent when there were no reruns
-   * or a rerun failed. The report does not call that result steady.
+   * Set when every rerun attempt that ran passed.
+   * The text is `no flake observed in N runs`. N does not include an unselectable command.
+   * Absent when there were no ran reruns or a ran rerun did not pass.
+   * The report does not call that result steady.
    */
   observation?: string;
   /** Set for an unexpected `test.fail()` pass, or when the failures have no error text. Otherwise null. */

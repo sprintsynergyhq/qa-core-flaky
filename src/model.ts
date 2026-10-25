@@ -14,8 +14,10 @@ export type Outcome = 'passed' | 'flaky' | 'failed' | 'skipped';
  * `timedOut` means the attempt hit its timeout.
  * `skipped` means the attempt did not run.
  * `interrupted` means the attempt was stopped before it finished.
+ * `unselectable` means a rerun command could not select this test.
+ * Parsers do not emit it. Verdicts, causes, signatures, and rerun counts skip it.
  */
-export type AttemptStatus = 'passed' | 'failed' | 'timedOut' | 'skipped' | 'interrupted';
+export type AttemptStatus = 'passed' | 'failed' | 'timedOut' | 'skipped' | 'interrupted' | 'unselectable';
 
 /**
  * One error attached to an attempt. ANSI escape codes are removed before

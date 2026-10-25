@@ -2,7 +2,7 @@
 
 `decideVerdict` reads every record for one test id and returns one verdict. There is no model call. The rows below are applied in order. The first row that matches wins.
 
-A pass and a fail are on the same code when they share a commit SHA. A missing SHA counts as the same code only inside one report. Attempts with status `failed`, `timedOut`, or `interrupted` are failures. `passed` attempts are passes. Skipped attempts are neither.
+A pass and a fail are on the same code when they share a commit SHA. A missing SHA counts as the same code only inside one report. Attempts with status `failed`, `timedOut`, or `interrupted` are failures. `passed` attempts are passes. Skipped attempts are neither. An `unselectable` rerun attempt is neither, and it does not change the verdict, the cause, or `no flake observed`.
 
 When a later run fails on every attempt with one error signature, that consistent failure is checked before a same-code flip. A broken test, an environment issue, or a likely real bug outranks flaky. The report lists both signals.
 

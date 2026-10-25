@@ -212,7 +212,16 @@ function splitAbsolute(value: string): { drive: string; parts: string[] } {
 }
 
 type HomeMatch =
-  | { kind: 'replace'; replaceFrom: number; username: string; hasSep: boolean; tail: string; next: number }
+  | {
+      kind: 'replace';
+      replaceFrom: number;
+      username: string;
+      hasSep: boolean;
+      tail: string;
+      next: number;
+      /** `\/home\/name` keeps the escaped slash. A drive form replaces the drive too. */
+      escaped?: 'slash' | 'drive';
+    }
   | { kind: 'skip'; next: number };
 
 /** Username to the `<home>` mark used for one triage entry. */
@@ -233,12 +242,14 @@ export type HomeMarks = ReadonlyMap<string, string>;
  * the rest of the path. A separator is one `/` or a run of one or more `\`,
  * so `C:\Users\alice\x.json` and `C:\\Users\\alice\\x.json` are the same path.
  * A path tail stops at whitespace, a quote, `)`, `]`, `>`, or `?`, `*`,
- * `#`, `=`, `,`. It does not stop at `:`. A space that is followed by a
- * backslash-separated segment stays in the tail, and that backslash is
- * written as `/`, so `/home/bob/my project\a.spec.ts` becomes
- * `<home>/my project/a.spec.ts`. A space that is not followed by a
- * backslash still ends the tail. `\/` is read as `/`, and `^` is a path
- * boundary, so a file filter `/^\/home\/name\/...$/` hides the username.
+ * `#`, `=`, `,`. It does not stop at `:`. A space continues that tail for
+ * one more segment only when the segment contains a backslash. That
+ * continuation stops before a drive letter, `\\`, or a UNC path. It does
+ * not look further down the line. `/home/bob/my project\a.spec.ts` becomes
+ * `<home>/my project/a.spec.ts`. A later `C:\Users\...` or `\\server\Users\...`
+ * stays its own home. `^` is a path boundary. An escaped slash is not
+ * rewritten to `/`. `\/home\/name` and `C:\/Users\/name` hide the username
+ * and leave every other escape as written.
  *
  * A letter before `:` is a drive letter only at the start of the text or
  * after a character that is not a letter or digit. `file:///` and `\\?\`
@@ -252,8 +263,7 @@ export type HomeMarks = ReadonlyMap<string, string>;
  * starts with a letter, a digit, or `_`, and a `/` or the end of the path
  * follows. `~/proj` is not, because it has no username. `~` inside
  * `locator('...')` or `locator("...")` is a CSS combinator and stays.
- * A path boundary may be `,`, `;`, `<`, `>`, or `^`. An escaped slash
- * (`\/`) is a slash.
+ * A path boundary may be `,`, `;`, `<`, `>`, or `^`.
  * `file://localhost/home/...` is a home. `../../../home/bob/...` is a home.
  * `\\server\Users\bob`, `\\?\UNC\server\Users\bob`, `//server/Users/bob`,
  * `smb://server/Users/bob`, `SMB://server/users/bob`, `x\\Users\\bob`, and
@@ -276,7 +286,7 @@ export type HomeMarks = ReadonlyMap<string, string>;
  * add a warning.
  */
 export function redactHomeText(value: string, marks?: HomeMarks): string {
-  const masked = maskUrls(openEscapedSlashes(value));
+  const masked = maskUrls(value);
   const text = tagLiteralMarks(masked.text);
   let out = '';
   let cursor = 0;
@@ -288,7 +298,9 @@ export function redactHomeText(value: string, marks?: HomeMarks): string {
     }
     const mark = marks?.get(hit.username) ?? '<home>';
     out += text.slice(cursor, hit.replaceFrom);
-    out += homeToken(text, hit.replaceFrom, hit.hasSep, mark);
+    if (hit.escaped === 'slash') out += `\\/${mark}`;
+    else if (hit.escaped === 'drive') out += mark;
+    else out += homeToken(text, hit.replaceFrom, hit.hasSep, mark);
     out += hit.tail;
     if (hit.next <= cursor) break;
     cursor = hit.next;
@@ -319,7 +331,7 @@ export function homeMarks(texts: readonly string[]): HomeMarks {
 }
 
 function homeUsernames(value: string): string[] {
-  const text = maskUrls(openEscapedSlashes(value)).text;
+  const text = maskUrls(value).text;
   const users: string[] = [];
   let cursor = 0;
   while (cursor < text.length) {
@@ -335,10 +347,12 @@ function homeUsernames(value: string): string[] {
 function findHome(text: string, from: number): HomeMatch | undefined {
   for (let index = from; index < text.length; index += 1) {
     const hit =
+      matchEscapedHome(text, index) ??
       matchDriveHome(text, index) ??
       matchTildeHome(text, index) ??
       matchDotDotHome(text, index) ??
-      matchSlashHome(text, index);
+      matchSlashHome(text, index) ??
+      matchBareFolderHome(text, index);
     if (!hit) continue;
     if (hit.kind === 'skip') {
       if (hit.next <= index) continue;
@@ -355,6 +369,24 @@ function matchDriveHome(text: string, index: number): HomeMatch | undefined {
   const afterDrive = readSeparator(text, index + 2);
   if (afterDrive === undefined) return undefined;
   const folder = readHomeFolder(text, afterDrive, true);
+  if (!folder) return undefined;
+  return finishHome(text, index, folder.userStart);
+}
+
+/**
+ * `home/alice/...` with no leading slash. A JUnit attachment can be stored
+ * that way. The folder name is at most `users` (5 letters), so a longer
+ * word is rejected without scanning it.
+ */
+function matchBareFolderHome(text: string, index: number): HomeMatch | undefined {
+  const ch = text[index] ?? '';
+  if (ch !== 'h' && ch !== 'H' && ch !== 'u' && ch !== 'U') return undefined;
+  if (!isPathStart(text, index)) return undefined;
+  let end = index;
+  const cap = Math.min(text.length, index + 6);
+  while (end < cap && /[A-Za-z]/.test(text[end] ?? '')) end += 1;
+  if (end - index > 5) return undefined;
+  const folder = readHomeFolder(text, index, false);
   if (!folder) return undefined;
   return finishHome(text, index, folder.userStart);
 }
@@ -430,9 +462,42 @@ function isDotDotStart(text: string, index: number): boolean {
   return /[\s"'=(`\[{:,;<>^/\\]/.test(text[index - 1] ?? '');
 }
 
-/** A printed file filter escapes slashes as `\/`. Read that as one slash. */
-function openEscapedSlashes(value: string): string {
-  return value.replaceAll('\\/', '/');
+/**
+ * `\/home\/name` and `C:\/Users\/name` hide the username without turning
+ * other `\/` escapes into `/`. The characters after the username stay.
+ */
+function matchEscapedHome(text: string, index: number): HomeMatch | undefined {
+  const drive = isDriveLetter(text, index) && text.startsWith(':\\/', index + 1);
+  let folderAt: number;
+  if (drive) folderAt = index + 4;
+  else if (text.startsWith('\\/', index) && isPathStart(text, index)) folderAt = index + 2;
+  else return undefined;
+  let folderEnd = folderAt;
+  while (folderEnd < text.length && /[A-Za-z]/.test(text[folderEnd] ?? '')) folderEnd += 1;
+  if (folderEnd === folderAt) return undefined;
+  const name = text.slice(folderAt, folderEnd);
+  if (!/^home$/i.test(name) && !/^users$/i.test(name)) return undefined;
+  if (!text.startsWith('\\/', folderEnd)) return undefined;
+  const userStart = folderEnd + 2;
+  let userEnd = userStart;
+  while (userEnd < text.length) {
+    const ch = text[userEnd] ?? '';
+    if (ch === '\\' || ch === '/' || ch === '\n' || ch === '\r' || /\s/.test(ch)) break;
+    if (/[?*#=,;]/.test(ch) || /["'`()<>|[\]{}]/.test(ch)) break;
+    userEnd += 1;
+  }
+  if (userEnd === userStart) return undefined;
+  const username = text.slice(userStart, userEnd);
+  if (username.startsWith(':') || !/\p{L}/u.test(username)) return undefined;
+  return {
+    kind: 'replace',
+    replaceFrom: index,
+    username,
+    hasSep: false,
+    tail: '',
+    next: userEnd,
+    escaped: drive ? 'drive' : 'slash',
+  };
 }
 
 /**
@@ -659,29 +724,31 @@ function isTailStop(ch: string): boolean {
 }
 
 /**
- * `/home/name/my project\a.spec.ts` stops at the space, then a backslash
- * continues the same path. Keep that space and write the backslash as `/`.
- * A space with no following backslash still ends the tail, so a later
- * `/home/other` stays a separate home. `;C:\\Windows` is not this case.
+ * One whitespace-delimited segment after the tail, and only when that
+ * segment contains a backslash. Stop before a drive letter, `\\`, or a
+ * UNC path so a later home is found on its own. Do not scan past that
+ * segment: a backslash anywhere later on the line is not this path.
  */
 function readMixedTail(value: string, start: number): { text: string; next: number } | undefined {
   if (start >= value.length || !/[\t ]/.test(value[start] ?? '')) return undefined;
   let index = start;
   let text = '';
+  while (index < value.length && /[\t ]/.test(value[index] ?? '')) {
+    text += value[index];
+    index += 1;
+  }
+  if (index >= value.length || isDriveLetter(value, index) || isUncStart(value, index)) return undefined;
+  const segmentAt = index;
   let sawBackslash = false;
   while (index < value.length) {
     const ch = value[index] ?? '';
-    if (ch === ' ' || ch === '\t') {
-      if (!backslashFollows(value, index)) break;
-      text += ch;
-      index += 1;
-      continue;
-    }
     if (isTailStop(ch) || /\s/.test(ch) || ch === '/') break;
+    if (index !== segmentAt && (isDriveLetter(value, index) || isUncStart(value, index))) break;
     if (ch === '\\') {
+      if (value[index + 1] === '\\') break;
+      if (isDriveLetter(value, index + 1)) break;
       sawBackslash = true;
       text += '/';
-      while (value[index + 1] === '\\') index += 1;
       index += 1;
       continue;
     }
@@ -692,13 +759,8 @@ function readMixedTail(value: string, start: number): { text: string; next: numb
   return { text, next: index };
 }
 
-function backslashFollows(value: string, start: number): boolean {
-  for (let index = start; index < value.length; index += 1) {
-    const ch = value[index] ?? '';
-    if (ch === '\\') return true;
-    if (ch === '\n' || ch === '\r' || ch === '/' || ch === ';' || ch === ',') return false;
-  }
-  return false;
+function isUncStart(value: string, index: number): boolean {
+  return value.startsWith('\\\\', index) || value.startsWith('//', index);
 }
 
 /**
