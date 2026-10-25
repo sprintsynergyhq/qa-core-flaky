@@ -651,6 +651,14 @@ test('the outcomes fixture classifies value mismatch as unknown and the timeout 
   assert.equal(JSON.stringify(timeoutFindings), JSON.stringify(classifyCauses(timedOut)));
 });
 
+test('a stack-frame-only error still quotes a line', () => {
+  const text = ['at /home/alice:12:3', 'at Object.<anonymous> (/home/alice/a.ts:1:1)'].join('\n');
+  const findings = causesOf(text);
+  assert.equal(findings[0].ruleIds.includes('UNK-NONE'), true);
+  assert.equal(findings[0].evidence.length > 0, true);
+  assert.match(findings[0].evidence[0], /at \/home\/alice:12:3/);
+});
+
 function attempt(durationMs, message, retry = 0, status = 'failed') {
   return {
     retry,

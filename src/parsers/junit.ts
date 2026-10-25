@@ -1,5 +1,5 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
-import { makeTestId } from '../id.js';
+import { disambiguateHomeFiles, makeTestId } from '../id.js';
 import type { Attempt, AttemptError, Attachment, Outcome, ParseResult, SourceInfo, TestRecord } from '../model.js';
 import { relativizeText, stripAnsi, toPortablePath } from '../report-path.js';
 
@@ -84,18 +84,19 @@ export function parseJunit(text: string, reportPath: string, meta?: Partial<Sour
 
   const warnings: string[] = [];
   const records: TestRecord[] = [];
+  const rawFiles: string[] = [];
   const missingProject = { value: false };
   const source = buildSource(reportPath, meta);
 
   for (const suite of suites) {
-    walkSuite(suite, undefined, source, records, warnings, missingProject);
+    walkSuite(suite, undefined, source, records, rawFiles, warnings, missingProject);
   }
 
   const ordered = [NO_ATTEMPT_WARNING];
   if (missingProject.value) ordered.push(NO_PROJECT_WARNING);
   return {
     schemaVersion: 1,
-    records,
+    records: disambiguateHomeFiles(records, rawFiles),
     warnings: [...ordered, ...warnings],
   };
 }
@@ -120,7 +121,7 @@ function buildSource(reportPath: string, meta?: Partial<SourceInfo>): SourceInfo
     reportPath,
   };
   if (meta?.runId !== undefined) source.runId = meta.runId;
-  if (meta?.commitSha !== undefined) source.commitSha = meta.commitSha;
+  if (typeof meta?.commitSha === 'string' && meta.commitSha.length > 0) source.commitSha = meta.commitSha;
   if (meta?.branch !== undefined) source.branch = meta.branch;
   if (meta?.createdAt !== undefined) source.createdAt = meta.createdAt;
   return source;
@@ -144,6 +145,7 @@ function walkSuite(
   inheritedProject: string | undefined,
   source: SourceInfo,
   records: TestRecord[],
+  rawFiles: string[],
   warnings: string[],
   missingProject: { value: boolean },
 ): void {
@@ -153,10 +155,12 @@ function walkSuite(
   for (const testcase of asArray(suite.testcase)) {
     if (!isObject(testcase)) continue;
     if (!project) missingProject.value = true;
-    records.push(readCase(testcase, project ?? 'default', source, warnings));
+    const read = readCase(testcase, project ?? 'default', source, warnings);
+    records.push(read.record);
+    rawFiles.push(read.raw);
   }
   for (const child of asArray(suite.testsuite)) {
-    walkSuite(child, project, source, records, warnings, missingProject);
+    walkSuite(child, project, source, records, rawFiles, warnings, missingProject);
   }
 }
 
@@ -165,8 +169,9 @@ function readCase(
   project: string,
   source: SourceInfo,
   warnings: string[],
-): TestRecord {
-  const file = readFile(testcase, warnings);
+): { record: TestRecord; raw: string } {
+  const raw = rawFile(testcase);
+  const file = toPortablePath(raw, undefined, warnings) ?? '';
   const titlePath = titlePathFromName(attr(testcase, 'name') ?? '');
   const failures = [...asArray(testcase.failure), ...asArray(testcase.error)];
   const failed = failures.length > 0;
@@ -182,22 +187,25 @@ function readCase(
     attachments: readAttachments(testcase, warnings),
   };
   return {
-    id: makeTestId(file, project, titlePath),
-    file,
-    project,
-    titlePath,
-    expectedStatus: 'passed',
-    outcome,
-    attempts: [attempt],
-    source,
+    raw,
+    record: {
+      id: makeTestId(file, project, titlePath),
+      file,
+      project,
+      titlePath,
+      expectedStatus: 'passed',
+      outcome,
+      attempts: [attempt],
+      source,
+    },
   };
 }
 
-function readFile(testcase: XmlNode, warnings: string[]): string {
+function rawFile(testcase: XmlNode): string {
   const fileAttr = attr(testcase, 'file');
   const classname = attr(testcase, 'classname');
-  const chosen = fileAttr !== undefined && fileAttr.trim() !== '' ? fileAttr : (classname ?? '');
-  return toPortablePath(chosen, undefined, warnings) ?? '';
+  if (fileAttr !== undefined && fileAttr.trim() !== '') return fileAttr;
+  return classname ?? '';
 }
 
 function titlePathFromName(name: string): string[] {

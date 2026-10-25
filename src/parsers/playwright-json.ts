@@ -1,4 +1,4 @@
-import { makeTestId } from '../id.js';
+import { disambiguateHomeFiles, makeTestId } from '../id.js';
 import type {
   Attempt,
   AttemptError,
@@ -52,15 +52,16 @@ export function parsePlaywrightJson(
   const rootDir = readRootDir(data);
   const warnings: string[] = [];
   const records: TestRecord[] = [];
-  const source = buildSource(reportPath, meta);
+  const rawFiles: string[] = [];
+  const source = buildSource(reportPath, meta, readGitCommit(data));
 
   for (const suite of suites) {
-    walkSuite(suite, [], undefined, rootDir, source, reportPath, records, warnings);
+    walkSuite(suite, [], undefined, undefined, rootDir, source, reportPath, records, rawFiles, warnings);
   }
 
   return {
     schemaVersion: 1,
-    records,
+    records: disambiguateHomeFiles(records, rawFiles),
     warnings,
   };
 }
@@ -79,16 +80,29 @@ function parseJson(text: string, reportPath: string): JsonObject {
   return value;
 }
 
-function buildSource(reportPath: string, meta?: Partial<SourceInfo>): SourceInfo {
+function buildSource(reportPath: string, meta: Partial<SourceInfo> | undefined, gitCommit: string | undefined): SourceInfo {
   const source: SourceInfo = {
     format: 'playwright-json',
     reportPath,
   };
   if (meta?.runId !== undefined) source.runId = meta.runId;
-  if (meta?.commitSha !== undefined) source.commitSha = meta.commitSha;
+  const commit = typeof meta?.commitSha === 'string' && meta.commitSha.length > 0 ? meta.commitSha : gitCommit;
+  if (commit) source.commitSha = commit;
   if (meta?.branch !== undefined) source.branch = meta.branch;
   if (meta?.createdAt !== undefined) source.createdAt = meta.createdAt;
   return source;
+}
+
+/** Playwright JSON stores the commit on `config.metadata.gitCommit`, or on the top-level metadata. */
+function readGitCommit(data: JsonObject): string | undefined {
+  const spots: unknown[] = [data.metadata];
+  if (isObject(data.config)) spots.push(data.config.metadata);
+  for (const spot of spots) {
+    if (!isObject(spot)) continue;
+    const sha = spot.gitCommit;
+    if (typeof sha === 'string' && sha.trim().length > 0) return sha.trim();
+  }
+  return undefined;
 }
 
 function readRootDir(data: JsonObject): string | undefined {
@@ -105,14 +119,17 @@ function walkSuite(
   suite: unknown,
   titleStack: string[],
   inheritedFile: string | undefined,
+  inheritedRaw: string | undefined,
   rootDir: string | undefined,
   source: SourceInfo,
   reportPath: string,
   records: TestRecord[],
+  rawFiles: string[],
   warnings: string[],
 ): void {
   if (!isObject(suite)) return;
 
+  const suiteRaw = asString(suite.file) ?? inheritedRaw;
   const suiteFile = toPortablePath(asString(suite.file), rootDir, warnings) ?? inheritedFile;
   const suiteTitle = asString(suite.title) ?? '';
   const nextStack = isFileSuiteTitle(suiteTitle, suiteFile, suite)
@@ -122,14 +139,14 @@ function walkSuite(
   const specs = suite.specs;
   if (Array.isArray(specs)) {
     for (const spec of specs) {
-      readSpec(spec, nextStack, suiteFile, rootDir, source, reportPath, records, warnings);
+      readSpec(spec, nextStack, suiteFile, suiteRaw, rootDir, source, reportPath, records, rawFiles, warnings);
     }
   }
 
   const children = suite.suites;
   if (Array.isArray(children)) {
     for (const child of children) {
-      walkSuite(child, nextStack, suiteFile, rootDir, source, reportPath, records, warnings);
+      walkSuite(child, nextStack, suiteFile, suiteRaw, rootDir, source, reportPath, records, rawFiles, warnings);
     }
   }
 }
@@ -138,16 +155,19 @@ function readSpec(
   spec: unknown,
   titleStack: string[],
   inheritedFile: string | undefined,
+  inheritedRaw: string | undefined,
   rootDir: string | undefined,
   source: SourceInfo,
   reportPath: string,
   records: TestRecord[],
+  rawFiles: string[],
   warnings: string[],
 ): void {
   if (!isObject(spec)) return;
 
   const specTitle = asString(spec.title) ?? '';
   const titlePath = [...titleStack, specTitle];
+  const raw = asString(spec.file) ?? inheritedRaw ?? '';
   const file = toPortablePath(asString(spec.file), rootDir, warnings) ?? inheritedFile ?? '';
   const line = asLine(spec.line);
   const tests = spec.tests;
@@ -179,6 +199,7 @@ function readSpec(
     };
     if (line !== undefined) record.line = line;
     records.push(record);
+    rawFiles.push(raw);
   }
 }
 

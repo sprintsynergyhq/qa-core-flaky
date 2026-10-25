@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { parsePlaywrightJson } from '../dist/index.js';
+import { buildTriageReport, parsePlaywrightJson, redactHomeText } from '../dist/index.js';
 
 const reportPath = 'fixtures/reports/pw-1.60.0-outcomes.json';
 const text = fs.readFileSync(reportPath, 'utf8');
@@ -667,6 +667,81 @@ test('a test with zero results warns and still returns a record', () => {
   });
   const result = parsePlaywrightJson(raw, 'empty.json');
   assert.equal(result.records.length, 1);
-  assert.equal(result.warnings.length, 1);
-  assert.match(result.warnings[0], /empty\.spec\.ts::chromium::has no results/);
+  assert.match(result.warnings[0], /No results/);
+});
+
+test('metadata.gitCommit is stored when --commit is omitted, and a flag overrides it', () => {
+  const raw = JSON.stringify({
+    config: { metadata: { gitCommit: 'abc1234' } },
+    suites: [
+      {
+        title: 'a.spec.ts',
+        file: 'a.spec.ts',
+        specs: [
+          {
+            title: 'reads',
+            file: 'a.spec.ts',
+            tests: [
+              {
+                projectName: 'chromium',
+                expectedStatus: 'passed',
+                status: 'unexpected',
+                results: [{ retry: 0, status: 'failed', duration: 1, errors: [{ message: 'Error: gave up' }] }],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const fromMetadata = parsePlaywrightJson(raw, 'meta.json');
+  assert.equal(fromMetadata.records[0].source.commitSha, 'abc1234');
+  const overridden = parsePlaywrightJson(raw, 'meta.json', { commitSha: 'fff9999' });
+  assert.equal(overridden.records[0].source.commitSha, 'fff9999');
+  const blank = parsePlaywrightJson(raw, 'meta.json', { commitSha: '' });
+  assert.equal(blank.records[0].source.commitSha, 'abc1234');
+  const whitespace = JSON.parse(raw);
+  whitespace.config.metadata.gitCommit = '   ';
+  const emptyMeta = parsePlaywrightJson(JSON.stringify(whitespace), 'meta.json');
+  assert.equal(emptyMeta.records[0].source.commitSha, undefined);
+});
+
+test('a rooted report redacts a relative home path in triage output', () => {
+  const raw = JSON.stringify({
+    config: { rootDir: '/var/ci/work' },
+    suites: [
+      {
+        title: 'a.spec.ts',
+        file: '/var/ci/work/a.spec.ts',
+        specs: [
+          {
+            title: 'reads',
+            file: '/var/ci/work/a.spec.ts',
+            tests: [
+              {
+                projectName: 'chromium',
+                expectedStatus: 'passed',
+                status: 'unexpected',
+                results: [
+                  {
+                    retry: 0,
+                    status: 'failed',
+                    duration: 1,
+                    errors: [{ message: 'Error: open /home/bob/proj/a.ts' }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const parsed = parsePlaywrightJson(raw, 'rooted.json');
+  const stored = parsed.records[0].attempts[0].errors[0].message;
+  assert.match(stored, /\.\.\/\.\.\/\.\.\/home\/bob\/proj\/a\.ts/);
+  assert.match(redactHomeText(stored), /<home>\/proj\/a\.ts/);
+  const entry = buildTriageReport(parsed.records).entries[0];
+  assert.equal(entry.evidence.join('\n').includes('bob'), false);
+  assert.match(entry.evidence.join('\n'), /<home>\/proj\/a\.ts/);
 });

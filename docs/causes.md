@@ -204,7 +204,7 @@ A closed target that still has selector evidence stays a selector finding and is
 
 | Rule | When | Evidence | Confidence |
 | --- | --- | --- | --- |
-| UNK-NONE | Some failed attempt has error text, and no rule matched | The `Expected:` and `Received:` lines when those exist, otherwise the first non-empty line that is still evidence. Each line is clipped to 300 characters. Leading whitespace is allowed | low |
+| UNK-NONE | Some failed attempt has error text, and no rule matched | The `Expected:` and `Received:` lines when those exist, otherwise the first non-empty line that is still evidence. If every line was removed as a stack frame, the first original line is quoted. Each line is clipped to 300 characters. Leading whitespace is allowed | low |
 | UNK-EMPTY | Every failed attempt has no error text, or the record is failed or flaky and has no failed attempt | Empty | low |
 
 A value mismatch on a resolved locator, such as `toHaveText` with `Received: "1"`, is `UNK-NONE` when the received value does not change across attempts. It is not selectors and it is not timing. The captured example is `fixtures/errors/data-value-1.txt`.
@@ -219,9 +219,10 @@ A value mismatch on a resolved locator, such as `toHaveText` with `Received: "1"
 4. A port on `localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`, or an `http(s)` URL becomes `:PORT`.
 5. Digits inside a `/tmp/`, `/private/tmp/`, or `/var/folders/` path become `N`.
 6. A UUID becomes `ID`. Digits after `id=` or `id:` become `N`.
-7. Runs of spaces or tabs become one space, then the ends are trimmed.
+7. A count is rewritten only when it starts a call-log line. Optional spaces come first, then an optional `-` and the spaces after it, then the count, then `×` or `x`, then `locator`. That count becomes `N ×`. `9 × locator` and `9 x locator` become `N × locator`. A count on an Expected or Received line stays. A quoted value which runs onto a line starting with a count followed by `locator` can still be rewritten.
+8. Runs of spaces or tabs become one space, then the ends are trimmed.
 
-Numbers that belong to the assertion, such as `Received: "1"`, are kept. A call-log repeat count such as `8 ×` is kept, so two errors that differ only by that count do not share a signature.
+Numbers in assertion values are kept, including `Expected: "1 × 4"`, `Received: "2×"`, and `Received: "2 × Backpack"`. `Received: "1"` and `Received: "9 x"` stay as written. Two errors that differ only by a call-log repeat count share a signature.
 
 ## Local Fixture
 
@@ -233,4 +234,4 @@ Numbers that belong to the assertion, such as `Received: "1"`, are kept. A call-
 - JUnit attachment paths stay relative to the report file. JSON attachment paths stay relative to `config.rootDir`. The two bases are documented in [model.md](model.md). Cause rules do not quote attachment paths.
 - A Windows path that does not share a drive with the report root is stored as `C:/...` with the drive kept and the separators collapsed. It is not rewritten to a POSIX relative path.
 - Order dependency is the `orderDependency` hook only. Nothing in this version decides that a test failed because of order.
-- Call-log repeat counts are not removed from signatures.
+- A stack-frame-only error, such as `at /home/alice:12:3`, is Unknown and quotes that first frame. The frame is not a cause by itself.

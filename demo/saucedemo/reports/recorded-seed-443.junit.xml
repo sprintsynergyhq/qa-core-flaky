@@ -1,0 +1,212 @@
+<testsuites id="" name="" tests="10" failures="2" skipped="0" errors="0" time="0">
+<testsuite name="broken.spec.ts" timestamp="1970-01-01T00:00:00.000Z" hostname="chromium" tests="1" failures="1" skipped="0" time="0" errors="0">
+<testcase name="typo locator never finds the backpack button" classname="broken.spec.ts" time="0">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../test-results/broken-typo-locator-never-finds-the-backpack-button-chromium/error-context.md]]
+
+[[ATTACHMENT|../test-results/broken-typo-locator-never-finds-the-backpack-button-chromium-retry1/error-context.md]]
+
+[[ATTACHMENT|../test-results/broken-typo-locator-never-finds-the-backpack-button-chromium-retry2/error-context.md]]
+]]>
+</system-out>
+<failure message="expect(locator).toBeVisible() failed" type="expect.toBeVisible">
+<![CDATA[  [chromium] › broken.spec.ts:4:1 › typo locator never finds the backpack button ───────────────────
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('#add-to-cart-sauce-labs-bakpack')
+    Expected: visible
+    Timeout: 1000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 1000ms
+      - waiting for locator('#add-to-cart-sauce-labs-bakpack')
+
+
+       6 |   // click() on a missing id times out without "element(s) not found".
+       7 |   // toBeVisible on this typo locator does print that error.
+    >  8 |   await expect(page.locator('#add-to-cart-sauce-labs-bakpack')).toBeVisible({ timeout: 1000 });
+         |                                                                 ^
+       9 | });
+      10 |
+        at broken.spec.ts:8:65
+
+    Error Context: ../test-results/broken-typo-locator-never-finds-the-backpack-button-chromium/error-context.md
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('#add-to-cart-sauce-labs-bakpack')
+    Expected: visible
+    Timeout: 1000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 1000ms
+      - waiting for locator('#add-to-cart-sauce-labs-bakpack')
+
+
+       6 |   // click() on a missing id times out without "element(s) not found".
+       7 |   // toBeVisible on this typo locator does print that error.
+    >  8 |   await expect(page.locator('#add-to-cart-sauce-labs-bakpack')).toBeVisible({ timeout: 1000 });
+         |                                                                 ^
+       9 | });
+      10 |
+        at broken.spec.ts:8:65
+
+    Error Context: ../test-results/broken-typo-locator-never-finds-the-backpack-button-chromium-retry1/error-context.md
+
+    Retry #2 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('#add-to-cart-sauce-labs-bakpack')
+    Expected: visible
+    Timeout: 1000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 1000ms
+      - waiting for locator('#add-to-cart-sauce-labs-bakpack')
+
+
+       6 |   // click() on a missing id times out without "element(s) not found".
+       7 |   // toBeVisible on this typo locator does print that error.
+    >  8 |   await expect(page.locator('#add-to-cart-sauce-labs-bakpack')).toBeVisible({ timeout: 1000 });
+         |                                                                 ^
+       9 | });
+      10 |
+        at broken.spec.ts:8:65
+
+    Error Context: ../test-results/broken-typo-locator-never-finds-the-backpack-button-chromium-retry2/error-context.md
+]]>
+</failure>
+</testcase>
+</testsuite>
+<testsuite name="environment.spec.ts" timestamp="1970-01-01T00:00:00.000Z" hostname="chromium" tests="1" failures="0" skipped="0" time="0" errors="0">
+<testcase name="aborted document fails page.goto" classname="environment.spec.ts" time="0">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../test-results/environment-aborted-document-fails-page-goto-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="healthy.spec.ts" timestamp="1970-01-01T00:00:00.000Z" hostname="chromium" tests="2" failures="0" skipped="0" time="0" errors="0">
+<testcase name="inventory shows six products" classname="healthy.spec.ts" time="0">
+</testcase>
+<testcase name="adding the backpack shows a badge of 1" classname="healthy.spec.ts" time="0">
+</testcase>
+</testsuite>
+<testsuite name="real-bug.spec.ts" timestamp="1970-01-01T00:00:00.000Z" hostname="chromium" tests="1" failures="1" skipped="0" time="0" errors="0">
+<testcase name="problem user image src differs from the standard catalog" classname="real-bug.spec.ts" time="0">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../test-results/real-bug-problem-user-imag-ca204-s-from-the-standard-catalog-chromium/error-context.md]]
+
+[[ATTACHMENT|../test-results/real-bug-problem-user-imag-ca204-s-from-the-standard-catalog-chromium-retry1/error-context.md]]
+
+[[ATTACHMENT|../test-results/real-bug-problem-user-imag-ca204-s-from-the-standard-catalog-chromium-retry2/error-context.md]]
+]]>
+</system-out>
+<failure message="expect(received).toContain(expected) // indexOf" type="expect.toContain">
+<![CDATA[  [chromium] › real-bug.spec.ts:10:1 › problem user image src differs from the standard catalog ────
+
+    Error: expect(received).toContain(expected) // indexOf
+
+    Expected substring: "sauce-backpack"
+    Received string:    "/assets/sl-404-Cq1a9k9X.jpg"
+
+      11 |   await login(page, 'problem_user');
+      12 |   const src = await page.locator('[data-test="inventory-item"] img').first().getAttribute('src');
+    > 13 |   expect(src ?? '').toContain('sauce-backpack');
+         |                     ^
+      14 | });
+      15 |
+        at real-bug.spec.ts:13:21
+
+    Error Context: ../test-results/real-bug-problem-user-imag-ca204-s-from-the-standard-catalog-chromium/error-context.md
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: expect(received).toContain(expected) // indexOf
+
+    Expected substring: "sauce-backpack"
+    Received string:    "/assets/sl-404-Cq1a9k9X.jpg"
+
+      11 |   await login(page, 'problem_user');
+      12 |   const src = await page.locator('[data-test="inventory-item"] img').first().getAttribute('src');
+    > 13 |   expect(src ?? '').toContain('sauce-backpack');
+         |                     ^
+      14 | });
+      15 |
+        at real-bug.spec.ts:13:21
+
+    Error Context: ../test-results/real-bug-problem-user-imag-ca204-s-from-the-standard-catalog-chromium-retry1/error-context.md
+
+    Retry #2 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: expect(received).toContain(expected) // indexOf
+
+    Expected substring: "sauce-backpack"
+    Received string:    "/assets/sl-404-Cq1a9k9X.jpg"
+
+      11 |   await login(page, 'problem_user');
+      12 |   const src = await page.locator('[data-test="inventory-item"] img').first().getAttribute('src');
+    > 13 |   expect(src ?? '').toContain('sauce-backpack');
+         |                     ^
+      14 | });
+      15 |
+        at real-bug.spec.ts:13:21
+
+    Error Context: ../test-results/real-bug-problem-user-imag-ca204-s-from-the-standard-catalog-chromium-retry2/error-context.md
+]]>
+</failure>
+</testcase>
+</testsuite>
+<testsuite name="selectors.spec.ts" timestamp="1970-01-01T00:00:00.000Z" hostname="chromium" tests="1" failures="0" skipped="0" time="0" errors="0">
+<testcase name="unscoped Remove is strict when two items were added" classname="selectors.spec.ts" time="0">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../test-results/selectors-unscoped-Remove--f5b6e-t-when-two-items-were-added-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="test-data.spec.ts" timestamp="1970-01-01T00:00:00.000Z" hostname="chromium" tests="2" failures="0" skipped="0" time="0" errors="0">
+<testcase name="shared cart page › A adds one backpack" classname="test-data.spec.ts" time="0">
+</testcase>
+<testcase name="shared cart page › B expects the badge A added" classname="test-data.spec.ts" time="0">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../test-results/test-data-shared-cart-page-B-expects-the-badge-A-added-chromium/error-context.md]]
+
+[[ATTACHMENT|../test-results/test-data-shared-cart-page-B-expects-the-badge-A-added-chromium/error-context.md]]
+
+[[ATTACHMENT|../test-results/test-data-shared-cart-page-B-expects-the-badge-A-added-chromium-retry1/error-context.md]]
+
+[[ATTACHMENT|../test-results/test-data-shared-cart-page-B-expects-the-badge-A-added-chromium-retry1/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="timing.spec.ts" timestamp="1970-01-01T00:00:00.000Z" hostname="chromium" tests="2" failures="0" skipped="0" time="0" errors="0">
+<testcase name="image delay fails the short visibility check" classname="timing.spec.ts" time="0">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../test-results/timing-image-delay-fails-the-short-visibility-check-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+<testcase name="waitForTimeout before add to cart" classname="timing.spec.ts" time="0">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../test-results/timing-waitForTimeout-before-add-to-cart-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+</testsuites>

@@ -67,7 +67,18 @@ function cell(value: string): string {
   return escapeHtml(value).replaceAll('|', '\\|');
 }
 
-/** Keep `<`, `>`, and `&` visible in a GitHub Markdown quote. */
+/**
+ * Keep `<`, `>`, and `&` visible, and keep `*`, `_`, and backticks from
+ * becoming Markdown emphasis or code. Titles, table cells, evidence, and
+ * the next step all use this.
+ */
 function escapeHtml(value: string): string {
-  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  return value
+    .replaceAll('\\', '\\\\')
+    .replaceAll('*', '\\*')
+    .replaceAll('_', '\\_')
+    .replaceAll('`', '\\`')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }

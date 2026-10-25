@@ -2,8 +2,8 @@ import { classifyCauses } from '../causes/index.js';
 import type { Cause, CauseFinding } from '../causes/types.js';
 import { suggestFix } from '../fixes/templates.js';
 import type { TestRecord } from '../model.js';
-import { redactHomeText } from '../report-path.js';
-import { decideVerdict, VERDICT_ORDER } from '../verdict.js';
+import { homeMarks, redactHomeText } from '../report-path.js';
+import { collapseRunRecords, decideVerdict, VERDICT_ORDER } from '../verdict.js';
 import type { TriageEntry, TriageReport } from './schema.js';
 
 export type BuildTriageOptions = {
@@ -39,6 +39,7 @@ export function buildTriageReport(records: readonly TestRecord[], options: Build
     if (left.id > right.id) return 1;
     return 0;
   });
+  assignDisplayIds(entries);
 
   const report: TriageReport = {
     schemaVersion: 1,
@@ -54,37 +55,52 @@ export function renderTriageJson(report: TriageReport): string {
 }
 
 function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefined): TriageEntry {
-  const base = group[0];
+  const records = collapseRunRecords(group);
+  const base = records[0];
   if (!base) {
     throw new Error('Cannot build a triage entry without a record');
   }
-  const attempts = group.flatMap((record) => record.attempts);
+  const attempts = records.flatMap((record) => record.attempts);
   const merged: TestRecord = {
     ...base,
-    outcome: group.some((record) => record.outcome === 'failed')
+    outcome: records.some((record) => record.outcome === 'failed')
       ? 'failed'
-      : group.some((record) => record.outcome === 'flaky')
+      : records.some((record) => record.outcome === 'flaky')
         ? 'flaky'
         : base.outcome,
     attempts,
   };
   const classifyOptions = testTimeoutMs === undefined ? {} : { testTimeoutMs };
   const findings = classifyCauses(merged, classifyOptions);
-  const decision = decideVerdict(group, findings, classifyOptions);
-  const causes = orderCauses(decision.findings, decision.cause).map((finding) => ({
+  const decision = decideVerdict(records, findings, classifyOptions);
+  const ordered = orderCauses(decision.findings, decision.cause);
+  // Dedupe the original lines first. Number homes from the id, then the
+  // title and file, then the evidence, so the id stays the same when only
+  // the error text changes. Later usernames are `<home~2>`, `<home~3>`.
+  const rawEvidence = flattenEvidence(ordered, decision.note);
+  const titleRaw = base.titlePath[base.titlePath.length - 1] ?? base.id;
+  const marks = homeMarks([
+    base.id,
+    titleRaw,
+    base.file,
+    ...rawEvidence,
+    ...ordered.flatMap((finding) => finding.evidence),
+  ]);
+  const redact = (value: string) => redactHomeText(value, marks);
+  const evidence = rawEvidence.map((line) => redact(line));
+  const causes = ordered.map((finding) => ({
     ...finding,
-    evidence: finding.evidence.map((line) => redactHomeText(line)),
+    evidence: finding.evidence.map((line) => redact(line)),
   }));
-  const evidence = flattenEvidence(causes, decision.note);
   const failed = attempts.filter(
     (attempt) => attempt.status === 'failed' || attempt.status === 'timedOut' || attempt.status === 'interrupted',
   ).length;
   const passed = attempts.filter((attempt) => attempt.status === 'passed').length;
-  const title = redactHomeText(base.titlePath[base.titlePath.length - 1] ?? base.id);
-  const file = redactHomeText(base.file);
+  const title = redact(titleRaw);
+  const file = redact(base.file);
 
   return {
-    id: redactHomeText(base.id),
+    id: redact(base.id),
     verdict: decision.verdict,
     confidence: decision.confidence,
     ruleId: decision.ruleId,
@@ -98,7 +114,7 @@ function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefi
       sameCommit: decision.signals.some((signal) => signal.kind === 'same-code-flip'),
     },
     history: {
-      runsSeen: group.length,
+      runsSeen: records.length,
       firstFailingCommit: null,
     },
     suggestedFix: suggestFix(decision.ruleIds),
@@ -120,6 +136,20 @@ function orderCauses(findings: readonly CauseFinding[], cause: Cause | null): Ca
   const rest = findings.filter((finding) => finding.cause !== cause);
   if (first.length === 0) return [...findings];
   return [...first, ...rest];
+}
+
+/**
+ * Ids that differ only by a username redact to one string. Keep every entry.
+ * The first id in report order stays as redacted. The next ones gain
+ * ` (2)`, ` (3)`, which is not the username.
+ */
+function assignDisplayIds(entries: TriageEntry[]): void {
+  const seen = new Map<string, number>();
+  for (const entry of entries) {
+    const count = seen.get(entry.id) ?? 0;
+    seen.set(entry.id, count + 1);
+    if (count > 0) entry.id = `${entry.id} (${count + 1})`;
+  }
 }
 
 function flattenEvidence(findings: readonly CauseFinding[], note: string | null): string[] {

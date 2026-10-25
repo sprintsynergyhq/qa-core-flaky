@@ -37,6 +37,63 @@ test('a long token does not stall line and column normalization', () => {
   assert.equal(signature, text);
 });
 
+test('call-log repeat counts share a signature', () => {
+  const left = '9 × locator resolved to <button>Add</button>\n    - waiting for getByRole';
+  const right = '2 × locator resolved to <button>Add</button>\n    - waiting for getByRole';
+  assert.equal(normalizeErrorSignature(left), normalizeErrorSignature(right));
+  assert.match(normalizeErrorSignature(left), /N × locator/);
+  const letter = '9 x locator resolved to 1 element';
+  const other = '3 x locator resolved to 1 element';
+  assert.equal(normalizeErrorSignature(letter), normalizeErrorSignature(other));
+  const received = 'Received: "9 x"';
+  assert.equal(normalizeErrorSignature(received), received);
+  const dashed = '  - 9 x locator.click';
+  const dashedOther = '  - 2 × locator.click';
+  assert.equal(normalizeErrorSignature(dashed), normalizeErrorSignature(dashedOther));
+  assert.match(normalizeErrorSignature(dashed), /N × locator/);
+  assert.equal(normalizeErrorSignature('  - 9 × locator'), '- N × locator');
+  assert.equal(normalizeErrorSignature('    9 x locator'), 'N × locator');
+  assert.equal(normalizeErrorSignature('9× locator'), 'N × locator');
+  assert.equal(normalizeErrorSignature('-9 × locator'), '-N × locator');
+});
+
+test('a long run of spaces does not stall call-log normalization', () => {
+  const text = [' '.repeat(60000), ' '.repeat(60000), ' '.repeat(60000)].join('\n');
+  const started = Date.now();
+  const signature = normalizeErrorSignature(text);
+  assert.equal(Date.now() - started < 1000, true);
+  assert.equal(signature, '');
+});
+
+test('a count inside an assertion value does not share a signature', () => {
+  const toBe = (expected, received) =>
+    ['Error: expect(received).toBe(expected) // Object.is equality', '', `Expected: "${expected}"`, `Received: "${received}"`].join(
+      '\n',
+    );
+  const times = ['2 × 4', '3 × 4', '5 × 4'].map((received) => normalizeErrorSignature(toBe('1 × 4', received)));
+  assert.notEqual(times[0], times[1]);
+  assert.notEqual(times[1], times[2]);
+  assert.match(times[0], /Expected: "1 × 4"/);
+  assert.match(times[0], /Received: "2 × 4"/);
+
+  const marks = ['2×', '3×', '5×'].map((received) => normalizeErrorSignature(toBe('1×', received)));
+  assert.notEqual(marks[0], marks[1]);
+  assert.notEqual(marks[1], marks[2]);
+  assert.match(marks[0], /Received: "2×"/);
+
+  const text = (received) =>
+    [
+      'Error: expect(locator).toHaveText(expected) failed',
+      `Locator: locator('[data-test="item"]')`,
+      'Expected: "Backpack"',
+      `Received: "${received}"`,
+    ].join('\n');
+  const backpack = ['2 × Backpack', '3 × Backpack', '5 × Backpack'].map((received) => normalizeErrorSignature(text(received)));
+  assert.notEqual(backpack[0], backpack[1]);
+  assert.notEqual(backpack[1], backpack[2]);
+  assert.match(backpack[0], /Received: "2 × Backpack"/);
+});
+
 test('a fractional duration and a private tmp path normalize', () => {
   const left = 'Timeout 1.5ms exceeded at /private/tmp/run-12/a.txt';
   const right = 'Timeout 30ms exceeded at /private/tmp/run-9/a.txt';

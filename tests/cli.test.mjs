@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { redactHomeText } from '../dist/index.js';
 
 const cli = 'dist/cli.js';
 const fixture = 'fixtures/reports/pw-1.60.0-outcomes.json';
@@ -17,6 +18,12 @@ function run(args) {
 function oneLine(text) {
   const trimmed = text.replace(/\n$/, '');
   return !trimmed.includes('\n');
+}
+
+function keepTemp(t, prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return dir;
 }
 
 test('parse exits 0 and prints schemaVersion 1', () => {
@@ -53,6 +60,8 @@ test('help exits 0 and lists parse', () => {
   const result = run(['--help']);
   assert.equal(result.status, 0);
   assert.match(result.stdout, /parse/);
+  assert.match(result.stdout, /\/proc/);
+  assert.match(result.stdout, /--redact/);
 });
 
 test('version exits 0 and prints the package version', () => {
@@ -133,8 +142,8 @@ test('help lists triage', () => {
   assert.match(result.stdout, /triage/);
 });
 
-test('triage writes both files and exits 2 when there are entries', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-cli-'));
+test('triage writes both files and exits 2 when there are entries', (t) => {
+  const dir = keepTemp(t, 'triage-cli-');
   const result = run(['triage', fixture, '--out-dir', dir]);
   assert.equal(result.status, 2, result.stderr);
   assert.equal(result.stderr, '');
@@ -146,9 +155,9 @@ test('triage writes both files and exits 2 when there are entries', () => {
   assert.equal(markdown.endsWith('\n'), true);
 });
 
-test('triage --fail-on never exits 0 and writes the same bytes', () => {
-  const findingsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-findings-'));
-  const neverDir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-never-'));
+test('triage --fail-on never exits 0 and writes the same bytes', (t) => {
+  const findingsDir = keepTemp(t, 'triage-findings-');
+  const neverDir = keepTemp(t, 'triage-never-');
   const findings = run(['triage', fixture, '--out-dir', findingsDir]);
   const never = run(['triage', fixture, '--out-dir', neverDir, '--fail-on', 'never']);
   assert.equal(findings.status, 2, findings.stderr);
@@ -163,8 +172,8 @@ test('triage --fail-on never exits 0 and writes the same bytes', () => {
   );
 });
 
-test('triage of a passing report exits 0', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-pass-'));
+test('triage of a passing report exits 0', (t) => {
+  const dir = keepTemp(t, 'triage-pass-');
   const report = path.join(dir, 'pass.json');
   fs.writeFileSync(
     report,
@@ -215,6 +224,32 @@ test('triage rejects an unknown --fail-on value', () => {
   assert.match(result.stderr, /fail-on/);
 });
 
+test('a failed triage.md write does not leave triage.json behind', (t) => {
+  const dir = keepTemp(t, 'qa-core-flaky-partial-');
+  fs.mkdirSync(path.join(dir, 'triage.json'));
+  const result = run(['triage', fixture, '--out-dir', dir, '--fail-on', 'never']);
+  assert.equal(result.status, 1);
+  assert.equal(oneLine(result.stderr), true);
+  assert.equal(fs.existsSync(path.join(dir, 'triage.md')), false);
+  assert.equal(fs.statSync(path.join(dir, 'triage.json')).isDirectory(), true);
+});
+
+test('parse --redact hides a home username and the default leaves it', (t) => {
+  const dir = keepTemp(t, 'qa-core-flaky-redact-');
+  const report = path.join(dir, 'home.xml');
+  fs.writeFileSync(
+    report,
+    `<testsuite hostname="chromium"><testcase name="home" classname="a.spec.ts"><failure message="open /home/alice/a.json">open /home/alice/a.json</failure></testcase></testsuite>`,
+  );
+  const raw = run(['parse', report]);
+  assert.equal(raw.status, 0, raw.stderr);
+  assert.match(raw.stdout, /\/home\/alice\/a\.json/);
+  const hidden = run(['parse', report, '--redact']);
+  assert.equal(hidden.status, 0, hidden.stderr);
+  assert.equal(hidden.stdout.includes('alice'), false);
+  assert.match(hidden.stdout, /<home>\/a\.json/);
+});
+
 test('triage exit 2 leaves the full stdout report intact', () => {
   const result = run(['triage', fixture, '--json']);
   assert.equal(result.status, 2, result.stderr);
@@ -223,9 +258,9 @@ test('triage exit 2 leaves the full stdout report intact', () => {
   JSON.parse(result.stdout);
 });
 
-test('two triage runs are byte identical', () => {
-  const firstDir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-a-'));
-  const secondDir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-b-'));
+test('two triage runs are byte identical', (t) => {
+  const firstDir = keepTemp(t, 'triage-a-');
+  const secondDir = keepTemp(t, 'triage-b-');
   const first = run(['triage', fixture, '--out-dir', firstDir, '--fail-on', 'never']);
   const second = run(['triage', fixture, '--out-dir', secondDir, '--fail-on', 'never']);
   assert.equal(first.status, 0, first.stderr);
@@ -238,6 +273,124 @@ test('two triage runs are byte identical', () => {
     fs.readFileSync(path.join(firstDir, 'triage.md'), 'utf8'),
     fs.readFileSync(path.join(secondDir, 'triage.md'), 'utf8'),
   );
+});
+
+const recordedJunit = 'demo/saucedemo/reports/recorded-seed-443.junit.xml';
+
+function problemUser(stdout) {
+  const report = JSON.parse(stdout);
+  const entry = report.entries.find((item) => item.id.includes('problem user'));
+  assert.ok(entry, stdout);
+  return entry;
+}
+
+test('the same report spelled three ways is counted once', () => {
+  const absolute = path.resolve(recordedJunit);
+  const once = run(['triage', recordedJunit, '--commit', 'abc', '--json', '--fail-on', 'never']);
+  const repeated = run([
+    'triage',
+    recordedJunit,
+    `./${recordedJunit}`,
+    absolute,
+    '--commit',
+    'abc',
+    '--json',
+    '--fail-on',
+    'never',
+  ]);
+  assert.equal(once.status, 0, once.stderr);
+  assert.equal(repeated.status, 0, repeated.stderr);
+  assert.equal(repeated.stdout, once.stdout);
+  const entry = problemUser(once.stdout);
+  assert.equal(entry.verdict, 'needs-more-runs');
+  assert.equal(entry.attempts.total, 1);
+});
+
+test('a byte-identical copy of a report is counted once', (t) => {
+  const dir = keepTemp(t, 'triage-copy-');
+  const copy = path.join(dir, 'copy.junit.xml');
+  fs.copyFileSync(recordedJunit, copy);
+  const link = path.join(dir, 'link.junit.xml');
+  fs.symlinkSync(path.resolve(recordedJunit), link);
+  const once = run(['triage', recordedJunit, '--commit', 'abc', '--json', '--fail-on', 'never']);
+  const repeated = run(['triage', recordedJunit, copy, link, '--commit', 'abc', '--json', '--fail-on', 'never']);
+  assert.equal(once.status, 0, once.stderr);
+  assert.equal(repeated.status, 0, repeated.stderr);
+  assert.equal(repeated.stdout, once.stdout);
+  const entry = problemUser(repeated.stdout);
+  assert.equal(entry.verdict, 'needs-more-runs');
+  assert.equal(entry.attempts.total, 1);
+});
+
+test('parse --redact applies home redaction to source.reportPath', (t) => {
+  const dir = keepTemp(t, 'qa-core-flaky-redact-path-');
+  const report = path.join(dir, 'r.xml');
+  fs.writeFileSync(
+    report,
+    '<testsuite hostname="chromium"><testcase name="home" classname="a.spec.ts"><failure message="Error: gave up">Error: gave up</failure></testcase></testsuite>',
+  );
+  const raw = run(['parse', report]);
+  assert.equal(raw.status, 0, raw.stderr);
+  const hidden = run(['parse', report, '--redact']);
+  assert.equal(hidden.status, 0, hidden.stderr);
+  assert.equal(JSON.parse(raw.stdout).records[0].source.reportPath, report);
+  assert.equal(JSON.parse(hidden.stdout).records[0].source.reportPath, redactHomeText(report));
+});
+
+function homeSuiteReport(message) {
+  return JSON.stringify({
+    suites: [
+      {
+        title: '/home/alice/a.spec.ts',
+        file: '/home/alice/a.spec.ts',
+        specs: [
+          {
+            title: 't',
+            file: '/home/alice/a.spec.ts',
+            tests: [
+              {
+                expectedStatus: 'passed',
+                status: 'unexpected',
+                results: [{ retry: 0, status: 'failed', duration: 1, errors: [{ message }] }],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+}
+
+test('a test id does not change when only the error text changes', (t) => {
+  const dir = keepTemp(t, 'triage-home-id-');
+  const messages = [
+    'ENOENT open /home/bob/x.json',
+    'ENOENT open /home/alice/x.json',
+    ['Error: expect(locator).toHaveURL(expected) failed', 'Expected: "/home/carol"', 'Received: "/home/bob"'].join('\n'),
+  ];
+  const stable = '<home>/a.spec.ts::default::<home>/a.spec.ts > t';
+  const ids = [];
+  for (const [index, message] of messages.entries()) {
+    const report = path.join(dir, `home-${index}.json`);
+    fs.writeFileSync(report, homeSuiteReport(message));
+    const triage = run(['triage', report, '--json', '--fail-on', 'never']);
+    assert.equal(triage.status, 0, triage.stderr);
+    const causes = run(['causes', report, '--json']);
+    assert.equal(causes.status, 0, causes.stderr);
+    const entry = JSON.parse(triage.stdout).entries[0];
+    const row = JSON.parse(causes.stdout)[0];
+    assert.equal(entry.id, stable);
+    assert.equal(row.id, entry.id);
+    assert.equal(entry.id.includes('alice'), false);
+    assert.equal(entry.id.includes('bob'), false);
+    assert.equal(entry.id.includes('carol'), false);
+    assert.equal(row.id.includes('alice'), false);
+    ids.push(entry.id);
+    const triageEvidence = entry.causes.flatMap((finding) => finding.evidence);
+    const causeEvidence = row.findings.flatMap((finding) => finding.evidence);
+    assert.deepEqual(causeEvidence, triageEvidence);
+  }
+  assert.equal(new Set(ids).size, 1);
 });
 
 test('parsing the JUnit fixture twice is byte identical', () => {

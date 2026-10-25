@@ -62,6 +62,45 @@ test('a consistent environment failure is an environment issue', () => {
   assert.equal(one.confidence, 'low');
 });
 
+test('assertion values that contain a times sign stay different failures', () => {
+  const toBe = (expected, received) =>
+    ['Error: expect(received).toBe(expected) // Object.is equality', '', `Expected: "${expected}"`, `Received: "${received}"`].join(
+      '\n',
+    );
+  const product = verdictOf([
+    attempt('failed', toBe('1 × 4', '2 × 4'), 0),
+    attempt('failed', toBe('1 × 4', '3 × 4'), 1),
+    attempt('failed', toBe('1 × 4', '5 × 4'), 2),
+  ]);
+  assert.equal(product.verdict, 'needs-more-runs');
+  assert.equal(product.signals.some((signal) => signal.kind === 'consistent-failure'), false);
+
+  const tight = verdictOf([
+    attempt('failed', toBe('1×', '2×'), 0),
+    attempt('failed', toBe('1×', '3×'), 1),
+    attempt('failed', toBe('1×', '5×'), 2),
+  ]);
+  assert.equal(tight.verdict, 'needs-more-runs');
+  assert.equal(tight.signals.some((signal) => signal.kind === 'consistent-failure'), false);
+
+  const text = (received) =>
+    [
+      'Error: expect(locator).toHaveText(expected) failed',
+      `Locator: locator('[data-test="item"]')`,
+      'Expected: "Backpack"',
+      `Received: "${received}"`,
+      'Timeout: 5000ms',
+    ].join('\n');
+  const backpack = verdictOf([
+    attempt('failed', text('2 × Backpack'), 0),
+    attempt('failed', text('3 × Backpack'), 1),
+    attempt('failed', text('5 × Backpack'), 2),
+  ]);
+  assert.equal(backpack.verdict, 'needs-more-runs');
+  assert.equal(backpack.signals.some((signal) => signal.kind === 'consistent-failure'), false);
+  assert.equal(backpack.cause, 'test-data');
+});
+
 test('a repeated unknown value mismatch is a likely real bug', () => {
   const text = ['Error: expect(locator).toHaveText(expected) failed', 'Expected: "9"', 'Received: "1"'].join('\n');
   const two = verdictOf([attempt('failed', text, 0), attempt('failed', text, 1)]);
@@ -171,6 +210,30 @@ test('an environment failure on a new SHA outranks an earlier flip', () => {
   const result = decideVerdict([flaky, later], []);
   assert.equal(result.verdict, 'environment-issue');
   assert.equal(result.signals.map((signal) => signal.kind).join(','), 'consistent-failure,same-code-flip');
+});
+
+test('a later passing commit does not keep an earlier broken verdict', () => {
+  const text = 'Error: element(s) not found';
+  const broken = record('missing', [attempt('failed', text, 0), attempt('failed', text, 1), attempt('failed', text, 2)], {
+    commitSha: 'aaa',
+    reportPath: 'old.json',
+  });
+  const passed = record('missing', [attempt('passed', undefined, 0)], {
+    commitSha: 'bbb',
+    reportPath: 'new.json',
+  });
+  passed.outcome = 'passed';
+  const result = decideVerdict([broken, passed], classifyCauses(broken));
+  assert.equal(result.verdict, 'needs-more-runs');
+  assert.equal(result.signals.some((signal) => signal.detail.includes('commit')), false);
+});
+
+test('a signal does not name a commit when the record has no SHA', () => {
+  const text = 'Error: element(s) not found';
+  const result = verdictOf([attempt('failed', text, 0), attempt('failed', text, 1), attempt('failed', text, 2)]);
+  assert.equal(result.verdict, 'broken-test');
+  assert.equal(result.signals.some((signal) => signal.detail.includes('commit')), false);
+  assert.match(result.signals[0].detail, /on this code/);
 });
 
 test('the outcomes fixture matches the decision table', () => {
