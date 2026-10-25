@@ -112,7 +112,21 @@ A missing or blank `hostname` becomes project `default`. The parser adds one war
 
 Attachment lines do not include a name or a media type. The parser uses the file name as the attachment name and an empty content type. ANSI escape codes are removed from the failure message and text.
 
-The XML parser does not expand entities. After parsing, attribute values and ordinary element text decode the five predefined XML entities (`lt`, `gt`, `amp`, `apos`, `quot`) and numeric character references (`&#65;` and `&#x42;`). `CDATA` stays literal, including entity text inside it. HTML entities stay literal. Entities declared in a `DOCTYPE` stay literal. Only a `DOCTYPE` in the prolog is removed, so an external entity identifier there is not read or fetched. A `DOCTYPE` after the root element, including one inside `CDATA`, is left in place.
+The XML parser does not expand entities. After parsing, attribute values and ordinary element text decode the five predefined XML entities (`lt`, `gt`, `amp`, `apos`, `quot`) and numeric character references whose code point is a legal XML 1.0 character (`&#65;` and `&#x42;`). The policy for a bad reference is to parse the report and leave the reference literal. A reference the grammar rejects, including a hex reference with an uppercase `X` (`&#X41;`), does not fail the report. A reference to a character XML forbids, such as `&#0;`, is also kept as the original reference text. `CDATA` stays literal, including entity text inside it, and is not rewritten before parsing. HTML entities stay literal. Entities declared in a `DOCTYPE` stay literal. Only a `DOCTYPE` in the prolog is removed, so an external entity identifier there is not read or fetched. A `DOCTYPE` after the root element, including one inside `CDATA`, is left in place.
+
+## Error Text Paths
+
+Paths inside error text are rewritten only when the token looks like a real filesystem path.
+
+| Token | What Happens |
+| --- | --- |
+| Report root, or a path inside it | The root prefix is removed. No warning. |
+| Absolute path outside the root that starts with `/home/`, `/Users/`, `/tmp/`, `/var/`, `/runner/`, `/srv/`, `/opt/`, `/etc/`, `/usr/`, `/root/`, `/mnt/`, `/private/`, `/workspace/`, or `/builds/`, or that ends in a source location such as `file.ts:12` | Rewritten to a relative path. One warning. `/srv/ci/out.json` and `/opt/app/data.json` are examples. |
+| Windows path | Backslash runs become one forward slash, and the drive letter stays (`C:/Users/bob/a.ts`). Relative only when the root uses that drive. Otherwise the normalized form is kept and one warning quotes it. |
+| `http://` or `https://` URL | Left as written, including `?x=/home/a` and a root prefix inside the URL. No warning. |
+| One segment, a regex, a quoted URL path, a glob, or prose | Left as written. `/var/`, `/Ready/`, `/\d+/`, `"/inventory.html"`, `"/cart/checkout.html"`, `/api/search?q=1`, `/src/**/*.ts`, `/and/or`, and `/month/user` are examples. No warning. |
+
+The report root matches when the next character does not continue the path name. Letters, digits, `_`, and `-` continue the name. A `.` continues the name only when a name character follows it, so `project-other` and `project.txt` stay whole. `root&b`, `root&&npm`, `root!`, `root?`, `root#x`, `root*`, `root%20`, `root~`, and `root$HOME` are still the root. Outside the root, a token may contain `%`, `~`, `$`, `&`, `!`, `@`, and `+`, which is why `/home/ci/w/a%20b.ts` and `/home/ci/w/a&b.ts` are paths. A token that contains `?`, `*`, `#`, `=`, or `,` stays as written. A regex literal such as `/pattern/` is still left as written.
 
 ## Known Gaps
 
@@ -139,5 +153,5 @@ Other differences from the JSON records for the same run:
 - `always fails` and `times out` keep every retry's text in the single attempt's error. They are not separate attempts. The JSON records have one attempt per retry.
 - The `time` attribute on a Playwright testcase is the sum of the attempt durations, in seconds. It is stored on the single attempt as `durationMs`. The fixture script replaces those attributes with `0` before the file is committed.
 - JUnit has no line number and no worker index. Those fields are omitted.
-- Attachment paths in this fixture are relative to the report file's directory (`../pw-project/test-results/...`). The JSON report's attachment paths are relative to `config.rootDir` (`test-results/...`). The paths differ.
+- Attachment paths are not on the same base, and that difference is kept on purpose. A JUnit file has no `config.rootDir`. Playwright writes each `[[ATTACHMENT|...]]` path relative to the report file, and this parser stores that path as written when it is already relative (`../pw-project/test-results/...` for this fixture). A JSON attachment path is relative to `config.rootDir` (`test-results/...`). Cause rules do not read attachment paths. Inventing a project root for JUnit would change paths the file does not name.
 - The reporter can emit per-retry elements when `includeRetries` is enabled. This parser does not read those elements. The fixture was generated without that option, and the elements are not in the file.

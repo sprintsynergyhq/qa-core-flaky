@@ -1,0 +1,22 @@
+Error: expect(locator).toBeVisible() failed
+
+Locator:  locator('#hidden')
+Expected: visible
+Received: hidden
+Timeout:  400ms
+
+Call log:
+  - Expect "toBeVisible" with timeout 400ms
+  - waiting for locator('#hidden')
+    8 × locator resolved to <span hidden="" id="hidden">Hidden</span>
+      - unexpected value "hidden"
+
+
+  33 | test('visible timeout', async ({ page }) => {
+  34 |   await page.goto(pageUrl);
+> 35 |   await expect(page.locator('#hidden')).toBeVisible({ timeout: 400 });
+     |                                         ^
+  36 | });
+  37 |
+  38 | test('test timeout', async ({ page }) => {
+    at fixtures/pw-project/tests/causes.spec.ts:35:41

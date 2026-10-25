@@ -1,0 +1,22 @@
+Error: expect(locator).toHaveCount(expected) failed
+
+Locator:  getByRole('listitem')
+Expected: 1
+Received: 0
+Timeout:  400ms
+
+Call log:
+  - Expect "toHaveCount" with timeout 400ms
+  - waiting for getByRole('listitem')
+    8 × locator resolved to 0 elements
+      - unexpected value "0"
+
+
+  28 | test('count zero', async ({ page }) => {
+  29 |   await page.goto(pageUrl);
+> 30 |   await expect(page.getByRole('listitem')).toHaveCount(1, { timeout: 400 });
+     |                                            ^
+  31 | });
+  32 |
+  33 | test('visible timeout', async ({ page }) => {
+    at fixtures/pw-project/tests/causes.spec.ts:30:44

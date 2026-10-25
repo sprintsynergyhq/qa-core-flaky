@@ -242,6 +242,85 @@ test('error text that is not a filesystem path stays unchanged', () => {
   assert.deepEqual(result.warnings, [NO_ATTEMPT]);
 });
 
+test('a root-shaped absolute path is rewritten when the next character is not a name', () => {
+  const input = [
+    'a=/home/ci/w&b',
+    'cd /home/ci/w&&npm test',
+    'bang /home/ci/w!',
+    'query /home/ci/w?',
+    'hash /home/ci/w#x',
+    'star /home/ci/w*',
+    'pct /home/ci/w%20',
+    'tilde /home/ci/w~',
+    'dollar /home/ci/w$HOME',
+    'file /home/ci/w/a%20b.ts',
+    'ampfile /home/ci/w/a&b.ts',
+    'keep /home/ci/w-other/file.ts',
+    'dot /home/ci/w.backup/a.ts',
+    'prose /var/',
+    'url https://x.test/home/ci/w/a?x=/home/ci/w',
+  ].join(' ');
+  const expected = [
+    'a=home/ci/w&b',
+    'cd home/ci/w&&npm test',
+    'bang home/ci/w!',
+    'query /home/ci/w?',
+    'hash /home/ci/w#x',
+    'star /home/ci/w*',
+    'pct home/ci/w%20',
+    'tilde home/ci/w~',
+    'dollar home/ci/w$HOME',
+    'file home/ci/w/a%20b.ts',
+    'ampfile home/ci/w/a&b.ts',
+    'keep home/ci/w-other/file.ts',
+    'dot home/ci/w.backup/a.ts',
+    'prose /var/',
+    'url https://x.test/home/ci/w/a?x=/home/ci/w',
+  ].join(' ');
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="paths" classname="a.spec.ts">
+      <failure message="${input.replaceAll('&', '&amp;')}">kept</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/root-boundary.xml');
+  const message = result.records[0].attempts[0].errors[0].message;
+  assert.equal(message, expected);
+  for (const warning of result.warnings) {
+    assert.equal(warning.includes('/home/ci/w'), false);
+  }
+});
+
+test('queries, globs, url paths, and prose stay as written', () => {
+  const input = [
+    'Received string: "/api/search?q=1&x=2"',
+    "page.route('/api/users/*', h)",
+    'glob /src/**/*.ts',
+    'list /a/b,/c/d',
+    'Expected: "/cart/checkout.html"',
+    'text /and/or more',
+    'price /month/user',
+    'wrote /srv/ci/out.json and /opt/app/data.json',
+  ].join(' ');
+  const expected = [
+    'Received string: "/api/search?q=1&x=2"',
+    "page.route('/api/users/*', h)",
+    'glob /src/**/*.ts',
+    'list /a/b,/c/d',
+    'Expected: "/cart/checkout.html"',
+    'text /and/or more',
+    'price /month/user',
+    'wrote srv/ci/out.json and opt/app/data.json',
+  ].join(' ');
+  const escaped = input.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="paths" classname="a.spec.ts">
+      <failure message="${escaped}">kept</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/not-a-path.xml');
+  assert.equal(result.records[0].attempts[0].errors[0].message, expected);
+});
+
 test('an absolute JUnit path is rewritten and does not stay absolute', () => {
   const xml = `<testsuites><testsuite hostname="chromium">
     <testcase name="runs elsewhere" file="/var/data/a.spec.ts">
@@ -301,6 +380,67 @@ test('format detection uses contents, not the file name', () => {
   assert.equal(detectFormat('<?xml version="1.0"?><testsuites></testsuites>', 'reports/out.json'), 'junit');
   assert.equal(detectFormat('<testsuite name="only"></testsuite>', 'reports/out.json'), 'junit');
   assert.throws(() => detectFormat('not a report', 'reports/notes.txt'), /unknown report format: reports\/notes\.txt/);
+});
+
+test('an invalid character reference is kept literal and a valid one is decoded', () => {
+  const xml = `<testsuite hostname="chromium">
+    <testcase name="refs" classname="a.spec.ts">
+      <failure message="&#x41;&#0;">&#X41; &#0; &#x42;</failure>
+    </testcase>
+    <testcase name="cdata" classname="a.spec.ts">
+      <failure message="kept"><![CDATA[&#X41; &#0;]]></failure>
+    </testcase>
+  </testsuite>`;
+  const result = parseJunit(xml, 'reports/charref.xml');
+  const decoded = result.records[0].attempts[0].errors[0];
+  const literal = result.records[1].attempts[0].errors[0];
+  assert.equal(decoded.message, 'A&#0;');
+  assert.equal(decoded.stack, '&#X41; &#0; B');
+  assert.equal(literal.stack, '&#X41; &#0;');
+  assert.equal(literal.stack.includes('&amp;'), false);
+});
+
+test('an empty failure is a failed attempt with no error entry', () => {
+  const xml = `<testsuite hostname="chromium">
+    <testcase name="empty" classname="a.spec.ts"><failure/></testcase>
+    <testcase name="blank" classname="a.spec.ts"><failure><![CDATA[]]></failure></testcase>
+  </testsuite>`;
+  const result = parseJunit(xml, 'reports/empty-failure.xml');
+  assert.equal(result.records.length, 2);
+  for (const record of result.records) {
+    assert.equal(record.outcome, 'failed');
+    assert.equal(record.attempts[0].status, 'failed');
+    assert.deepEqual(record.attempts[0].errors, []);
+  }
+});
+
+test('a JUnit attachment path stays relative to the report file', () => {
+  const xml = `<testsuite hostname="chromium">
+    <testcase name="shot" classname="a.spec.ts">
+      <system-out><![CDATA[
+[[ATTACHMENT|../pw-project/test-results/shot.png]]
+]]></system-out>
+    </testcase>
+  </testsuite>`;
+  const result = parseJunit(xml, 'fixtures/reports/sample.junit.xml');
+  assert.equal(result.records[0].attempts[0].attachments[0].path, '../pw-project/test-results/shot.png');
+});
+
+test('format detection uses the root element', () => {
+  assert.equal(detectFormat('{"message":"<testsuite name=\\"x\\">"}', 'reports/note.json'), 'json');
+  assert.equal(
+    detectFormat('<?xml version="1.0"?><!-- <testsuite> --><testsuite name="only"></testsuite>', 'reports/comment.xml'),
+    'junit',
+  );
+  assert.throws(() => detectFormat('hello <testsuite name="x"></testsuite>', 'reports/prose.txt'), /unknown report format/);
+  assert.throws(
+    () => detectFormat('<html><body><testsuite></testsuite></body></html>', 'reports/page.html'),
+    /unknown report format/,
+  );
+  assert.throws(
+    () => detectFormat('<!-- <testsuite> --><notes></notes>', 'reports/notes.xml'),
+    /unknown report format/,
+  );
 });
 
 test('parsing the JUnit fixture twice is byte identical', () => {

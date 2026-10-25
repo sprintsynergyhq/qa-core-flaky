@@ -1,0 +1,22 @@
+Error: expect(locator).toHaveText(expected) failed
+
+Locator:  locator('#n')
+Expected: "9"
+Received: "1"
+Timeout:  400ms
+
+Call log:
+  - Expect "toHaveText" with timeout 400ms
+  - waiting for locator('#n')
+    8 × locator resolved to <h1 id="n">1</h1>
+      - unexpected value "1"
+
+
+  56 | test('value mismatch one', async ({ page }) => {
+  57 |   await page.setContent('<h1 id="n">1</h1>');
+> 58 |   await expect(page.locator('#n')).toHaveText('9', { timeout: 400 });
+     |                                    ^
+  59 | });
+  60 |
+  61 | test('value mismatch two', async ({ page }) => {
+    at fixtures/pw-project/tests/causes.spec.ts:58:36

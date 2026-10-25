@@ -1,10 +1,10 @@
 # qa-core-flaky
 
-qa-core-flaky will triage flaky Playwright tests. It separates a likely real bug from an unstable test, names the likely cause, and suggests a fix for an engineer to review. This repository currently reads a Playwright JSON report or a JUnit XML report and prints one normalized record per test. The JSON parser keeps every retry attempt. The JUnit parser keeps one attempt per test, because Playwright's default JUnit report does not list retries separately.
+qa-core-flaky will triage flaky Playwright tests. It separates a likely real bug from an unstable test, names the likely cause, and suggests a fix for an engineer to review. This repository reads a Playwright JSON report or a JUnit XML report and prints one normalized record per test. It also names a likely cause for each failed or flaky test, with the evidence quoted from the error text. The JSON parser keeps every retry attempt. The JUnit parser keeps one attempt per test, because Playwright's default JUnit report does not list retries separately.
 
 ## Status
 
-Early development. This repository is private until v0.1 review. Only the parse command exists.
+Early development. This repository is private until v0.1 review. The commands are `parse` and `causes`.
 
 ## Quick Start
 
@@ -15,11 +15,14 @@ npm ci
 npm run build
 node dist/cli.js parse fixtures/reports/pw-1.60.0-outcomes.json
 node dist/cli.js parse fixtures/reports/pw-1.60.0-outcomes.junit.xml
+node dist/cli.js causes fixtures/reports/pw-1.60.0-outcomes.json
 ```
 
-The package is not published. Use the commands above from a local clone. `node dist/cli.js --help` lists the parse command.
+The package is not published. Use the commands above from a local clone. `node dist/cli.js --help` lists the commands.
 
-The format is detected from the file contents. `--format json` or `--format junit` overrides that detection. Optional flags `--commit`, `--branch`, and `--run-id` are copied onto each record. `--out` writes the JSON to a file instead of stdout.
+The format is detected from the file contents. The root element must be `testsuites` or `testsuite` for JUnit. A later mention of `<testsuite` is not enough. `--format json` or `--format junit` overrides that detection. Optional flags `--commit`, `--branch`, and `--run-id` are copied onto each record by `parse`. `--out` writes the output to a file instead of stdout.
+
+`causes` prints one block per failed or flaky test. `--json` prints a JSON array of `{ id, findings }`. `--test-timeout` supplies the timeout used by the near-timeout rule. The rule list is in [docs/causes.md](docs/causes.md).
 
 ## Model
 

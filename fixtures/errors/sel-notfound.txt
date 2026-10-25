@@ -1,0 +1,20 @@
+Error: expect(locator).toBeVisible() failed
+
+Locator: getByRole('button', { name: 'Missing' })
+Expected: visible
+Timeout: 400ms
+Error: element(s) not found
+
+Call log:
+  - Expect "toBeVisible" with timeout 400ms
+  - waiting for getByRole('button', { name: 'Missing' })
+
+
+  18 | test('element not found', async ({ page }) => {
+  19 |   await page.goto(pageUrl);
+> 20 |   await expect(page.getByRole('button', { name: 'Missing' })).toBeVisible({ timeout: 400 });
+     |                                                               ^
+  21 | });
+  22 |
+  23 | test('locator unresolved', async ({ page }) => {
+    at fixtures/pw-project/tests/causes.spec.ts:20:63

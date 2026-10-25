@@ -1,0 +1,22 @@
+Error: expect(locator).toHaveText(expected) failed
+
+Locator:  locator('#n')
+Expected: "9"
+Received: "2"
+Timeout:  400ms
+
+Call log:
+  - Expect "toHaveText" with timeout 400ms
+  - waiting for locator('#n')
+    8 × locator resolved to <h1 id="n">2</h1>
+      - unexpected value "2"
+
+
+  61 | test('value mismatch two', async ({ page }) => {
+  62 |   await page.setContent('<h1 id="n">2</h1>');
+> 63 |   await expect(page.locator('#n')).toHaveText('9', { timeout: 400 });
+     |                                    ^
+  64 | });
+  65 |
+  66 | test('closed port', async ({ page }) => {
+    at fixtures/pw-project/tests/causes.spec.ts:63:36

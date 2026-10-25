@@ -402,9 +402,9 @@ test('a filesystem path after file, colon, backtick, and brackets is rewritten',
   assert.equal(outside.length, 7);
 });
 
-function errorReport(text) {
+function rootReport(text, rootDir) {
   return JSON.stringify({
-    config: { rootDir: '/tmp/project' },
+    config: { rootDir },
     suites: [
       {
         title: 'sample.spec.ts',
@@ -434,6 +434,174 @@ function errorReport(text) {
     ],
   });
 }
+
+function errorReport(text) {
+  return rootReport(text, '/tmp/project');
+}
+
+test('an http URL is not rewritten, including a query path and the report root', () => {
+  const text = 'see https://example.com/page?x=/home/a and https://x.test/tmp/project/a end';
+  const result = parsePlaywrightJson(errorReport(text), 'urls.json');
+  assert.equal(result.records[0].attempts[0].errors[0].message, text);
+  assert.equal(result.records[0].attempts[0].errors[0].stack, text);
+  assert.equal(result.warnings.length, 0);
+});
+
+test('a real path beside a URL is rewritten and the URL is not', () => {
+  const text = 'boom /opt/app/data.json see https://example.com/opt/app/data.json';
+  const result = parsePlaywrightJson(errorReport(text), 'url-and-path.json');
+  const message = result.records[0].attempts[0].errors[0].message;
+  assert.equal(message.includes('https://example.com/opt/app/data.json'), true);
+  assert.equal(message.includes('boom /opt/app/data.json'), false);
+  assert.match(message, /boom \.\.\/\.\.\/opt\/app\/data\.json/);
+  assert.equal(
+    result.warnings.some((warning) => warning.includes('https://example.com')),
+    false,
+  );
+});
+
+test('a known prefix in prose is not rewritten', () => {
+  const text = 'The prefixes /var/ /home/ /tmp/ /Users/ /runner/ appear in prose.';
+  const result = parsePlaywrightJson(errorReport(text), 'prose.json');
+  assert.equal(result.records[0].attempts[0].errors[0].message, text);
+  assert.equal(result.warnings.length, 0);
+});
+
+test('an absolute path outside the old prefix list is rewritten', () => {
+  const text = 'wrote /srv/ci/out.json and /opt/app/data.json';
+  const result = parsePlaywrightJson(errorReport(text), 'wide.json');
+  const message = result.records[0].attempts[0].errors[0].message;
+  assert.equal(message, 'wrote ../../srv/ci/out.json and ../../opt/app/data.json');
+  assert.equal(/(?:^|\s)\/srv\/ci\/out\.json/.test(message), false);
+  assert.equal(/(?:^|\s)\/opt\/app\/data\.json/.test(message), false);
+});
+
+test('a report root followed by a non-name character is rewritten', () => {
+  const input = [
+    'a=/home/ci/w&b',
+    'cd /home/ci/w&&npm test',
+    'bang /home/ci/w!',
+    'query /home/ci/w?',
+    'hash /home/ci/w#x',
+    'star /home/ci/w*',
+    'pct /home/ci/w%20',
+    'tilde /home/ci/w~',
+    'dollar /home/ci/w$HOME',
+    'file /home/ci/w/a%20b.ts',
+    'ampfile /home/ci/w/a&b.ts',
+    'keep /home/ci/w-other/file.ts',
+    'dot /home/ci/w.backup/a.ts',
+    'prose /var/',
+    'url https://x.test/home/ci/w/a?x=/home/ci/w',
+  ].join(' ');
+  const expected = [
+    'a=../w&b',
+    'cd ../w&&npm test',
+    'bang ../w!',
+    'query ../w?',
+    'hash ../w#x',
+    'star ../w*',
+    'pct ../w%20',
+    'tilde ../w~',
+    'dollar ../w$HOME',
+    'file a%20b.ts',
+    'ampfile a&b.ts',
+    'keep ../w-other/file.ts',
+    'dot ../w.backup/a.ts',
+    'prose /var/',
+    'url https://x.test/home/ci/w/a?x=/home/ci/w',
+  ].join(' ');
+  const result = parsePlaywrightJson(rootReport(input, '/home/ci/w'), 'root-boundary.json');
+  const message = result.records[0].attempts[0].errors[0].message;
+  assert.equal(message, expected);
+  for (const warning of result.warnings) {
+    assert.equal(warning.includes('/home/ci/w'), false);
+  }
+});
+
+test('queries, globs, url paths, and prose stay as written', () => {
+  const input = [
+    'Received string: "/api/search?q=1&x=2"',
+    "page.route('/api/users/*', h)",
+    'glob /src/**/*.ts',
+    'list /a/b,/c/d',
+    'Expected: "/cart/checkout.html"',
+    'text /and/or more',
+    'price /month/user',
+    'wrote /srv/ci/out.json and /opt/app/data.json',
+  ].join(' ');
+  const expected = [
+    'Received string: "/api/search?q=1&x=2"',
+    "page.route('/api/users/*', h)",
+    'glob /src/**/*.ts',
+    'list /a/b,/c/d',
+    'Expected: "/cart/checkout.html"',
+    'text /and/or more',
+    'price /month/user',
+    'wrote ../../../srv/ci/out.json and ../../../opt/app/data.json',
+  ].join(' ');
+  const result = parsePlaywrightJson(rootReport(input, '/home/ci/w'), 'not-a-path.json');
+  const message = result.records[0].attempts[0].errors[0].message;
+  assert.equal(message, expected);
+  for (const warning of result.warnings) {
+    assert.equal(warning.includes('/api/'), false);
+    assert.equal(warning.includes('/cart/'), false);
+    assert.equal(warning.includes('/src/'), false);
+    assert.equal(warning.includes('/and/'), false);
+    assert.equal(warning.includes('/month/'), false);
+    assert.equal(warning.includes('/a/b'), false);
+  }
+});
+
+test('escaped Windows backslashes keep the drive and use single separators', () => {
+  const message = 'Error at C:\\\\Users\\\\bob\\\\a.ts:12:3';
+  const result = parsePlaywrightJson(errorReport(message), 'windows.json');
+  const stored = result.records[0].attempts[0].errors[0].message;
+  assert.equal(stored, 'Error at C:/Users/bob/a.ts:12:3');
+  assert.equal(stored.includes('Users//bob'), false);
+  assert.equal(stored.includes('\\'), false);
+  assert.ok(result.warnings.some((warning) => warning.includes('C:/Users/bob/a.ts:12:3')));
+});
+
+test('a Windows path on the report drive becomes relative', () => {
+  const raw = JSON.stringify({
+    config: { rootDir: 'C:/work/repo' },
+    suites: [
+      {
+        title: 'a.ts',
+        file: 'C:/work/repo/src/a.ts',
+        specs: [
+          {
+            title: 'runs',
+            file: 'C:/work/repo/src/a.ts',
+            tests: [
+              {
+                projectName: 'chromium',
+                expectedStatus: 'passed',
+                status: 'unexpected',
+                results: [
+                  {
+                    retry: 0,
+                    status: 'failed',
+                    duration: 1,
+                    errors: [{ message: 'at C:\\\\work\\\\repo\\\\src\\\\a.ts:2:1' }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const result = parsePlaywrightJson(raw, 'windows-root.json');
+  assert.equal(result.records[0].file, 'src/a.ts');
+  assert.equal(result.records[0].attempts[0].errors[0].message, 'at src/a.ts:2:1');
+  assert.equal(
+    result.warnings.some((warning) => warning.startsWith('File path is a Windows path')),
+    false,
+  );
+});
 
 test('a test with zero results warns and still returns a record', () => {
   const raw = JSON.stringify({
