@@ -69,10 +69,13 @@ export function decideVerdict(
   causes: readonly CauseFinding[],
   options: { testTimeoutMs?: number } = {},
 ): Verdict {
-  const groups = codeGroups(records);
+  const groups = codeGroups(collapseRunRecords(records));
   const attemptCount = groups.reduce((sum, group) => sum + group.passed.length + group.failed.length, 0);
   const flips = groups.filter((group) => group.passed.length > 0 && group.failed.length > 0);
-  const consistent = groups.filter((group) => group.consistent);
+  // A later code group that only passes means the earlier consistent failure
+  // is not the current verdict. Same-code flips are unchanged: a pass and a
+  // fail on one SHA are already one group.
+  const consistent = groups.filter((group) => group.consistent && !laterPassSupersedes(groups, group));
   const failedTotal = groups.reduce((sum, group) => sum + group.failed.length, 0);
   const passedTotal = groups.reduce((sum, group) => sum + group.passed.length, 0);
   const signatureCount = new Set(groups.flatMap((group) => group.signatures)).size;
@@ -371,10 +374,58 @@ function codeGroups(records: readonly TestRecord[]): CodeGroup[] {
   });
 }
 
-function codeKey(record: TestRecord): string {
+function laterPassSupersedes(groups: readonly CodeGroup[], group: CodeGroup): boolean {
+  const index = groups.indexOf(group);
+  return groups.slice(index + 1).some((later) => later.failed.length === 0 && later.passed.length > 0);
+}
+
+/**
+ * One code version.
+ * A commit SHA is the key when the record has one. Otherwise a run id is
+ * the key. With neither, the report path with `.json`, `.xml`, or
+ * `.junit.xml` removed is the key, so one run's JSON and JUnit files are
+ * one group.
+ */
+export function runIdentity(record: TestRecord): string {
   const sha = record.source.commitSha;
   if (typeof sha === 'string' && sha.length > 0) return `sha:${sha}`;
-  return `report:${record.source.format}:${record.source.reportPath}`;
+  const runId = record.source.runId;
+  if (typeof runId === 'string' && runId.length > 0) return `run:${runId}`;
+  return `stem:${reportStem(record.source.reportPath)}`;
+}
+
+/** `a.json`, `a.xml`, and `a.junit.xml` share a stem. */
+export function reportStem(reportPath: string): string {
+  return reportPath.replace(/\\/g, '/').replace(/\.junit\.xml$/i, '').replace(/\.xml$/i, '').replace(/\.json$/i, '');
+}
+
+/**
+ * Drop a repeated report, and drop a JUnit record when the same test id
+ * already has a Playwright JSON record for that run. JSON keeps every
+ * retry. Counting both would double the attempts and split the run.
+ */
+export function collapseRunRecords(records: readonly TestRecord[]): TestRecord[] {
+  const seen = new Set<string>();
+  const unique: TestRecord[] = [];
+  for (const record of records) {
+    const marker = `${record.id}\0${record.source.format}\0${record.source.reportPath}`;
+    if (seen.has(marker)) continue;
+    seen.add(marker);
+    unique.push(record);
+  }
+  const jsonRuns = new Set(
+    unique
+      .filter((record) => record.source.format === 'playwright-json')
+      .map((record) => `${record.id}\0${runIdentity(record)}`),
+  );
+  return unique.filter((record) => {
+    if (record.source.format !== 'junit') return true;
+    return !jsonRuns.has(`${record.id}\0${runIdentity(record)}`);
+  });
+}
+
+function codeKey(record: TestRecord): string {
+  return runIdentity(record);
 }
 
 function classifyGroup(

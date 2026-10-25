@@ -451,3 +451,68 @@ test('a Playwright JSON report with no root hides a doubled Windows home path', 
   assert.equal(redactHomeText(error.stack).includes('alice'), false);
   assert.match(redactHomeText(error.stack), /at readCsv \(<home>\/x\.json:12:3\)/);
 });
+
+test('home-path drift keeps both redacted lines', () => {
+  const line = (user) =>
+    ['Error: expect(locator).toHaveText(expected) failed', 'Expected: "9"', `Received: "/home/${user}/proj/a.json"`].join('\n');
+  const item = oneRecord('files', [attempt('failed', line('alice'), 0), attempt('failed', line('bob'), 1)]);
+  const entry = buildTriageReport([item]).entries[0];
+  const received = entry.evidence.filter((row) => row.startsWith('Received:'));
+  assert.equal(received.length, 2);
+  assert.equal(received[0], received[1]);
+  assert.match(received[0], /<home>\/proj\/a\.json/);
+  assert.equal(entry.evidence.join('\n').includes('alice'), false);
+  assert.equal(entry.evidence.join('\n').includes('bob'), false);
+});
+
+test('test ids that differ only by username stay separate after redaction', () => {
+  const text = 'Error: element(s) not found';
+  const alice = oneRecord('reads', [attempt('failed', text, 0), attempt('failed', text, 1), attempt('failed', text, 2)]);
+  alice.file = '/home/alice/proj/a.spec.ts';
+  alice.id = '/home/alice/proj/a.spec.ts::chromium::reads';
+  const bob = oneRecord('reads', [attempt('failed', text, 0), attempt('failed', text, 1), attempt('failed', text, 2)]);
+  bob.file = '/home/bob/proj/a.spec.ts';
+  bob.id = '/home/bob/proj/a.spec.ts::chromium::reads';
+  bob.source = { ...bob.source, reportPath: 'other.json' };
+  const report = buildTriageReport([alice, bob]);
+  assert.equal(report.entries.length, 2);
+  assert.notEqual(report.entries[0].id, report.entries[1].id);
+  const joined = report.entries.map((entry) => entry.id).join('\n');
+  assert.equal(joined.includes('alice'), false);
+  assert.equal(joined.includes('bob'), false);
+  assert.match(joined, /<home>\/proj\/a\.spec\.ts/);
+  assert.match(joined, /\(2\)$/m);
+});
+
+test('the same report passed twice is counted once', () => {
+  const item = oneRecord('once', [attempt('failed', 'Error: gave up', 0)]);
+  const copy = { ...item, attempts: item.attempts.map((row) => ({ ...row })) };
+  const entry = buildTriageReport([item, copy]).entries[0];
+  assert.equal(entry.attempts.total, 1);
+  assert.equal(entry.history.runsSeen, 1);
+});
+
+test('a run JSON report is used instead of its JUnit twin', () => {
+  const text = 'Error: element(s) not found';
+  const json = oneRecord('missing', [attempt('failed', text, 0), attempt('failed', text, 1), attempt('failed', text, 2)]);
+  json.source = { format: 'playwright-json', reportPath: 'demo/recorded-seed-1.json' };
+  const junit = oneRecord('missing', [attempt('failed', text, 0)]);
+  junit.source = { format: 'junit', reportPath: 'demo/recorded-seed-1.junit.xml' };
+  const entry = buildTriageReport([json, junit]).entries[0];
+  assert.equal(entry.attempts.total, 3);
+  assert.equal(entry.history.runsSeen, 1);
+  assert.equal(entry.verdict, 'broken-test');
+});
+
+test('markdown escapes stars, underscores, and backticks in a title', () => {
+  const message = 'Error: element(s) not found';
+  const item = oneRecord('show *bold* and _em_ and `code`', [
+    attempt('failed', message, 0),
+    attempt('failed', message, 1),
+    attempt('failed', message, 2),
+  ]);
+  const markdown = renderTriageMarkdown(buildTriageReport([item]));
+  assert.match(markdown, /\\*bold\\*/);
+  assert.match(markdown, /\\_em\\_/);
+  assert.match(markdown, /\\`code\\`/);
+});

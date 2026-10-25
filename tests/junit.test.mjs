@@ -649,6 +649,52 @@ test('a run of backslashes is one separator around a Windows home path', () => {
     redactHomeText('Received: "C:\\\\Users\\\\alice\\\\Desktop\\\\Inner\\\\notes.txt"'),
     'Received: "<home>/Desktop/Inner/notes.txt"',
   );
-  assert.equal(redactHomeText('Received: "/home/alice/Desktop"'), 'Received: "/home/alice/Desktop"');
+  assert.equal(redactHomeText('Received: "/home/alice/Desktop"'), 'Received: "<home>/Desktop"');
   assert.equal(redactHomeText('Expected: "/home/feed"'), 'Expected: "/home/feed"');
+  assert.equal(redactHomeText('Expected: "/home/alice"'), 'Expected: "/home/alice"');
+  assert.equal(redactHomeText('Received: "/Users/bob/notes"'), 'Received: "<home>/notes"');
+});
+
+test('home paths after punctuation, a tilde, a relative prefix, and a UNC share are redacted', () => {
+  const cases = [
+    [',/home/x', ',<home>'],
+    ['>/home/x', '><home>'],
+    ['PATH=/home/alice/bin;/home/bob/bin', 'PATH=<home>/bin;<home>/bin'],
+    ['</home/alice/proj>', '<<home>/proj>'],
+    ['file://localhost/home/alice/a.ts', 'file://localhost/<home>/a.ts'],
+    ['/HOME/alice/a.ts', '<home>/a.ts'],
+    ['~alice/proj', '<home>/proj'],
+    ['~alice', '<home>'],
+    ['~/proj', '~/proj'],
+    ['../../../home/bob/a.ts', '<home>/a.ts'],
+    ['\\\\server\\Users\\bob\\a', '\\\\server<home>/a'],
+    ['x\\\\Users\\\\bob\\\\a', 'x<home>/a'],
+    ['\\\\home\\\\alice\\\\x', '<home>/x'],
+    ['C:\\Users\\Jo Smith failed', '<home> failed'],
+    ['route /home/dashboard/widgets', 'route <home>/widgets'],
+  ];
+  for (const [input, expected] of cases) {
+    assert.equal(redactHomeText(input), expected, input);
+  }
+  const trailed = 'C:\\Users\\bob\\a;C:\\\\Windows';
+  assert.equal(redactHomeText(trailed), '<home>/a;C:\\\\Windows');
+  assert.equal(redactHomeText(trailed).includes('C:/Windows'), false);
+});
+
+test('two files that differ only by the home username stay distinct ids', () => {
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="reads" classname="a.spec.ts" file="/home/alice/proj/a.spec.ts">
+      <failure message="Error: element(s) not found">Error: element(s) not found</failure>
+    </testcase>
+    <testcase name="reads" classname="a.spec.ts" file="/home/bob/proj/a.spec.ts">
+      <failure message="Error: element(s) not found">Error: element(s) not found</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/two-homes.xml');
+  assert.equal(result.records.length, 2);
+  assert.notEqual(result.records[0].id, result.records[1].id);
+  assert.equal(result.records[0].file, '<home>/proj/a.spec.ts');
+  assert.equal(result.records[1].file, '<home~2>/proj/a.spec.ts');
+  assert.equal(result.records[0].id.includes('alice'), false);
+  assert.equal(result.records[1].id.includes('bob'), false);
 });

@@ -16,6 +16,6 @@
     "forceConsistentCasingInFileNames": true,
     "rootDir": "."
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "demo/saucedemo/**/*.ts"],
   "exclude": ["node_modules", "dist", "fixtures"]
 }

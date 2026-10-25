@@ -3,7 +3,7 @@ import type { Cause, CauseFinding } from '../causes/types.js';
 import { suggestFix } from '../fixes/templates.js';
 import type { TestRecord } from '../model.js';
 import { redactHomeText } from '../report-path.js';
-import { decideVerdict, VERDICT_ORDER } from '../verdict.js';
+import { collapseRunRecords, decideVerdict, VERDICT_ORDER } from '../verdict.js';
 import type { TriageEntry, TriageReport } from './schema.js';
 
 export type BuildTriageOptions = {
@@ -39,6 +39,7 @@ export function buildTriageReport(records: readonly TestRecord[], options: Build
     if (left.id > right.id) return 1;
     return 0;
   });
+  assignDisplayIds(entries);
 
   const report: TriageReport = {
     schemaVersion: 1,
@@ -54,28 +55,32 @@ export function renderTriageJson(report: TriageReport): string {
 }
 
 function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefined): TriageEntry {
-  const base = group[0];
+  const records = collapseRunRecords(group);
+  const base = records[0];
   if (!base) {
     throw new Error('Cannot build a triage entry without a record');
   }
-  const attempts = group.flatMap((record) => record.attempts);
+  const attempts = records.flatMap((record) => record.attempts);
   const merged: TestRecord = {
     ...base,
-    outcome: group.some((record) => record.outcome === 'failed')
+    outcome: records.some((record) => record.outcome === 'failed')
       ? 'failed'
-      : group.some((record) => record.outcome === 'flaky')
+      : records.some((record) => record.outcome === 'flaky')
         ? 'flaky'
         : base.outcome,
     attempts,
   };
   const classifyOptions = testTimeoutMs === undefined ? {} : { testTimeoutMs };
   const findings = classifyCauses(merged, classifyOptions);
-  const decision = decideVerdict(group, findings, classifyOptions);
-  const causes = orderCauses(decision.findings, decision.cause).map((finding) => ({
+  const decision = decideVerdict(records, findings, classifyOptions);
+  const ordered = orderCauses(decision.findings, decision.cause);
+  // Dedupe the original lines first. Two home paths can redact to the same
+  // `<home>` text, and that repeat is how the drift stays visible.
+  const evidence = flattenEvidence(ordered, decision.note).map((line) => redactHomeText(line));
+  const causes = ordered.map((finding) => ({
     ...finding,
     evidence: finding.evidence.map((line) => redactHomeText(line)),
   }));
-  const evidence = flattenEvidence(causes, decision.note);
   const failed = attempts.filter(
     (attempt) => attempt.status === 'failed' || attempt.status === 'timedOut' || attempt.status === 'interrupted',
   ).length;
@@ -98,7 +103,7 @@ function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefi
       sameCommit: decision.signals.some((signal) => signal.kind === 'same-code-flip'),
     },
     history: {
-      runsSeen: group.length,
+      runsSeen: records.length,
       firstFailingCommit: null,
     },
     suggestedFix: suggestFix(decision.ruleIds),
@@ -120,6 +125,20 @@ function orderCauses(findings: readonly CauseFinding[], cause: Cause | null): Ca
   const rest = findings.filter((finding) => finding.cause !== cause);
   if (first.length === 0) return [...findings];
   return [...first, ...rest];
+}
+
+/**
+ * Ids that differ only by a username redact to one string. Keep every entry.
+ * The first id in report order stays as redacted. The next ones gain
+ * ` (2)`, ` (3)`, which is not the username.
+ */
+function assignDisplayIds(entries: TriageEntry[]): void {
+  const seen = new Map<string, number>();
+  for (const entry of entries) {
+    const count = seen.get(entry.id) ?? 0;
+    seen.set(entry.id, count + 1);
+    if (count > 0) entry.id = `${entry.id} (${count + 1})`;
+  }
 }
 
 function flattenEvidence(findings: readonly CauseFinding[], note: string | null): string[] {

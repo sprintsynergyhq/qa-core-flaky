@@ -53,6 +53,8 @@ test('help exits 0 and lists parse', () => {
   const result = run(['--help']);
   assert.equal(result.status, 0);
   assert.match(result.stdout, /parse/);
+  assert.match(result.stdout, /\/proc/);
+  assert.match(result.stdout, /--redact/);
 });
 
 test('version exits 0 and prints the package version', () => {
@@ -213,6 +215,32 @@ test('triage rejects an unknown --fail-on value', () => {
   assert.equal(result.stdout, '');
   assert.equal(oneLine(result.stderr), true);
   assert.match(result.stderr, /fail-on/);
+});
+
+test('a failed triage.md write does not leave triage.json behind', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-partial-'));
+  fs.mkdirSync(path.join(dir, 'triage.json'));
+  const result = run(['triage', fixture, '--out-dir', dir, '--fail-on', 'never']);
+  assert.equal(result.status, 1);
+  assert.equal(oneLine(result.stderr), true);
+  assert.equal(fs.existsSync(path.join(dir, 'triage.md')), false);
+  assert.equal(fs.statSync(path.join(dir, 'triage.json')).isDirectory(), true);
+});
+
+test('parse --redact hides a home username and the default leaves it', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-redact-'));
+  const report = path.join(dir, 'home.xml');
+  fs.writeFileSync(
+    report,
+    `<testsuite hostname="chromium"><testcase name="home" classname="a.spec.ts"><failure message="open /home/alice/a.json">open /home/alice/a.json</failure></testcase></testsuite>`,
+  );
+  const raw = run(['parse', report]);
+  assert.equal(raw.status, 0, raw.stderr);
+  assert.match(raw.stdout, /\/home\/alice\/a\.json/);
+  const hidden = run(['parse', report, '--redact']);
+  assert.equal(hidden.status, 0, hidden.stderr);
+  assert.equal(hidden.stdout.includes('alice'), false);
+  assert.match(hidden.stdout, /<home>\/a\.json/);
 });
 
 test('triage exit 2 leaves the full stdout report intact', () => {

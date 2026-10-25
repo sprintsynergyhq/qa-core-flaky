@@ -1,0 +1,966 @@
+{
+  "config": {
+    "configFile": "demo/saucedemo/playwright.config.ts",
+    "rootDir": ".",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {},
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "demo/saucedemo/test-results",
+        "repeatEach": 1,
+        "retries": 2,
+        "metadata": {},
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": ".",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json",
+        {
+          "outputFile": "reports/live.json"
+        }
+      ],
+      [
+        "junit",
+        {
+          "outputFile": "reports/live.junit.xml"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.60.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "broken.spec.ts",
+      "file": "broken.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "typo locator never finds the backpack button",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 0,
+                  "error": {
+                    "message": "Error: expect(locator).toBeVisible() failed\n\nLocator: locator('#add-to-cart-sauce-labs-bakpack')\nExpected: visible\nTimeout: 1000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 1000ms\n  - waiting for locator('#add-to-cart-sauce-labs-bakpack')\n",
+                    "stack": "Error: expect(locator).toBeVisible() failed\n\nLocator: locator('#add-to-cart-sauce-labs-bakpack')\nExpected: visible\nTimeout: 1000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 1000ms\n  - waiting for locator('#add-to-cart-sauce-labs-bakpack')\n\n    at broken.spec.ts:8:65",
+                    "location": {
+                      "file": "broken.spec.ts",
+                      "column": 65,
+                      "line": 8
+                    },
+                    "snippet": "   6 |   // click() on a missing id times out without \"element(s) not found\".\n   7 |   // toBeVisible on this typo locator does print that error.\n>  8 |   await expect(page.locator('#add-to-cart-sauce-labs-bakpack')).toBeVisible({ timeout: 1000 });\n     |                                                                 ^\n   9 | });\n  10 |"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "broken.spec.ts",
+                        "column": 65,
+                        "line": 8
+                      },
+                      "message": "Error: expect(locator).toBeVisible() failed\n\nLocator: locator('#add-to-cart-sauce-labs-bakpack')\nExpected: visible\nTimeout: 1000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 1000ms\n  - waiting for locator('#add-to-cart-sauce-labs-bakpack')\n\n\n   6 |   // click() on a missing id times out without \"element(s) not found\".\n   7 |   // toBeVisible on this typo locator does print that error.\n>  8 |   await expect(page.locator('#add-to-cart-sauce-labs-bakpack')).toBeVisible({ timeout: 1000 });\n     |                                                                 ^\n   9 | });\n  10 |\n    at broken.spec.ts:8:65"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "demo/saucedemo/test-results/broken-typo-locator-never-finds-the-backpack-button-chromium/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "broken.spec.ts",
+                    "column": 65,
+                    "line": 8
+                  }
+                },
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 0,
+                  "error": {
+                    "message": "Error: expect(locator).toBeVisible() failed\n\nLocator: locator('#add-to-cart-sauce-labs-bakpack')\nExpected: visible\nTimeout: 1000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 1000ms\n  - waiting for locator('#add-to-cart-sauce-labs-bakpack')\n",
+                    "stack": "Error: expect(locator).toBeVisible() failed\n\nLocator: locator('#add-to-cart-sauce-labs-bakpack')\nExpected: visible\nTimeout: 1000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 1000ms\n  - waiting for locator('#add-to-cart-sauce-labs-bakpack')\n\n    at broken.spec.ts:8:65",
+                    "location": {
+                      "file": "broken.spec.ts",
+                      "column": 65,
+                      "line": 8
+                    },
+                    "snippet": "   6 |   // click() on a missing id times out without \"element(s) not found\".\n   7 |   // toBeVisible on this typo locator does print that error.\n>  8 |   await expect(page.locator('#add-to-cart-sauce-labs-bakpack')).toBeVisible({ timeout: 1000 });\n     |                                                                 ^\n   9 | });\n  10 |"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "broken.spec.ts",
+                        "column": 65,
+                        "line": 8
+                      },
+                      "message": "Error: expect(locator).toBeVisible() failed\n\nLocator: locator('#add-to-cart-sauce-labs-bakpack')\nExpected: visible\nTimeout: 1000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 1000ms\n  - waiting for locator('#add-to-cart-sauce-labs-bakpack')\n\n\n   6 |   // click() on a missing id times out without \"element(s) not found\".\n   7 |   // toBeVisible on this typo locator does print that error.\n>  8 |   await expect(page.locator('#add-to-cart-sauce-labs-bakpack')).toBeVisible({ timeout: 1000 });\n     |                                                                 ^\n   9 | });\n  10 |\n    at broken.spec.ts:8:65"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 1,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "demo/saucedemo/test-results/broken-typo-locator-never-finds-the-backpack-button-chromium-retry1/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "broken.spec.ts",
+                    "column": 65,
+                    "line": 8
+                  }
+                },
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 0,
+                  "error": {
+                    "message": "Error: expect(locator).toBeVisible() failed\n\nLocator: locator('#add-to-cart-sauce-labs-bakpack')\nExpected: visible\nTimeout: 1000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 1000ms\n  - waiting for locator('#add-to-cart-sauce-labs-bakpack')\n",
+                    "stack": "Error: expect(locator).toBeVisible() failed\n\nLocator: locator('#add-to-cart-sauce-labs-bakpack')\nExpected: visible\nTimeout: 1000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 1000ms\n  - waiting for locator('#add-to-cart-sauce-labs-bakpack')\n\n    at broken.spec.ts:8:65",
+                    "location": {
+                      "file": "broken.spec.ts",
+                      "column": 65,
+                      "line": 8
+                    },
+                    "snippet": "   6 |   // click() on a missing id times out without \"element(s) not found\".\n   7 |   // toBeVisible on this typo locator does print that error.\n>  8 |   await expect(page.locator('#add-to-cart-sauce-labs-bakpack')).toBeVisible({ timeout: 1000 });\n     |                                                                 ^\n   9 | });\n  10 |"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "broken.spec.ts",
+                        "column": 65,
+                        "line": 8
+                      },
+                      "message": "Error: expect(locator).toBeVisible() failed\n\nLocator: locator('#add-to-cart-sauce-labs-bakpack')\nExpected: visible\nTimeout: 1000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 1000ms\n  - waiting for locator('#add-to-cart-sauce-labs-bakpack')\n\n\n   6 |   // click() on a missing id times out without \"element(s) not found\".\n   7 |   // toBeVisible on this typo locator does print that error.\n>  8 |   await expect(page.locator('#add-to-cart-sauce-labs-bakpack')).toBeVisible({ timeout: 1000 });\n     |                                                                 ^\n   9 | });\n  10 |\n    at broken.spec.ts:8:65"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 2,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "demo/saucedemo/test-results/broken-typo-locator-never-finds-the-backpack-button-chromium-retry2/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "broken.spec.ts",
+                    "column": 65,
+                    "line": 8
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "8c7f8f1902ef713fcbc2-21a7d06badf6900a4d53",
+          "file": "broken.spec.ts",
+          "line": 4,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "environment.spec.ts",
+      "file": "environment.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "aborted document fails page.goto",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 0,
+                  "error": {
+                    "message": "Error: page.goto: net::ERR_INTERNET_DISCONNECTED at https://www.saucedemo.com/\nCall log:\n  - navigating to \"https://www.saucedemo.com/\", waiting until \"load\"\n",
+                    "stack": "Error: page.goto: net::ERR_INTERNET_DISCONNECTED at https://www.saucedemo.com/\nCall log:\n  - navigating to \"https://www.saucedemo.com/\", waiting until \"load\"\n\n    at environment.spec.ts:16:14",
+                    "location": {
+                      "file": "environment.spec.ts",
+                      "column": 14,
+                      "line": 16
+                    },
+                    "snippet": "  14 |     });\n  15 |   }\n> 16 |   await page.goto('/');\n     |              ^\n  17 |   await expect(page.locator('[data-test=\"username\"]')).toBeVisible();\n  18 | });\n  19 |"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "environment.spec.ts",
+                        "column": 14,
+                        "line": 16
+                      },
+                      "message": "Error: page.goto: net::ERR_INTERNET_DISCONNECTED at https://www.saucedemo.com/\nCall log:\n  - navigating to \"https://www.saucedemo.com/\", waiting until \"load\"\n\n\n  14 |     });\n  15 |   }\n> 16 |   await page.goto('/');\n     |              ^\n  17 |   await expect(page.locator('[data-test=\"username\"]')).toBeVisible();\n  18 | });\n  19 |\n    at environment.spec.ts:16:14"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "demo/saucedemo/test-results/environment-aborted-document-fails-page-goto-chromium/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "environment.spec.ts",
+                    "column": 14,
+                    "line": 16
+                  }
+                },
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 1,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "flaky"
+            }
+          ],
+          "id": "2a84b67ca6571daf27b7-84ad49f0ccfbad746197",
+          "file": "environment.spec.ts",
+          "line": 6,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "healthy.spec.ts",
+      "file": "healthy.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "inventory shows six products",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9332c95ddcc6ca2277e3-f9a28c142826305f6c68",
+          "file": "healthy.spec.ts",
+          "line": 4,
+          "column": 1
+        },
+        {
+          "title": "adding the backpack shows a badge of 1",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9332c95ddcc6ca2277e3-f4018f8019c9148238e8",
+          "file": "healthy.spec.ts",
+          "line": 9,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "real-bug.spec.ts",
+      "file": "real-bug.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "problem user image src differs from the standard catalog",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 0,
+                  "error": {
+                    "message": "Error: expect(received).toContain(expected) // indexOf\n\nExpected substring: \"sauce-backpack\"\nReceived string:    \"/assets/sl-404-Cq1a9k9X.jpg\"",
+                    "stack": "Error: expect(received).toContain(expected) // indexOf\n\nExpected substring: \"sauce-backpack\"\nReceived string:    \"/assets/sl-404-Cq1a9k9X.jpg\"\n    at real-bug.spec.ts:13:21",
+                    "location": {
+                      "file": "real-bug.spec.ts",
+                      "column": 21,
+                      "line": 13
+                    },
+                    "snippet": "  11 |   await login(page, 'problem_user');\n  12 |   const src = await page.locator('[data-test=\"inventory-item\"] img').first().getAttribute('src');\n> 13 |   expect(src ?? '').toContain('sauce-backpack');\n     |                     ^\n  14 | });\n  15 |"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "real-bug.spec.ts",
+                        "column": 21,
+                        "line": 13
+                      },
+                      "message": "Error: expect(received).toContain(expected) // indexOf\n\nExpected substring: \"sauce-backpack\"\nReceived string:    \"/assets/sl-404-Cq1a9k9X.jpg\"\n\n  11 |   await login(page, 'problem_user');\n  12 |   const src = await page.locator('[data-test=\"inventory-item\"] img').first().getAttribute('src');\n> 13 |   expect(src ?? '').toContain('sauce-backpack');\n     |                     ^\n  14 | });\n  15 |\n    at real-bug.spec.ts:13:21"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "demo/saucedemo/test-results/real-bug-problem-user-imag-ca204-s-from-the-standard-catalog-chromium/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "real-bug.spec.ts",
+                    "column": 21,
+                    "line": 13
+                  }
+                },
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 0,
+                  "error": {
+                    "message": "Error: expect(received).toContain(expected) // indexOf\n\nExpected substring: \"sauce-backpack\"\nReceived string:    \"/assets/sl-404-Cq1a9k9X.jpg\"",
+                    "stack": "Error: expect(received).toContain(expected) // indexOf\n\nExpected substring: \"sauce-backpack\"\nReceived string:    \"/assets/sl-404-Cq1a9k9X.jpg\"\n    at real-bug.spec.ts:13:21",
+                    "location": {
+                      "file": "real-bug.spec.ts",
+                      "column": 21,
+                      "line": 13
+                    },
+                    "snippet": "  11 |   await login(page, 'problem_user');\n  12 |   const src = await page.locator('[data-test=\"inventory-item\"] img').first().getAttribute('src');\n> 13 |   expect(src ?? '').toContain('sauce-backpack');\n     |                     ^\n  14 | });\n  15 |"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "real-bug.spec.ts",
+                        "column": 21,
+                        "line": 13
+                      },
+                      "message": "Error: expect(received).toContain(expected) // indexOf\n\nExpected substring: \"sauce-backpack\"\nReceived string:    \"/assets/sl-404-Cq1a9k9X.jpg\"\n\n  11 |   await login(page, 'problem_user');\n  12 |   const src = await page.locator('[data-test=\"inventory-item\"] img').first().getAttribute('src');\n> 13 |   expect(src ?? '').toContain('sauce-backpack');\n     |                     ^\n  14 | });\n  15 |\n    at real-bug.spec.ts:13:21"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 1,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "demo/saucedemo/test-results/real-bug-problem-user-imag-ca204-s-from-the-standard-catalog-chromium-retry1/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "real-bug.spec.ts",
+                    "column": 21,
+                    "line": 13
+                  }
+                },
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 0,
+                  "error": {
+                    "message": "Error: expect(received).toContain(expected) // indexOf\n\nExpected substring: \"sauce-backpack\"\nReceived string:    \"/assets/sl-404-Cq1a9k9X.jpg\"",
+                    "stack": "Error: expect(received).toContain(expected) // indexOf\n\nExpected substring: \"sauce-backpack\"\nReceived string:    \"/assets/sl-404-Cq1a9k9X.jpg\"\n    at real-bug.spec.ts:13:21",
+                    "location": {
+                      "file": "real-bug.spec.ts",
+                      "column": 21,
+                      "line": 13
+                    },
+                    "snippet": "  11 |   await login(page, 'problem_user');\n  12 |   const src = await page.locator('[data-test=\"inventory-item\"] img').first().getAttribute('src');\n> 13 |   expect(src ?? '').toContain('sauce-backpack');\n     |                     ^\n  14 | });\n  15 |"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "real-bug.spec.ts",
+                        "column": 21,
+                        "line": 13
+                      },
+                      "message": "Error: expect(received).toContain(expected) // indexOf\n\nExpected substring: \"sauce-backpack\"\nReceived string:    \"/assets/sl-404-Cq1a9k9X.jpg\"\n\n  11 |   await login(page, 'problem_user');\n  12 |   const src = await page.locator('[data-test=\"inventory-item\"] img').first().getAttribute('src');\n> 13 |   expect(src ?? '').toContain('sauce-backpack');\n     |                     ^\n  14 | });\n  15 |\n    at real-bug.spec.ts:13:21"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 2,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "demo/saucedemo/test-results/real-bug-problem-user-imag-ca204-s-from-the-standard-catalog-chromium-retry2/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "real-bug.spec.ts",
+                    "column": 21,
+                    "line": 13
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "c6ecba575cb51e7bdb4b-dc601cbe28ea0f8c9dda",
+          "file": "real-bug.spec.ts",
+          "line": 10,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "selectors.spec.ts",
+      "file": "selectors.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "unscoped Remove is strict when two items were added",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 0,
+                  "error": {
+                    "message": "Error: locator.click: Error: strict mode violation: getByRole('button', { name: 'Remove' }) resolved to 2 elements:\n    1) <button id=\"remove-sauce-labs-backpack\" name=\"remove-sauce-labs-backpack\" data-test=\"remove-sauce-labs-backpack\" class=\"btn btn_secondary btn_small btn_inventory \">Remove</button> aka getByTestId('remove-sauce-labs-backpack')\n    2) <button id=\"remove-sauce-labs-bike-light\" name=\"remove-sauce-labs-bike-light\" data-test=\"remove-sauce-labs-bike-light\" class=\"btn btn_secondary btn_small btn_inventory \">Remove</button> aka getByTestId('remove-sauce-labs-bike-light')\n\nCall log:\n  - waiting for getByRole('button', { name: 'Remove' })\n",
+                    "stack": "Error: locator.click: Error: strict mode violation: getByRole('button', { name: 'Remove' }) resolved to 2 elements:\n    1) <button id=\"remove-sauce-labs-backpack\" name=\"remove-sauce-labs-backpack\" data-test=\"remove-sauce-labs-backpack\" class=\"btn btn_secondary btn_small btn_inventory \">Remove</button> aka getByTestId('remove-sauce-labs-backpack')\n    2) <button id=\"remove-sauce-labs-bike-light\" name=\"remove-sauce-labs-bike-light\" data-test=\"remove-sauce-labs-bike-light\" class=\"btn btn_secondary btn_small btn_inventory \">Remove</button> aka getByTestId('remove-sauce-labs-bike-light')\n\nCall log:\n  - waiting for getByRole('button', { name: 'Remove' })\n\n    at selectors.spec.ts:14:54",
+                    "location": {
+                      "file": "selectors.spec.ts",
+                      "column": 54,
+                      "line": 14
+                    },
+                    "snippet": "  12 |     await page.locator(`[data-test=\"${addButtons[index]}\"]`).click();\n  13 |   }\n> 14 |   await page.getByRole('button', { name: 'Remove' }).click();\n     |                                                      ^\n  15 |   await expect(page.locator('[data-test=\"shopping-cart-badge\"]')).toHaveCount(0);\n  16 | });\n  17 |"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "selectors.spec.ts",
+                        "column": 54,
+                        "line": 14
+                      },
+                      "message": "Error: locator.click: Error: strict mode violation: getByRole('button', { name: 'Remove' }) resolved to 2 elements:\n    1) <button id=\"remove-sauce-labs-backpack\" name=\"remove-sauce-labs-backpack\" data-test=\"remove-sauce-labs-backpack\" class=\"btn btn_secondary btn_small btn_inventory \">Remove</button> aka getByTestId('remove-sauce-labs-backpack')\n    2) <button id=\"remove-sauce-labs-bike-light\" name=\"remove-sauce-labs-bike-light\" data-test=\"remove-sauce-labs-bike-light\" class=\"btn btn_secondary btn_small btn_inventory \">Remove</button> aka getByTestId('remove-sauce-labs-bike-light')\n\nCall log:\n  - waiting for getByRole('button', { name: 'Remove' })\n\n\n  12 |     await page.locator(`[data-test=\"${addButtons[index]}\"]`).click();\n  13 |   }\n> 14 |   await page.getByRole('button', { name: 'Remove' }).click();\n     |                                                      ^\n  15 |   await expect(page.locator('[data-test=\"shopping-cart-badge\"]')).toHaveCount(0);\n  16 | });\n  17 |\n    at selectors.spec.ts:14:54"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "demo/saucedemo/test-results/selectors-unscoped-Remove--f5b6e-t-when-two-items-were-added-chromium/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "selectors.spec.ts",
+                    "column": 54,
+                    "line": 14
+                  }
+                },
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 1,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "flaky"
+            }
+          ],
+          "id": "cd16a4105508e9c5795d-baa7188fc094d5549695",
+          "file": "selectors.spec.ts",
+          "line": 7,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "test-data.spec.ts",
+      "file": "test-data.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "shared cart page",
+          "file": "test-data.spec.ts",
+          "line": 29,
+          "column": 6,
+          "specs": [
+            {
+              "title": "A adds one backpack",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "1970-01-01T00:00:00.000Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "d29aa87f11a9a77fe0dc-1c6cdfda6f171a912d58",
+              "file": "test-data.spec.ts",
+              "line": 39,
+              "column": 3
+            },
+            {
+              "title": "B expects the badge A added",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 0,
+                      "error": {
+                        "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  locator('[data-test=\"shopping-cart-badge\"]')\nExpected: \"1\"\nReceived: \"2\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 5000ms\n  - waiting for locator('[data-test=\"shopping-cart-badge\"]')\n    1 × locator resolved to <span class=\"shopping_cart_badge\" data-test=\"shopping-cart-badge\">2</span>\n       - unexpected value \"2\"\n",
+                        "stack": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  locator('[data-test=\"shopping-cart-badge\"]')\nExpected: \"1\"\nReceived: \"2\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 5000ms\n  - waiting for locator('[data-test=\"shopping-cart-badge\"]')\n    1 × locator resolved to <span class=\"shopping_cart_badge\" data-test=\"shopping-cart-badge\">2</span>\n       - unexpected value \"2\"\n\n    at test-data.spec.ts:53:71",
+                        "location": {
+                          "file": "test-data.spec.ts",
+                          "column": 71,
+                          "line": 53
+                        },
+                        "snippet": "  51 |       await setCount(shared, 1);\n  52 |     }\n> 53 |     await expect(shared.locator('[data-test=\"shopping-cart-badge\"]')).toHaveText('1');\n     |                                                                       ^\n  54 |   });\n  55 | });\n  56 |"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "test-data.spec.ts",
+                            "column": 71,
+                            "line": 53
+                          },
+                          "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  locator('[data-test=\"shopping-cart-badge\"]')\nExpected: \"1\"\nReceived: \"2\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 5000ms\n  - waiting for locator('[data-test=\"shopping-cart-badge\"]')\n    1 × locator resolved to <span class=\"shopping_cart_badge\" data-test=\"shopping-cart-badge\">2</span>\n       - unexpected value \"2\"\n\n\n  51 |       await setCount(shared, 1);\n  52 |     }\n> 53 |     await expect(shared.locator('[data-test=\"shopping-cart-badge\"]')).toHaveText('1');\n     |                                                                       ^\n  54 |   });\n  55 | });\n  56 |\n    at test-data.spec.ts:53:71"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "1970-01-01T00:00:00.000Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "demo/saucedemo/test-results/test-data-shared-cart-page-B-expects-the-badge-A-added-chromium/error-context.md"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "demo/saucedemo/test-results/test-data-shared-cart-page-B-expects-the-badge-A-added-chromium/error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "test-data.spec.ts",
+                        "column": 71,
+                        "line": 53
+                      }
+                    },
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 0,
+                      "error": {
+                        "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  locator('[data-test=\"shopping-cart-badge\"]')\nExpected: \"1\"\nReceived: \"3\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 5000ms\n  - waiting for locator('[data-test=\"shopping-cart-badge\"]')\n    1 × locator resolved to <span class=\"shopping_cart_badge\" data-test=\"shopping-cart-badge\">3</span>\n       - unexpected value \"3\"\n",
+                        "stack": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  locator('[data-test=\"shopping-cart-badge\"]')\nExpected: \"1\"\nReceived: \"3\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 5000ms\n  - waiting for locator('[data-test=\"shopping-cart-badge\"]')\n    1 × locator resolved to <span class=\"shopping_cart_badge\" data-test=\"shopping-cart-badge\">3</span>\n       - unexpected value \"3\"\n\n    at test-data.spec.ts:53:71",
+                        "location": {
+                          "file": "test-data.spec.ts",
+                          "column": 71,
+                          "line": 53
+                        },
+                        "snippet": "  51 |       await setCount(shared, 1);\n  52 |     }\n> 53 |     await expect(shared.locator('[data-test=\"shopping-cart-badge\"]')).toHaveText('1');\n     |                                                                       ^\n  54 |   });\n  55 | });\n  56 |"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "test-data.spec.ts",
+                            "column": 71,
+                            "line": 53
+                          },
+                          "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator:  locator('[data-test=\"shopping-cart-badge\"]')\nExpected: \"1\"\nReceived: \"3\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 5000ms\n  - waiting for locator('[data-test=\"shopping-cart-badge\"]')\n    1 × locator resolved to <span class=\"shopping_cart_badge\" data-test=\"shopping-cart-badge\">3</span>\n       - unexpected value \"3\"\n\n\n  51 |       await setCount(shared, 1);\n  52 |     }\n> 53 |     await expect(shared.locator('[data-test=\"shopping-cart-badge\"]')).toHaveText('1');\n     |                                                                       ^\n  54 |   });\n  55 | });\n  56 |\n    at test-data.spec.ts:53:71"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 1,
+                      "startTime": "1970-01-01T00:00:00.000Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "demo/saucedemo/test-results/test-data-shared-cart-page-B-expects-the-badge-A-added-chromium-retry1/error-context.md"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "demo/saucedemo/test-results/test-data-shared-cart-page-B-expects-the-badge-A-added-chromium-retry1/error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "test-data.spec.ts",
+                        "column": 71,
+                        "line": 53
+                      }
+                    },
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 2,
+                      "startTime": "1970-01-01T00:00:00.000Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "flaky"
+                }
+              ],
+              "id": "d29aa87f11a9a77fe0dc-856ffa45c76b5460535d",
+              "file": "test-data.spec.ts",
+              "line": 44,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "timing.spec.ts",
+      "file": "timing.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "image delay fails the short visibility check",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 0,
+                  "error": {
+                    "message": "Error: expect(locator).toBeVisible() failed\n\nLocator:  locator('[data-test=\"inventory-item\"] img').first()\nExpected: visible\nReceived: hidden\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 1000ms\n  - waiting for locator('[data-test=\"inventory-item\"] img').first()\n    1 × locator resolved to <img alt=\"Sauce Labs Backpack\" class=\"inventory_item_img\" data-test=\"inventory-item-sauce-labs-backpack-img\" src=\"/assets/sauce-backpack-1200x1500-CjRW-Djj.jpg\"/>\n       - unexpected value \"hidden\"\n",
+                    "stack": "Error: expect(locator).toBeVisible() failed\n\nLocator:  locator('[data-test=\"inventory-item\"] img').first()\nExpected: visible\nReceived: hidden\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 1000ms\n  - waiting for locator('[data-test=\"inventory-item\"] img').first()\n    1 × locator resolved to <img alt=\"Sauce Labs Backpack\" class=\"inventory_item_img\" data-test=\"inventory-item-sauce-labs-backpack-img\" src=\"/assets/sauce-backpack-1200x1500-CjRW-Djj.jpg\"/>\n       - unexpected value \"hidden\"\n\n    at timing.spec.ts:19:32",
+                    "location": {
+                      "file": "timing.spec.ts",
+                      "column": 32,
+                      "line": 19
+                    },
+                    "snippet": "  17 |   await login(page);\n  18 |   const firstItemImage = page.locator('[data-test=\"inventory-item\"] img').first();\n> 19 |   await expect(firstItemImage).toBeVisible({ timeout: 1000 });\n     |                                ^\n  20 | });\n  21 |\n  22 | test('waitForTimeout before add to cart', async ({ page }, testInfo) => {"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "timing.spec.ts",
+                        "column": 32,
+                        "line": 19
+                      },
+                      "message": "Error: expect(locator).toBeVisible() failed\n\nLocator:  locator('[data-test=\"inventory-item\"] img').first()\nExpected: visible\nReceived: hidden\nTimeout:  1000ms\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 1000ms\n  - waiting for locator('[data-test=\"inventory-item\"] img').first()\n    1 × locator resolved to <img alt=\"Sauce Labs Backpack\" class=\"inventory_item_img\" data-test=\"inventory-item-sauce-labs-backpack-img\" src=\"/assets/sauce-backpack-1200x1500-CjRW-Djj.jpg\"/>\n       - unexpected value \"hidden\"\n\n\n  17 |   await login(page);\n  18 |   const firstItemImage = page.locator('[data-test=\"inventory-item\"] img').first();\n> 19 |   await expect(firstItemImage).toBeVisible({ timeout: 1000 });\n     |                                ^\n  20 | });\n  21 |\n  22 | test('waitForTimeout before add to cart', async ({ page }, testInfo) => {\n    at timing.spec.ts:19:32"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "demo/saucedemo/test-results/timing-image-delay-fails-the-short-visibility-check-chromium/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "timing.spec.ts",
+                    "column": 32,
+                    "line": 19
+                  }
+                },
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 1,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "flaky"
+            }
+          ],
+          "id": "8b144b852b1422c1e11b-0f00c8a90b4ff25d5ec1",
+          "file": "timing.spec.ts",
+          "line": 8,
+          "column": 1
+        },
+        {
+          "title": "waitForTimeout before add to cart",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 8000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "timedOut",
+                  "duration": 0,
+                  "error": {
+                    "message": "Test timeout of 8000ms exceeded.",
+                    "stack": "Test timeout of 8000ms exceeded."
+                  },
+                  "errors": [
+                    {
+                      "message": "Test timeout of 8000ms exceeded."
+                    },
+                    {
+                      "location": {
+                        "file": "timing.spec.ts",
+                        "column": 56,
+                        "line": 26
+                      },
+                      "message": "Error: page.waitForTimeout: Test timeout of 8000ms exceeded.\n\n  24 |   await login(page);\n  25 |   // waitForTimeout before the click is the antipattern being demonstrated.\n> 26 |   if (shouldFlake(WAIT_ID, testInfo.retry)) await page.waitForTimeout(12000);\n     |                                                        ^\n  27 |   await page.locator('[data-test=\"add-to-cart-sauce-labs-backpack\"]').click();\n  28 |   await expect(page.locator('[data-test=\"shopping-cart-badge\"]')).toHaveText('1');\n  29 | });\n    at timing.spec.ts:26:56"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "demo/saucedemo/test-results/timing-waitForTimeout-before-add-to-cart-chromium/error-context.md"
+                    }
+                  ]
+                },
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 1,
+                  "startTime": "1970-01-01T00:00:00.000Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "flaky"
+            }
+          ],
+          "id": "8b144b852b1422c1e11b-80e3ec67019479e10051",
+          "file": "timing.spec.ts",
+          "line": 22,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "1970-01-01T00:00:00.000Z",
+    "duration": 0,
+    "expected": 3,
+    "skipped": 0,
+    "unexpected": 2,
+    "flaky": 5
+  }
+}

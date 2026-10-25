@@ -275,7 +275,14 @@ function unknownEvidence(attempts: readonly Attempt[]): string[] {
           continue;
         }
         const first = readable.split('\n').find((line) => line.trim().length > 0);
-        pushEvidence(evidence, first === undefined ? undefined : clipEvidenceLine(first));
+        if (first !== undefined) {
+          pushEvidence(evidence, clipEvidenceLine(first));
+          continue;
+        }
+        // A stack frame is not a cause, but it is still evidence when the
+        // error has no other line. `at /home/alice:12:3` is quoted here.
+        const frame = text.split('\n').find((line) => line.trim().length > 0);
+        pushEvidence(evidence, frame === undefined ? undefined : clipEvidenceLine(frame));
       }
     }
   }

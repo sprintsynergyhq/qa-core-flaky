@@ -1,0 +1,35 @@
+{
+  "seed": 443,
+  "rate": 0.5,
+  "command": "npm run demo:record -- --seed 443",
+  "tests": {
+    "timing.spec.ts::chromium::image delay fails the short visibility check": {
+      "verdict": "flaky",
+      "cause": "timing"
+    },
+    "timing.spec.ts::chromium::waitForTimeout before add to cart": {
+      "verdict": "flaky",
+      "cause": "timing"
+    },
+    "selectors.spec.ts::chromium::unscoped Remove is strict when two items were added": {
+      "verdict": "flaky",
+      "cause": "selectors"
+    },
+    "broken.spec.ts::chromium::typo locator never finds the backpack button": {
+      "verdict": "broken-test",
+      "cause": "selectors"
+    },
+    "environment.spec.ts::chromium::aborted document fails page.goto": {
+      "verdict": "flaky",
+      "cause": "environment"
+    },
+    "test-data.spec.ts::chromium::shared cart page > B expects the badge A added": {
+      "verdict": "flaky",
+      "cause": "test-data"
+    },
+    "real-bug.spec.ts::chromium::problem user image src differs from the standard catalog": {
+      "verdict": "likely-real-bug",
+      "cause": "unknown"
+    }
+  }
+}

@@ -204,7 +204,7 @@ A closed target that still has selector evidence stays a selector finding and is
 
 | Rule | When | Evidence | Confidence |
 | --- | --- | --- | --- |
-| UNK-NONE | Some failed attempt has error text, and no rule matched | The `Expected:` and `Received:` lines when those exist, otherwise the first non-empty line that is still evidence. Each line is clipped to 300 characters. Leading whitespace is allowed | low |
+| UNK-NONE | Some failed attempt has error text, and no rule matched | The `Expected:` and `Received:` lines when those exist, otherwise the first non-empty line that is still evidence. If every line was removed as a stack frame, the first original line is quoted. Each line is clipped to 300 characters. Leading whitespace is allowed | low |
 | UNK-EMPTY | Every failed attempt has no error text, or the record is failed or flaky and has no failed attempt | Empty | low |
 
 A value mismatch on a resolved locator, such as `toHaveText` with `Received: "1"`, is `UNK-NONE` when the received value does not change across attempts. It is not selectors and it is not timing. The captured example is `fixtures/errors/data-value-1.txt`.
@@ -221,7 +221,7 @@ A value mismatch on a resolved locator, such as `toHaveText` with `Received: "1"
 6. A UUID becomes `ID`. Digits after `id=` or `id:` become `N`.
 7. Runs of spaces or tabs become one space, then the ends are trimmed.
 
-Numbers that belong to the assertion, such as `Received: "1"`, are kept. A call-log repeat count such as `8 ×` is kept, so two errors that differ only by that count do not share a signature.
+Numbers that belong to the assertion, such as `Received: "1"`, are kept. A call-log repeat count such as `9 ×` or `9 x locator` becomes `N ×`, so two errors that differ only by that count share a signature. `Received: "9 x"` is an assertion value and is kept.
 
 ## Local Fixture
 
@@ -233,4 +233,4 @@ Numbers that belong to the assertion, such as `Received: "1"`, are kept. A call-
 - JUnit attachment paths stay relative to the report file. JSON attachment paths stay relative to `config.rootDir`. The two bases are documented in [model.md](model.md). Cause rules do not quote attachment paths.
 - A Windows path that does not share a drive with the report root is stored as `C:/...` with the drive kept and the separators collapsed. It is not rewritten to a POSIX relative path.
 - Order dependency is the `orderDependency` hook only. Nothing in this version decides that a test failed because of order.
-- Call-log repeat counts are not removed from signatures.
+- A stack-frame-only error, such as `at /home/alice:12:3`, is Unknown and quotes that first frame. The frame is not a cause by itself.

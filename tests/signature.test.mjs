@@ -37,6 +37,18 @@ test('a long token does not stall line and column normalization', () => {
   assert.equal(signature, text);
 });
 
+test('call-log repeat counts share a signature', () => {
+  const left = '9 × locator resolved to <button>Add</button>\n    - waiting for getByRole';
+  const right = '2 × locator resolved to <button>Add</button>\n    - waiting for getByRole';
+  assert.equal(normalizeErrorSignature(left), normalizeErrorSignature(right));
+  assert.match(normalizeErrorSignature(left), /N × locator/);
+  const letter = '9 x locator resolved to 1 element';
+  const other = '3 x locator resolved to 1 element';
+  assert.equal(normalizeErrorSignature(letter), normalizeErrorSignature(other));
+  const received = 'Received: "9 x"';
+  assert.equal(normalizeErrorSignature(received), received);
+});
+
 test('a fractional duration and a private tmp path normalize', () => {
   const left = 'Timeout 1.5ms exceeded at /private/tmp/run-12/a.txt';
   const right = 'Timeout 30ms exceeded at /private/tmp/run-9/a.txt';

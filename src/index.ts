@@ -17,6 +17,8 @@ export { makeTestId } from './id.js';
 export { classifyCauses } from './causes/index.js';
 export type { Cause, CauseFinding, ClassifyOptions, Confidence, OrderDependencyHook } from './causes/index.js';
 export { redactHomeText } from './report-path.js';
+export { redactParseResult } from './redact.js';
+export { collapseRunRecords, reportStem, runIdentity } from './verdict.js';
 export { normalizeErrorSignature } from './signature.js';
 export { decideVerdict, VERDICT_ORDER } from './verdict.js';
 export type { Verdict } from './verdict.js';

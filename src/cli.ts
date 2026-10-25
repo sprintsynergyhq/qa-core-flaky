@@ -10,6 +10,7 @@ import { detectFormat } from './parsers/detect.js';
 import { parseJunit } from './parsers/junit.js';
 import { parsePlaywrightJson } from './parsers/playwright-json.js';
 import { redactHomeText } from './report-path.js';
+import { redactParseResult } from './redact.js';
 import { renderTriageMarkdown } from './report/markdown.js';
 import { buildTriageReport, renderTriageJson } from './report/json.js';
 
@@ -17,7 +18,7 @@ import { buildTriageReport, renderTriageJson } from './report/json.js';
  * qa-core-flaky command line.
  *
  *   qa-core-flaky parse <report> [--format json|junit] [--commit <sha>]
- *                     [--branch <name>] [--run-id <id>] [--out <file>]
+ *                     [--branch <name>] [--run-id <id>] [--out <file>] [--redact]
  *   qa-core-flaky causes <report> [--format json|junit] [--json]
  *                     [--test-timeout <ms>] [--out <file>]
  *   qa-core-flaky triage <report...> [--out-dir <dir>] [--json]
@@ -38,11 +39,17 @@ Commands:
 
 Options:
   --format <json|junit>       Force the report format instead of detecting it
-  --commit <sha>              Store this commit SHA on every record
+  --commit <sha>              Store this commit SHA on every record in this command.
+                              A blank value is ignored. A Playwright JSON report
+                              also reads config.metadata.gitCommit when this is omitted.
   --branch <name>             Store this branch name on every record
   --run-id <id>               Store this run id on every record
+  --redact                    parse: hide home usernames in the printed records
   --out <file>                parse, causes: write the output to this file
-  --out-dir <dir>             triage: write triage.json and triage.md here
+  --out-dir <dir>             triage: write triage.json and triage.md here.
+                              Do not use a directory under /proc. Creating one
+                              can hang (a Node bug) and this command does not
+                              probe /proc.
   --json                      causes: print a JSON array. triage: also print JSON
   --fail-on <findings|never>  triage: exit 2 when there are entries (default findings)
   --timestamp                 triage: include generatedAt. Output then changes every run
@@ -64,6 +71,7 @@ type FlagValues = {
   'fail-on'?: string;
   timestamp?: boolean;
   'test-timeout'?: string;
+  redact?: boolean;
 };
 
 function main(): void {
@@ -96,6 +104,7 @@ function run(args: readonly string[]): void {
         'fail-on': { type: 'string' },
         timestamp: { type: 'boolean' },
         'test-timeout': { type: 'string' },
+        redact: { type: 'boolean' },
       },
     }));
   } catch (error) {
@@ -139,8 +148,9 @@ function run(args: readonly string[]): void {
   let body: string;
   try {
     const selected = format ?? detectFormat(text, reportPath);
-    const result =
+    const parsed =
       selected === 'json' ? parsePlaywrightJson(text, reportPath, meta) : parseJunit(text, reportPath, meta);
+    const result = command === 'parse' && values.redact === true ? redactParseResult(parsed) : parsed;
     body =
       command === 'parse'
         ? `${JSON.stringify(result, null, 2)}\n`
@@ -184,8 +194,7 @@ function runTriage(reportPaths: readonly string[], values: FlagValues): void {
   const json = renderTriageJson(report);
   const markdown = renderTriageMarkdown(report);
   if (values['out-dir'] !== undefined) {
-    writeNamed(values['out-dir'], 'triage.json', json);
-    writeNamed(values['out-dir'], 'triage.md', markdown);
+    writeTriagePair(values['out-dir'], json, markdown);
   }
   if (values['out-dir'] === undefined || values.json === true) {
     process.stdout.write(values.json === true ? json : markdown);
@@ -200,9 +209,37 @@ function readFailOn(value: string | undefined): 'findings' | 'never' {
   fail(`Unknown --fail-on value ${value}. Expected findings or never.`);
 }
 
-function writeNamed(dir: string, name: string, body: string): void {
+/**
+ * Write both triage files, or neither.
+ * The Markdown file is written before the JSON file is put in its final place.
+ * If that second step fails, the JSON file is removed.
+ * A directory under /proc is not detected here. Node can hang while creating
+ * one, which is documented on --out-dir instead of probed.
+ */
+function writeTriagePair(dir: string, json: string, markdown: string): void {
   if (dir.trim() === '') fail('The output directory is empty.');
-  writeOutput(path.join(dir, name), body);
+  const resolved = path.resolve(dir);
+  const jsonPath = path.join(resolved, 'triage.json');
+  const mdPath = path.join(resolved, 'triage.md');
+  const jsonTmp = path.join(resolved, `.triage.json.${process.pid}.tmp`);
+  const mdTmp = path.join(resolved, `.triage.md.${process.pid}.tmp`);
+  try {
+    fs.mkdirSync(resolved, { recursive: true });
+    fs.writeFileSync(mdTmp, markdown);
+    fs.writeFileSync(jsonTmp, json);
+    fs.renameSync(mdTmp, mdPath);
+    try {
+      fs.renameSync(jsonTmp, jsonPath);
+    } catch (error) {
+      fs.rmSync(mdPath, { force: true });
+      throw error;
+    }
+  } catch (error) {
+    fs.rmSync(jsonTmp, { force: true });
+    fs.rmSync(mdTmp, { force: true });
+    const detail = error instanceof Error ? error.message : 'unknown error';
+    fail(`Cannot write ${dir}: ${oneLine(detail)}`);
+  }
 }
 
 function formatCauses(result: ParseResult, testTimeoutMs: number | undefined, asJson: boolean): string {
