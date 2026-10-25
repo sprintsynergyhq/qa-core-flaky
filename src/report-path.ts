@@ -227,24 +227,28 @@ type HomeMatch =
  * follows on the same line before one of those stops, as in `Jöhn Smith`.
  * With no separator after the name, `/home/alice` becomes `<home>` and the
  * text after the name stays. With a separator, the result is `<home>/` plus
- * the rest of the path. A path tail stops at whitespace, a quote, `)`, `]`,
- * `>`, or `?`, `*`, `#`, `=`, `,`. It does not stop at `:`.
+ * the rest of the path. A separator is one `/` or a run of one or more `\`,
+ * so `C:\Users\alice\x.json` and `C:\\Users\\alice\\x.json` are the same path.
+ * A path tail stops at whitespace, a quote, `)`, `]`, `>`, or `?`, `*`,
+ * `#`, `=`, `,`. It does not stop at `:`.
  *
  * A letter before `:` is a drive letter only at the start of the text or
  * after a character that is not a letter or digit. `file:///` and `\\?\`
  * qualify. `cwd:/home/ci/w` does not: `d` is preceded by a letter, so the
- * path is POSIX `/home/`.
+ * path is POSIX `/home/`. A drive-letter path is never an app route.
  *
  * POSIX paths match `/home/` and `/Users/` with a capital U. Lowercase
  * `users` matches only after a drive letter. A segment that starts with `:`
  * is not a username. `/users/:id`, `/api/home/settings/save`,
  * `GET /home/index/page`, and `/Users/42/orders` stay as written.
  *
- * Inside an Expected or Received value, a home path is rewritten only when
- * at least two segments follow the username, or the last segment has a file
- * extension. `Expected: "/home/feed"` and `Received: "/home/login"` stay, so
- * the two routes are still visible. `Expected: "/home/alice/notes.txt"` and
- * `Expected: "/home/alice/proj/a.json"` are rewritten.
+ * Inside an Expected or Received value, a POSIX `/home/...` or `/Users/...`
+ * path is rewritten only when at least two segments follow the username, or
+ * the last segment has a file extension. `Expected: "/home/feed"` and
+ * `Received: "/home/login"` stay, so the two routes are still visible.
+ * `Expected: "/home/alice/notes.txt"` and `Expected: "/home/alice/proj/a.json"`
+ * are rewritten. `C:/Users/alice/Desktop` and `C:\\Users\\alice\\Downloads\\report.csv`
+ * are drive paths, so they are rewritten at any depth.
  *
  * `http://` and `https://` URLs are left as written. This function does not
  * add a warning.
@@ -285,20 +289,34 @@ function findHome(text: string, from: number): HomeMatch | undefined {
 
 function matchDriveHome(text: string, index: number): HomeMatch | undefined {
   if (!isDriveLetter(text, index)) return undefined;
-  const sep = text[index + 2];
-  if (sep !== '/' && sep !== '\\') return undefined;
-  const folder = readHomeFolder(text, index + 3, true);
+  const afterDrive = readSeparator(text, index + 2);
+  if (afterDrive === undefined) return undefined;
+  const folder = readHomeFolder(text, afterDrive, true);
   if (!folder) return undefined;
   return finishHome(text, index, folder.userStart);
 }
 
 function matchSlashHome(text: string, index: number): HomeMatch | undefined {
-  const sep = text[index];
-  if (sep !== '/' && sep !== '\\') return undefined;
-  const folder = readHomeFolder(text, index + 1, false);
+  if (text[index] === '\\' && text[index - 1] === '\\') return undefined;
+  const afterSep = readSeparator(text, index);
+  if (afterSep === undefined) return undefined;
+  const folder = readHomeFolder(text, afterSep, false);
   if (!folder) return undefined;
   if (!slashContextOk(text, index)) return undefined;
   return finishHome(text, index, folder.userStart);
+}
+
+/**
+ * One `/`, or a run of `\`. `C:\Users` and `C:\\Users` are the same separator.
+ * The returned index is the first character after that separator.
+ */
+function readSeparator(text: string, index: number): number | undefined {
+  const ch = text[index];
+  if (ch === '/') return index + 1;
+  if (ch !== '\\') return undefined;
+  let end = index + 1;
+  while (text[end] === '\\') end += 1;
+  return end;
 }
 
 function readHomeFolder(text: string, start: number, drive: boolean): { userStart: number } | undefined {
@@ -306,11 +324,11 @@ function readHomeFolder(text: string, start: number, drive: boolean): { userStar
   while (end < text.length && /[A-Za-z]/.test(text[end] ?? '')) end += 1;
   if (end === start) return undefined;
   const name = text.slice(start, end);
-  const sep = text[end];
-  if (sep !== '/' && sep !== '\\') return undefined;
+  const afterName = readSeparator(text, end);
+  if (afterName === undefined) return undefined;
   const allowed = drive ? /^home$/i.test(name) || /^users$/i.test(name) : name === 'home' || name === 'Users';
   if (!allowed) return undefined;
-  return { userStart: end + 1 };
+  return { userStart: afterName };
 }
 
 /** A drive letter is at the start, or the previous character is not a letter or digit. */
@@ -331,9 +349,11 @@ function finishHome(text: string, replaceFrom: number, userStart: number): HomeM
   if (userEnd === userStart) return undefined;
   const username = text.slice(userStart, userEnd);
   if (username.startsWith(':') || !/\p{L}/u.test(username)) return undefined;
-  const hasSep = userEnd < text.length && (text[userEnd] === '/' || text[userEnd] === '\\');
-  const tail = hasSep ? readPathTail(text, userEnd + 1) : { text: '', next: userEnd };
-  if (inExpectedOrReceived(text, replaceFrom) && !expectedHomeRewrites(tail.text, hasSep)) {
+  const afterUser = readSeparator(text, userEnd);
+  const hasSep = afterUser !== undefined;
+  const tail = hasSep ? readPathTail(text, afterUser) : { text: '', next: userEnd };
+  // A drive path is a filesystem path at every depth, never an app route.
+  if (!isDriveLetter(text, replaceFrom) && inExpectedOrReceived(text, replaceFrom) && !expectedHomeRewrites(tail.text, hasSep)) {
     return { kind: 'skip', next: tail.next };
   }
   return {

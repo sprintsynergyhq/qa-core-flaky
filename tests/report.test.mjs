@@ -374,3 +374,80 @@ test('markdown escapes home and title brackets in the table, heading, and next s
   assert.equal(json.includes('<home>/proj/a.spec.ts'), true);
   assert.equal(json.includes('&lt;'), false);
 });
+
+test('doubled Windows backslashes in JUnit Expected and Received lines hide the username', () => {
+  const expected = 'Expected: "C:\\\\Users\\\\alice\\\\Downloads\\\\report.csv"';
+  const received = 'Received: "C:\\\\Users\\\\alice\\\\Downloads\\\\report.csv"';
+  const frame = '    at readCsv (C:\\\\Users\\\\alice\\\\x.json:12:3)';
+  assert.equal(expected.includes('\\\\'), true);
+  assert.equal(frame.includes('\\\\'), true);
+  const xml = `<testsuite hostname="chromium">
+    <testcase name="csv" classname="a.spec.ts">
+      <failure message="mismatch">${expected}\n${received}\n${frame}</failure>
+    </testcase>
+  </testsuite>`;
+  const parsed = parseJunit(xml, 'reports/doubled-win.xml');
+  const stored = parsed.records[0].attempts[0].errors[0].stack ?? parsed.records[0].attempts[0].errors[0].message;
+  assert.equal(stored.includes('\\\\Users\\\\alice\\\\Downloads\\\\report.csv'), true);
+  assert.equal(stored.includes('\\\\Users\\\\alice\\\\x.json'), true);
+  const report = buildTriageReport(parsed.records);
+  const json = renderTriageJson(report);
+  const markdown = renderTriageMarkdown(report);
+  assert.equal(json.includes('alice'), false);
+  assert.equal(markdown.includes('alice'), false);
+  assert.equal(json.includes('<home>/Downloads/report.csv'), true);
+  assert.equal(markdown.includes('&lt;home&gt;/Downloads/report.csv'), true);
+  assert.equal(markdown.includes('<home>'), false);
+  assert.equal(redactHomeText(frame), '    at readCsv (<home>/x.json:12:3)');
+});
+
+test('a Playwright JSON report with no root hides a doubled Windows home path', () => {
+  const win = 'C:\\\\Users\\\\alice\\\\x.json';
+  const message = `Error at ${win}`;
+  const stack = `${message}\n    at readCsv (${win}:12:3)`;
+  assert.equal(message.includes('\\\\Users\\\\alice\\\\x.json'), true);
+  const raw = JSON.stringify({
+    config: {},
+    suites: [
+      {
+        title: 'sample.spec.ts',
+        file: 'sample.spec.ts',
+        specs: [
+          {
+            title: 'reads',
+            file: 'sample.spec.ts',
+            tests: [
+              {
+                projectName: 'chromium',
+                expectedStatus: 'passed',
+                status: 'unexpected',
+                results: [
+                  {
+                    retry: 0,
+                    status: 'failed',
+                    duration: 1,
+                    errors: [{ message, stack }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const parsed = parsePlaywrightJson(raw, 'reports/no-root-win.json');
+  const error = parsed.records[0].attempts[0].errors[0];
+  assert.equal(error.message, message);
+  assert.equal(error.stack.includes('\\\\Users\\\\alice\\\\x.json'), true);
+  const report = buildTriageReport(parsed.records);
+  const json = renderTriageJson(report);
+  const markdown = renderTriageMarkdown(report);
+  assert.equal(json.includes('alice'), false);
+  assert.equal(markdown.includes('alice'), false);
+  assert.match(json, /Error at <home>\/x\.json/);
+  assert.match(markdown, /Error at &lt;home&gt;\/x\.json/);
+  assert.equal(markdown.includes('<home>'), false);
+  assert.equal(redactHomeText(error.stack).includes('alice'), false);
+  assert.match(redactHomeText(error.stack), /at readCsv \(<home>\/x\.json:12:3\)/);
+});

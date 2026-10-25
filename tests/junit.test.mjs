@@ -624,3 +624,31 @@ test('app routes and short Expected values are not home directories', () => {
   );
   assert.equal(redactHomeText(drift), drift);
 });
+
+test('a run of backslashes is one separator around a Windows home path', () => {
+  const file = 'C:\\\\Users\\\\alice\\\\x.json';
+  assert.equal(file.includes('\\\\'), true);
+  assert.equal(redactHomeText(file), '<home>/x.json');
+  assert.equal(redactHomeText('Error at C:\\\\Users\\\\bob\\\\a.ts:12:3'), 'Error at <home>/a.ts:12:3');
+  assert.equal(redactHomeText('Error at C:\\Users\\bob\\a.ts:12:3'), 'Error at <home>/a.ts:12:3');
+  assert.equal(
+    redactHomeText('    at readCsv (C:\\\\Users\\\\alice\\\\x.json:12:3)'),
+    '    at readCsv (<home>/x.json:12:3)',
+  );
+  assert.equal(
+    redactHomeText('Expected: "C:\\\\Users\\\\alice\\\\Downloads\\\\report.csv"'),
+    'Expected: "<home>/Downloads/report.csv"',
+  );
+  assert.equal(
+    redactHomeText('Received: "C:\\\\Users\\\\alice\\\\Downloads\\\\report.csv"'),
+    'Received: "<home>/Downloads/report.csv"',
+  );
+  assert.equal(redactHomeText('Received: "C:/Users/alice/Desktop"'), 'Received: "<home>/Desktop"');
+  assert.equal(redactHomeText('Received: "C:\\\\Users\\\\alice\\\\Desktop"'), 'Received: "<home>/Desktop"');
+  assert.equal(
+    redactHomeText('Received: "C:\\\\Users\\\\alice\\\\Desktop\\\\Inner\\\\notes.txt"'),
+    'Received: "<home>/Desktop/Inner/notes.txt"',
+  );
+  assert.equal(redactHomeText('Received: "/home/alice/Desktop"'), 'Received: "/home/alice/Desktop"');
+  assert.equal(redactHomeText('Expected: "/home/feed"'), 'Expected: "/home/feed"');
+});
