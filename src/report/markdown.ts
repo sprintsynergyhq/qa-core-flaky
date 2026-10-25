@@ -39,7 +39,7 @@ function renderEntry(entry: TriageEntry): string[] {
   if (entry.evidence.length === 0) {
     lines.push('No error text was quoted.');
   } else {
-    for (const line of entry.evidence) lines.push(`> ${line}`);
+    for (const line of entry.evidence) lines.push(`> ${escapeHtml(line)}`);
   }
   lines.push(
     '',
@@ -65,4 +65,9 @@ function renderEntry(entry: TriageEntry): string[] {
 
 function cell(value: string): string {
   return value.replaceAll('|', '\\|');
+}
+
+/** Keep `<`, `>`, and `&` visible in a GitHub Markdown quote. */
+function escapeHtml(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }

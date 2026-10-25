@@ -261,19 +261,19 @@ test('a root-shaped absolute path is rewritten when the next character is not a 
     'url https://x.test/home/ci/w/a?x=/home/ci/w',
   ].join(' ');
   const expected = [
-    'a=home/ci/w&b',
-    'cd home/ci/w&&npm test',
-    'bang home/ci/w!',
-    'query /home/ci/w?',
-    'hash /home/ci/w#x',
-    'star /home/ci/w*',
-    'pct home/ci/w%20',
-    'tilde home/ci/w~',
-    'dollar home/ci/w$HOME',
-    'file home/ci/w/a%20b.ts',
-    'ampfile home/ci/w/a&b.ts',
-    'keep home/ci/w-other/file.ts',
-    'dot home/ci/w.backup/a.ts',
+    'a=~/w&b',
+    'cd ~/w&&npm test',
+    'bang ~/w!',
+    'query ~/w?',
+    'hash ~/w#x',
+    'star ~/w*',
+    'pct ~/w%20',
+    'tilde ~/w~',
+    'dollar ~/w$HOME',
+    'file ~/w/a%20b.ts',
+    'ampfile ~/w/a&b.ts',
+    'keep ~/w-other/file.ts',
+    'dot ~/w.backup/a.ts',
     'prose /var/',
     'url https://x.test/home/ci/w/a?x=/home/ci/w',
   ].join(' ');
@@ -302,12 +302,12 @@ test('Unicode home paths and CI work folders are rewritten when JUnit has no roo
     '/app/foo/bar.json',
     '/data/foo/bar.json',
   ].join(' ');
-  // No report root, so a blocked token such as file#1.json stays absolute.
-  // A path with no blocked character is still rewritten, including Unicode names.
+  // No report root. The home directory and username become ~/ , including
+  // up to a blocked character. Other known folders are still rewritten.
   const expected = [
-    '/home/bob/file#1.json',
-    'home/józef/secret.txt',
-    'Users/李/a.ts',
+    '~/file#1.json',
+    '~/secret.txt',
+    '~/a.ts',
     '__w/repo/a.ts',
     'github/workspace/repo/a.ts',
     'Volumes/CI/a.ts',
@@ -483,4 +483,30 @@ test('parsing the JUnit fixture twice is byte identical', () => {
   const first = JSON.stringify(parseJunit(text, junitPath));
   const second = JSON.stringify(parseJunit(text, junitPath));
   assert.equal(first, second);
+});
+
+test('a JUnit report with no root rewrites the home directory and username to ~/', () => {
+  const message = [
+    "open '/tmp/home/alice/proj/tests/seed-users.json'",
+    'also /home/alice/proj/x.json',
+    'blocked /home/bob/file#1.json',
+    'win C:\\Users\\alice\\proj\\tests\\seed.json',
+  ].join(' ');
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="reads the seed file" classname="missing.spec.ts" file="/tmp/home/alice/proj/tests/missing.spec.ts">
+      <failure message="${message.replaceAll('&', '&amp;')}">${message}</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/home.xml');
+  const stored = result.records[0].attempts[0].errors[0].message;
+  assert.match(stored, /open 'tmp\/~\/proj\/tests\/seed-users\.json'/);
+  assert.match(stored, /also ~\/proj\/x\.json/);
+  assert.match(stored, /blocked ~\/file#1\.json/);
+  assert.match(stored, /win ~\/proj\/tests\/seed\.json/);
+  assert.match(result.records[0].file, /^tmp\/~\/proj\/tests\/missing\.spec\.ts$/);
+  const blob = JSON.stringify(result);
+  assert.equal(blob.includes('alice'), false);
+  assert.equal(blob.includes('bob'), false);
+  assert.equal(blob.includes('/home/'), false);
+  assert.equal(blob.includes('Users'), false);
 });

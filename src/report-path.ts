@@ -30,8 +30,11 @@
  * that root that starts with a known folder is rewritten up to the first of
  * those characters, and the rest is kept, so `/home/bob/file#1.json` does
  * not leave the absolute `/home/bob` path in the text. Without a report
- * root, a token that contains one of those characters stays as written, so
- * `query /home/ci/w?` is unchanged. A single segment such as `/var/`, `/Ready/`, or
+ * root, `/home/<user>/`, `/Users/<user>/`, `C:/Users/<user>/`, and
+ * `C:\Users\<user>\` are rewritten to `~/` first, including after a prefix
+ * such as `/tmp/` and up to the first `?`, `*`, `#`, `=`, or `,`, so the
+ * username does not remain. A blocked token that is not a home path stays
+ * as written. A single segment such as `/var/`, `/Ready/`, or
  * `"/inventory.html"`, a quoted URL path such as `"/cart/checkout.html"`,
  * and prose such as `/and/or` stay as written.
  * `http://` and `https://` URLs are left alone, including a query such as
@@ -128,9 +131,10 @@ export function toPortablePath(
   warnings: string[],
 ): string | undefined {
   if (file === undefined) return undefined;
-  const normalized = stripTrailingSlash(normalizeSlashes(file));
+  let normalized = stripTrailingSlash(normalizeSlashes(file));
   if (normalized === '') return '';
   const root = normalizeRoot(rootDir);
+  if (!root) normalized = redactHomeUser(normalized);
   if (root) {
     if (normalized === root) return '';
     if (normalized.startsWith(`${root}/`)) return normalized.slice(root.length + 1);
@@ -203,6 +207,29 @@ function splitAbsolute(value: string): { drive: string; parts: string[] } {
   return { drive: '', parts: value.split('/').filter(Boolean) };
 }
 
+/**
+ * Replace `/home/<user>/`, `/Users/<user>/`, `C:/Users/<user>/`, and
+ * `C:\Users\<user>\` with `~/`. The match may sit after another prefix,
+ * such as `/tmp/`. A blocked character ends the match, and the rest of the
+ * token stays as written.
+ */
+function redactHomeUser(value: string): string {
+  const blockedAt = value.search(OUTSIDE_ROOT_BLOCKED);
+  const limit = blockedAt < 0 ? value.length : blockedAt;
+  const head = value.slice(0, limit);
+  const tail = value.slice(limit);
+  const pattern = /(?:[A-Za-z]:)?(?:\/|\\)(?:home|Users)(?:\/|\\)[^/\\]+(?:\/|\\|(?=$))/g;
+  // A home path at the start of the token, or a drive path, becomes `~/`.
+  // A home path after another folder keeps the separator, so `/tmp/home/alice/`
+  // becomes `/tmp/~/`.
+  const redacted = head.replace(pattern, (match, offset) => {
+    if (offset === 0 || /^[A-Za-z]:/.test(match)) return '~/';
+    return '/~/';
+  });
+  if (redacted === head) return value;
+  return normalizeSlashes(redacted) + tail;
+}
+
 function stripAbsolutePrefix(value: string): string {
   const stripped = value.replace(/^[A-Za-z]:\//, '').replace(/^\/+/, '');
   return stripped === '' ? '.' : stripped;
@@ -213,16 +240,18 @@ function stripAbsolutePrefix(value: string): string {
  * A token under the report root is rewritten whole, even when it contains
  * `?`, `*`, `#`, `=`, or `,`. When a report root is known, any other token
  * that starts with a known folder is rewritten only up to the first of
- * those characters. Without a report root, a blocked token stays as written.
+ * those characters. Without a report root, a home directory and its username
+ * are rewritten to `~/` first. Any other blocked token stays as written.
  */
 function rewriteErrorToken(token: string, root: string | undefined, warnings: string[]): string | undefined {
-  const whole = rewritePathToken(token, root, warnings);
+  // No report root: hide the home directory and username before any other
+  // rewrite, including on a token cut at the first blocked character.
+  const prepared = root ? token : redactHomeUser(token);
+  const whole = rewritePathToken(prepared, root, warnings);
   if (whole !== undefined) return whole;
-  // Without a report root, a blocked token stays as written. That keeps
-  // `query /home/ci/w?` and the other false-positive cases unchanged.
+  if (!root) return prepared === token ? undefined : prepared;
   // With a root, a known folder outside that root is cut at the first
   // blocked character so the absolute home path does not remain.
-  if (!root) return undefined;
   const blockedAt = token.search(OUTSIDE_ROOT_BLOCKED);
   if (blockedAt <= 0) return undefined;
   const head = token.slice(0, blockedAt);

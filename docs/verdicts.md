@@ -22,7 +22,7 @@ The high rows are broken test, environment issue, likely real bug, and flaky. Ne
 | --- | --- | --- | --- |
 | 1 | `BROKEN-TEST` | One code group failed on every attempt with one error signature, and the primary cause is selectors with `SEL-NOTFOUND` | `broken-test` |
 | 2 | `ENVIRONMENT-ISSUE` | One code group failed on every attempt with one error signature, and the primary cause is environment | `environment-issue` |
-| 3 | `LIKELY-REAL-BUG` | One code group failed on every attempt with one error signature, that group has at least 2 failures, and the primary cause is unknown. A resolved locator whose received value does not change is this unknown cause (`UNK-NONE`) | `likely-real-bug` |
+| 3 | `LIKELY-REAL-BUG` | One code group failed on every attempt with one error signature, that group has at least 2 failures, and the primary cause is unknown. A resolved locator whose received value does not change is this unknown cause (`UNK-NONE`). Attempts with no error text are not this row | `likely-real-bug` |
 | 4 | `FLAKY` | At least one pass and one fail on the same code, and no earlier row matched | `flaky` |
 | 5 | `NEEDS-MORE-RUNS` | Only one failed attempt in total, or the failures do not share one error signature and there is no pass | `needs-more-runs` |
 | 6 | `UNEXPECTED-PASS` | `expectedStatus` is `failed`, an attempt passed, and no attempt failed. This is a `test.fail()` test that passed. The verdict has a note | `needs-more-runs` |
@@ -62,6 +62,8 @@ One attempt and an error that matches no stronger row, such as `Error: gave up`.
 
 Three attempts that fail with three different messages, and no pass. Verdict `needs-more-runs`, confidence medium.
 
+Three failed attempts and no error text on any of them. The cause is unknown (`UNK-EMPTY`), and there is nothing to quote, so this is not a likely real bug. Verdict `needs-more-runs`. The note, and the evidence line, are: "The report has no error text for these attempts."
+
 ### Unexpected Pass
 
 `expectedStatus` is `failed` and the only attempt passed. Playwright records that as an unexpected pass of `test.fail()`. Verdict `needs-more-runs`. The note is: "This test uses test.fail() and it passed. The expected failure did not happen."
@@ -74,6 +76,6 @@ A `test.fail()` test that does fail is outcome `passed` in the normalized model.
 
 ### Both Signals
 
-One report on SHA `aaa` has a pass and a fail. A later report on SHA `bbb` fails twice with the same unknown value mismatch. Row 3 matches the later run, so the verdict is `likely-real-bug`. The signals are `consistent-failure` and `same-code-flip`.
+One report on SHA `aaa` has a pass and a fail. A later report on SHA `bbb` fails twice with the same unknown value mismatch. Row 3 matches the later run, so the verdict is `likely-real-bug`. The signals are `consistent-failure` and `same-code-flip`. The cause, the evidence, and the suggested fix come from commit `bbb`. The flip on commit `aaa` is the other signal. Each signal names its commit.
 
 An environment failure that is consistent on a new SHA outranks an earlier flip the same way. The verdict is `environment-issue`, and both signals are listed.

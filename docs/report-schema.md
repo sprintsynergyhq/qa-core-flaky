@@ -40,7 +40,7 @@ Passed and skipped tests are omitted. A test that was expected to fail, and did 
 | suggestedFix | `string` | The fix template for the primary cause rule. It does not say to only raise a timeout. |
 | healProposal | `null` | Always null in this version. A later version can attach a heal diff. |
 | nextStep | `string` | A sentence that contains the exact command `qa-core-flaky rerun <file> -g <title> --times 10`. |
-| note | `string` or `null` | Set for an unexpected `test.fail()` pass. Otherwise null. |
+| note | `string` or `null` | Set for an unexpected `test.fail()` pass, or when the failures have no error text. Otherwise null. |
 | llm | `null` | Always null in this version. |
 | review.status | `Needs Review` | Every entry starts here. The tool does not accept its own finding. |
 | review.reviewer | `null` | No reviewer is recorded. |
@@ -48,7 +48,9 @@ Passed and skipped tests are omitted. A test that was expected to fail, and did 
 
 ## Markdown
 
-The Markdown file starts with a summary table: test, verdict, cause, confidence. Then one section per test, in the same order. Each section has the causes, the evidence quotes, the attempt counts, the signals, the suggested fix, and the next step. A flaky section also has this sentence: "A flaky test can still point to a real app defect. Check the app behavior too."
+The Markdown file starts with a summary table: test, verdict, cause, confidence. Then one section per test, in the same order. Each section has the causes, the evidence quotes, the attempt counts, the signals, the suggested fix, and the next step. Evidence quotes escape `&`, `<`, and `>` so a line such as `<div id="cover">` stays visible. A flaky section also has this sentence: "A flaky test can still point to a real app defect. Check the app behavior too."
+
+When more than one commit is present, the cause list, the evidence, and the suggested fix come from the commit that selected the verdict. The other commit is a separate signal, and each signal names its commit.
 
 The review line is `Review status: Needs Review.`
 

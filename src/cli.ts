@@ -66,11 +66,20 @@ type FlagValues = {
 };
 
 function main(): void {
+  try {
+    run(process.argv.slice(2));
+  } catch (error) {
+    if (error instanceof ExitRequest) return;
+    throw error;
+  }
+}
+
+function run(args: readonly string[]): void {
   let values: FlagValues;
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
-      args: process.argv.slice(2),
+      args: [...args],
       allowPositionals: true,
       strict: true,
       options: {
@@ -136,6 +145,7 @@ function main(): void {
         ? `${JSON.stringify(result, null, 2)}\n`
         : formatCauses(result, readTimeout(values['test-timeout']), values.json === true);
   } catch (error) {
+    if (error instanceof ExitRequest) throw error;
     fail(oneLine(error instanceof Error ? error.message : 'Could not parse the report'));
   }
 
@@ -161,6 +171,7 @@ function runTriage(reportPaths: readonly string[], values: FlagValues): void {
         selected === 'json' ? parsePlaywrightJson(text, reportPath, meta) : parseJunit(text, reportPath, meta);
       records.push(...result.records);
     } catch (error) {
+      if (error instanceof ExitRequest) throw error;
       fail(oneLine(error instanceof Error ? error.message : 'Could not parse the report'));
     }
   }
@@ -179,7 +190,7 @@ function runTriage(reportPaths: readonly string[], values: FlagValues): void {
     process.stdout.write(values.json === true ? json : markdown);
   }
   const code = failOn === 'never' || report.entries.length === 0 ? 0 : 2;
-  if (code !== 0) process.exit(code);
+  if (code !== 0) process.exitCode = code;
 }
 
 function readFailOn(value: string | undefined): 'findings' | 'never' {
@@ -269,9 +280,17 @@ function oneLine(message: string): string {
   return message.replaceAll('\n', ' ').trim();
 }
 
+class ExitRequest extends Error {
+  constructor() {
+    super('exit');
+    this.name = 'ExitRequest';
+  }
+}
+
 function fail(message: string): never {
   process.stderr.write(`${oneLine(message)}\n`);
-  process.exit(1);
+  process.exitCode = 1;
+  throw new ExitRequest();
 }
 
 main();

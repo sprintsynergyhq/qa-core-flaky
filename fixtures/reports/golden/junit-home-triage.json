@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "id": "missing.spec.js::chromium::reads the seed file",
+      "verdict": "needs-more-runs",
+      "confidence": "low",
+      "ruleId": "NEEDS-MORE-RUNS",
+      "signals": [
+        {
+          "kind": "insufficient-evidence",
+          "detail": "Only one failed attempt. One failure is not enough for a stronger verdict."
+        }
+      ],
+      "causes": [
+        {
+          "cause": "unknown",
+          "confidence": "low",
+          "evidence": [
+            "ENOENT: no such file or directory, open 'tmp/~/proj/tests/seed-users.json'",
+            "    Error: ENOENT: no such file or directory, open 'tmp/~/proj/tests/seed-users.json'"
+          ],
+          "ruleIds": [
+            "UNK-NONE"
+          ]
+        }
+      ],
+      "evidence": [
+        "ENOENT: no such file or directory, open 'tmp/~/proj/tests/seed-users.json'",
+        "    Error: ENOENT: no such file or directory, open 'tmp/~/proj/tests/seed-users.json'"
+      ],
+      "attempts": {
+        "total": 1,
+        "failed": 1,
+        "passed": 0,
+        "sameCommit": false
+      },
+      "history": {
+        "runsSeen": 1,
+        "firstFailingCommit": null
+      },
+      "suggestedFix": "The rules did not name a cause. Compare the quoted expected and received values with what the user sees. Do not loosen the assertion to make it pass.",
+      "healProposal": null,
+      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun \"missing.spec.js\" -g \"reads the seed file\" --times 10",
+      "note": null,
+      "llm": null,
+      "review": {
+        "status": "Needs Review",
+        "reviewer": null,
+        "decision": null
+      }
+    }
+  ]
+}

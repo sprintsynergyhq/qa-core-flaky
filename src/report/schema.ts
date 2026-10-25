@@ -72,8 +72,8 @@ export type TriageEntry = {
   /** Likely causes, primary first. Evidence on each cause is quoted error text. */
   causes: CauseFinding[];
   /**
-   * Quoted evidence from the causes, in cause order.
-   * An unexpected pass with no error text uses the note as its evidence.
+   * Quoted evidence from the cause that selected the verdict.
+   * An unexpected pass, or failures with no error text, use the note as evidence.
    */
   evidence: string[];
   /** Attempt counts. */
@@ -86,7 +86,7 @@ export type TriageEntry = {
   healProposal: null;
   /** A sentence that contains the exact rerun command. */
   nextStep: string;
-  /** Set for an unexpected `test.fail()` pass. Otherwise null. */
+  /** Set for an unexpected `test.fail()` pass, or when the failures have no error text. Otherwise null. */
   note: string | null;
   /** Reserved for a later explanation. Always null in this version. */
   llm: null;

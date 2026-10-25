@@ -70,7 +70,7 @@ function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefi
   const classifyOptions = testTimeoutMs === undefined ? {} : { testTimeoutMs };
   const findings = classifyCauses(merged, classifyOptions);
   const decision = decideVerdict(group, findings, classifyOptions);
-  const causes = orderCauses(findings, decision.cause);
+  const causes = orderCauses(decision.findings, decision.cause);
   const evidence = flattenEvidence(causes, decision.note);
   const failed = attempts.filter(
     (attempt) => attempt.status === 'failed' || attempt.status === 'timedOut' || attempt.status === 'interrupted',

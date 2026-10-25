@@ -28,15 +28,21 @@ export type Verdict = {
   cause: Cause | null;
   /** Rule ids of that primary cause, in cause-rule order. */
   ruleIds: string[];
+  /**
+   * Cause findings from the code version that selected the verdict.
+   * Other versions stay in the signals, not in this list.
+   */
+  findings: CauseFinding[];
   /** Signals that were present. Order is fixed. */
   signals: VerdictSignal[];
-  /** Set when a `test.fail()` test passed. Otherwise null. */
+  /** Set for a `test.fail()` pass, or when the failures have no error text. Otherwise null. */
   note: string | null;
 };
 
 const CONSISTENT_DETAIL = 'All attempts on this code failed with one error signature.';
 const FLIP_DETAIL = 'At least one pass and one fail share the same code.';
 const UNEXPECTED_NOTE = 'This test uses test.fail() and it passed. The expected failure did not happen.';
+const NO_ERROR_NOTE = 'The report has no error text for these attempts.';
 
 type CodeGroup = {
   key: string;
@@ -77,9 +83,25 @@ export function decideVerdict(
     return classifyGroup(records, group, options.testTimeoutMs);
   };
 
+  const flipSha = commitOf(flips[0]);
   const broken = consistent.find((group) => isBrokenTest(findingsFor(group)));
   if (broken) {
-    return finish('broken-test', 'BROKEN-TEST', 'high', findingsFor(broken), flips.length > 0, false, attemptCount, null);
+    return finish(
+      'broken-test',
+      'BROKEN-TEST',
+      'high',
+      findingsFor(broken),
+      flips.length > 0,
+      false,
+      attemptCount,
+      null,
+      false,
+      undefined,
+      false,
+      false,
+      commitOf(broken),
+      flipSha,
+    );
   }
 
   const environment = consistent.find((group) => findingsFor(group)[0]?.cause === 'environment');
@@ -93,6 +115,12 @@ export function decideVerdict(
       false,
       attemptCount,
       null,
+      false,
+      undefined,
+      false,
+      false,
+      commitOf(environment),
+      flipSha,
     );
   }
 
@@ -107,11 +135,33 @@ export function decideVerdict(
       false,
       attemptCount,
       null,
+      false,
+      undefined,
+      false,
+      false,
+      commitOf(realBug),
+      flipSha,
     );
   }
 
   if (flips.length > 0) {
-    return finish('flaky', 'FLAKY', 'high', findingsFor(flips[0]), false, false, attemptCount, null, true);
+    const flip = flips[0];
+    return finish(
+      'flaky',
+      'FLAKY',
+      'high',
+      findingsFor(flip),
+      false,
+      false,
+      attemptCount,
+      null,
+      true,
+      undefined,
+      false,
+      false,
+      undefined,
+      commitOf(flip),
+    );
   }
 
   if (failedTotal === 1 || (passedTotal === 0 && signatureCount > 1)) {
@@ -128,9 +178,12 @@ export function decideVerdict(
       false,
       true,
       attemptCount,
-      null,
+      emptyNote(failedGroup),
       false,
       detail,
+      false,
+      false,
+      commitOf(failedGroup),
     );
   }
 
@@ -161,11 +214,12 @@ export function decideVerdict(
       false,
       false,
       attemptCount,
-      null,
+      emptyNote(repeated),
       false,
       unmatchedDetail(findings),
       false,
       true,
+      commitOf(repeated),
     );
   }
 
@@ -177,9 +231,12 @@ export function decideVerdict(
     false,
     true,
     attemptCount,
-    null,
+    emptyNote(groups[0]),
     false,
     'These attempts do not match a stronger verdict.',
+    false,
+    false,
+    commitOf(groups[0]),
   );
 }
 
@@ -190,7 +247,36 @@ function isBrokenTest(findings: readonly CauseFinding[]): boolean {
 
 function isLikelyRealBug(findings: readonly CauseFinding[], group: CodeGroup): boolean {
   if (group.failed.length < 2) return false;
+  if (hasNoErrorText(group)) return false;
   return findings[0]?.cause === 'unknown';
+}
+
+function hasNoErrorText(group: CodeGroup): boolean {
+  return group.failed.length > 0 && group.failed.every((attempt) => !attemptHasErrorText(attempt));
+}
+
+function attemptHasErrorText(attempt: Attempt): boolean {
+  for (const error of attempt.errors ?? []) {
+    if ((error.message ?? '').trim().length > 0) return true;
+    if ((error.stack ?? '').trim().length > 0) return true;
+  }
+  return false;
+}
+
+function emptyNote(group: CodeGroup | undefined): string | null {
+  if (!group || !hasNoErrorText(group)) return null;
+  return NO_ERROR_NOTE;
+}
+
+function commitOf(group: CodeGroup | undefined): string | undefined {
+  if (!group?.key.startsWith('sha:')) return undefined;
+  const sha = group.key.slice(4);
+  return sha.length > 0 ? sha : undefined;
+}
+
+function labelSignal(detail: string, sha: string | undefined): string {
+  if (!sha) return detail;
+  return detail.replace('on this code', `on commit ${sha}`).replace('share the same code', `share commit ${sha}`);
 }
 
 function unmatchedDetail(findings: readonly CauseFinding[]): string {
@@ -223,12 +309,19 @@ function finish(
   insufficientDetail = 'Not enough evidence for a stronger verdict.',
   unexpected = false,
   consistentOverride = false,
+  consistentSha?: string,
+  flipSha?: string,
 ): Verdict {
   const primary = findings[0];
   const consistent = verdict === 'broken-test' || verdict === 'environment-issue' || verdict === 'likely-real-bug' || consistentOverride;
   const signals: VerdictSignal[] = [];
-  if (consistent) signals.push({ kind: 'consistent-failure', detail: consistentOverride ? insufficientDetail : CONSISTENT_DETAIL });
-  if (flip || forceFlip || verdict === 'flaky') signals.push({ kind: 'same-code-flip', detail: FLIP_DETAIL });
+  if (consistent) {
+    const detail = consistentOverride ? insufficientDetail : CONSISTENT_DETAIL;
+    signals.push({ kind: 'consistent-failure', detail: labelSignal(detail, consistentSha) });
+  }
+  if (flip || forceFlip || verdict === 'flaky') {
+    signals.push({ kind: 'same-code-flip', detail: labelSignal(FLIP_DETAIL, flipSha) });
+  }
   if (insufficient) signals.push({ kind: 'insufficient-evidence', detail: insufficientDetail });
   if (unexpected) signals.push({ kind: 'unexpected-pass', detail: UNEXPECTED_NOTE });
 
@@ -243,6 +336,7 @@ function finish(
     ruleId,
     cause: primary?.cause ?? null,
     ruleIds: primary ? [...primary.ruleIds] : [],
+    findings: [...findings],
     signals,
     note,
   };

@@ -215,6 +215,14 @@ test('triage rejects an unknown --fail-on value', () => {
   assert.match(result.stderr, /fail-on/);
 });
 
+test('triage exit 2 leaves the full stdout report intact', () => {
+  const result = run(['triage', fixture, '--json']);
+  assert.equal(result.status, 2, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.equal(result.stdout, fs.readFileSync('fixtures/reports/golden/triage.json', 'utf8'));
+  JSON.parse(result.stdout);
+});
+
 test('two triage runs are byte identical', () => {
   const firstDir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-a-'));
   const secondDir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-b-'));

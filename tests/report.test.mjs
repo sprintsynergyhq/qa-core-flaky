@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
   buildTriageReport,
   fixTemplates,
+  parseJunit,
   parsePlaywrightJson,
   renderTriageJson,
   renderTriageMarkdown,
@@ -149,4 +150,124 @@ test('a triage entry keeps the review status and a command', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-'));
   fs.writeFileSync(path.join(dir, 'note.txt'), 'unused');
   assert.equal(fs.existsSync(dir), true);
+});
+
+function attempt(status, message, retry = 0) {
+  return {
+    retry,
+    status,
+    durationMs: 10,
+    errors: message === undefined ? [] : [{ message }],
+    attachments: [],
+  };
+}
+
+function oneRecord(title, attempts, source = {}) {
+  const failed = attempts.some((item) => item.status === 'failed' || item.status === 'timedOut' || item.status === 'interrupted');
+  const passed = attempts.some((item) => item.status === 'passed');
+  return {
+    id: `tests/a.spec.ts::chromium::${title}`,
+    file: 'tests/a.spec.ts',
+    project: 'chromium',
+    titlePath: [title],
+    expectedStatus: 'passed',
+    outcome: failed && passed ? 'flaky' : 'failed',
+    attempts,
+    source: {
+      format: 'playwright-json',
+      reportPath: 'fixture.json',
+      ...source,
+    },
+  };
+}
+
+function received(value) {
+  return ['Error: expect(locator).toHaveText(expected) failed', 'Expected: "9"', `Received: "${value}"`].join('\n');
+}
+
+test('triage keeps the cause from the commit that decided the verdict', () => {
+  const flaky = oneRecord('cart', [attempt('failed', received('2'), 0), attempt('passed', undefined, 1)], {
+    commitSha: 'aaa',
+    reportPath: 'b1.json',
+  });
+  const later = oneRecord(
+    'cart',
+    [attempt('failed', received('1'), 0), attempt('failed', received('1'), 1), attempt('failed', received('1'), 2)],
+    { commitSha: 'bbb', reportPath: 'b2.json' },
+  );
+  const entry = buildTriageReport([flaky, later]).entries[0];
+  assert.equal(entry.verdict, 'likely-real-bug');
+  assert.equal(entry.confidence, 'medium');
+  assert.equal(entry.causes[0].cause, 'unknown');
+  assert.equal(entry.causes[0].confidence, 'low');
+  assert.equal(entry.causes.some((finding) => finding.cause === 'test-data'), false);
+  assert.equal(entry.evidence.some((line) => line.includes('Received: "1"')), true);
+  assert.equal(entry.evidence.some((line) => line.includes('Received: "2"')), false);
+  assert.match(entry.suggestedFix, /did not name a cause/);
+  const details = entry.signals.map((signal) => `${signal.kind}: ${signal.detail}`).join('\n');
+  assert.match(details, /consistent-failure: All attempts on commit bbb failed with one error signature\./);
+  assert.match(details, /same-code-flip: At least one pass and one fail share commit aaa\./);
+
+  const net = 'Error: connect ECONNREFUSED';
+  const flip = oneRecord('net', [attempt('failed', net, 0), attempt('passed', undefined, 1)], {
+    commitSha: 'aaa',
+    reportPath: 'e1.json',
+  });
+  const env = oneRecord(
+    'net',
+    [attempt('failed', net, 0), attempt('failed', net, 1), attempt('failed', net, 2)],
+    { commitSha: 'bbb', reportPath: 'e2.json' },
+  );
+  const envEntry = buildTriageReport([flip, env]).entries[0];
+  assert.equal(envEntry.verdict, 'environment-issue');
+  assert.equal(envEntry.causes[0].cause, 'environment');
+  assert.equal(envEntry.causes[0].confidence, 'high');
+  assert.equal(envEntry.confidence, 'high');
+  assert.match(envEntry.signals[0].detail, /commit bbb/);
+  assert.match(envEntry.signals[1].detail, /commit aaa/);
+});
+
+test('three failures with no error text are needs-more-runs', () => {
+  const item = oneRecord('blank', [
+    attempt('failed', undefined, 0),
+    attempt('failed', undefined, 1),
+    attempt('failed', undefined, 2),
+  ]);
+  const entry = buildTriageReport([item]).entries[0];
+  assert.equal(entry.verdict, 'needs-more-runs');
+  assert.equal(entry.ruleId, 'NEEDS-MORE-RUNS');
+  assert.equal(entry.note, 'The report has no error text for these attempts.');
+  assert.deepEqual(entry.evidence, ['The report has no error text for these attempts.']);
+  assert.equal(entry.confidence, 'medium');
+});
+
+test('a real JUnit run with no root hides the home username in triage', () => {
+  const reportPath = 'fixtures/reports/junit-no-root-home.xml';
+  const source = fs.readFileSync(reportPath, 'utf8');
+  assert.equal(source.includes('/tmp/home/alice/proj/tests/seed-users.json'), true);
+  const records = parseJunit(source, reportPath).records;
+  const report = buildTriageReport(records);
+  const json = renderTriageJson(report);
+  const markdown = renderTriageMarkdown(report);
+  assert.equal(json, fs.readFileSync('fixtures/reports/golden/junit-home-triage.json', 'utf8'));
+  assert.equal(markdown, fs.readFileSync('fixtures/reports/golden/junit-home-triage.md', 'utf8'));
+  const triage = json + markdown;
+  assert.equal(triage.includes('alice'), false);
+  assert.equal(triage.includes('/home/'), false);
+  assert.equal(triage.includes('Users'), false);
+  assert.match(triage, /tmp\/~\/proj\/tests\/seed-users\.json/);
+});
+
+test('markdown evidence escapes html from an overlay error', () => {
+  const message = '<div id="cover"> intercepts pointer events';
+  const item = oneRecord('overlay', [
+    attempt('failed', message, 0),
+    attempt('failed', message, 1),
+    attempt('failed', message, 2),
+  ]);
+  const report = buildTriageReport([item]);
+  const markdown = renderTriageMarkdown(report);
+  assert.equal(markdown.includes('<div'), false);
+  assert.match(markdown, /&lt;div id="cover"&gt;/);
+  assert.equal(report.entries[0].evidence.some((line) => line.includes('<div id="cover">')), true);
 });
