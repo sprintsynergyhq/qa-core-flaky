@@ -48,7 +48,7 @@ Passed and skipped tests are omitted. A test that was expected to fail, and did 
 
 ## Markdown
 
-The Markdown file starts with a summary table: test, verdict, cause, confidence. Then one section per test, in the same order. Each section has the causes, the evidence quotes, the attempt counts, the signals, the suggested fix, and the next step. Evidence quotes escape `&`, `<`, and `>` so a line such as `<div id="cover">` stays visible. A home path written as `<home>/` is escaped as `&lt;home&gt;` in Markdown. The JSON evidence keeps the raw `<home>/` text. A flaky section also has this sentence: "A flaky test can still point to a real app defect. Check the app behavior too."
+The Markdown file starts with a summary table: test, verdict, cause, confidence. Then one section per test, in the same order. Each section has the causes, the evidence quotes, the attempt counts, the signals, the suggested fix, and the next step. Summary table cells, section headings, evidence quotes, and the next step escape `&`, then `<`, then `>`. A line such as `<div id="cover">`, a title such as `renders <Cart>`, and a home path written as `<home>` stay visible. `<home>` is escaped as `&lt;home&gt;` in those Markdown places. The JSON report keeps the raw `<home>` text. Cause rules read the original error text. Home redaction is applied to the evidence, the id, the title, and the next step when those strings are built. A flaky section also has this sentence: "A flaky test can still point to a real app defect. Check the app behavior too."
 
 When more than one commit is present, the cause list, the evidence, and the suggested fix come from the commit that selected the verdict. The other commit is a separate signal, and each signal names its commit.
 

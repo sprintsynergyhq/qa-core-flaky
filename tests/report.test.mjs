@@ -5,9 +5,11 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   buildTriageReport,
+  classifyCauses,
   fixTemplates,
   parseJunit,
   parsePlaywrightJson,
+  redactHomeText,
   renderTriageJson,
   renderTriageMarkdown,
 } from '../dist/index.js';
@@ -272,6 +274,70 @@ test('a real JUnit run with no root hides the home username in triage', () => {
   assert.equal(markdown.includes('<home>'), false);
 });
 
+test('a home path does not change the verdict', () => {
+  const net = 'Error: missing /home/alice\nError: connect ECONNREFUSED';
+  const notFound = 'Error: missing /home/alice\nError: element(s) not found';
+  const netEntry = entryFor(net);
+  const netRedacted = entryFor(redactHomeText(net));
+  const netEaten = entryFor('Error: missing <home>/');
+  assert.equal(redactHomeText(net), 'Error: missing <home>\nError: connect ECONNREFUSED');
+  assert.equal(netEntry.verdict, netRedacted.verdict);
+  assert.equal(netEntry.verdict, 'environment-issue');
+  assert.equal(netEntry.confidence, 'high');
+  assert.equal(netEntry.ruleId, 'ENVIRONMENT-ISSUE');
+  assert.equal(netEntry.causes[0].ruleIds.includes('ENV-NET'), true);
+  assert.equal(netEaten.verdict, 'likely-real-bug');
+  assert.equal(netEntry.evidence.some((line) => line.includes('ECONNREFUSED')), true);
+  assert.equal(netEntry.evidence.join('\n').includes('alice'), false);
+
+  const missing = entryFor(notFound);
+  const missingRedacted = entryFor(redactHomeText(notFound));
+  assert.equal(redactHomeText(notFound), 'Error: missing <home>\nError: element(s) not found');
+  assert.equal(missing.verdict, missingRedacted.verdict);
+  assert.equal(missing.verdict, 'broken-test');
+  assert.equal(missing.confidence, 'high');
+  assert.equal(missing.causes[0].ruleIds.includes('SEL-NOTFOUND'), true);
+  assert.equal(missing.evidence.join('\n').includes('element(s) not found'), true);
+
+  const onTheLine = 'Error: connect ECONNREFUSED /home/alice';
+  const quoted = entryFor(onTheLine);
+  assert.equal(quoted.verdict, entryFor(redactHomeText(onTheLine)).verdict);
+  assert.equal(quoted.evidence.some((line) => line.includes('<home>')), true);
+  assert.equal(quoted.evidence.join('\n').includes('alice'), false);
+  assert.equal(quoted.evidence.join('\n').includes('ECONNREFUSED'), true);
+
+  const feed = [
+    'Error: expect(locator).toHaveURL(expected) failed',
+    'Expected: "/home/feed"',
+    'Received: "/home/login"',
+  ].join('\n');
+  const settings = [
+    'Error: expect(locator).toHaveURL(expected) failed',
+    'Expected: "/home/feed"',
+    'Received: "/home/settings"',
+  ].join('\n');
+  const drift = buildTriageReport([
+    oneRecord('routes', [attempt('failed', feed, 0), attempt('failed', settings, 1)]),
+  ]).entries[0];
+  const driftRecord = oneRecord('routes', [attempt('failed', feed, 0), attempt('failed', settings, 1)]);
+  assert.equal(
+    classifyCauses(driftRecord).some((finding) => finding.ruleIds.includes('DATA-VALUE-DRIFT')),
+    true,
+  );
+  assert.equal(drift.causes.some((finding) => finding.ruleIds.includes('DATA-VALUE-DRIFT')), true);
+  const driftText = drift.evidence.join('\n');
+  assert.equal(driftText.includes('/home/login'), true);
+  assert.equal(driftText.includes('/home/settings'), true);
+  assert.equal(driftText.includes('<home>'), false);
+});
+
+function entryFor(text) {
+  const attempts = [0, 1, 2].map((retry) => attempt('failed', text, retry));
+  const record = oneRecord('sample', attempts);
+  assert.equal(record.attempts[0].errors[0].message, text);
+  return buildTriageReport([record]).entries[0];
+}
+
 test('markdown evidence escapes html from an overlay error', () => {
   const message = '<div id="cover"> intercepts pointer events';
   const item = oneRecord('overlay', [
@@ -284,4 +350,27 @@ test('markdown evidence escapes html from an overlay error', () => {
   assert.equal(markdown.includes('<div'), false);
   assert.match(markdown, /&lt;div id="cover"&gt;/);
   assert.equal(report.entries[0].evidence.some((line) => line.includes('<div id="cover">')), true);
+});
+
+test('markdown escapes home and title brackets in the table, heading, and next step', () => {
+  const message = 'Error: element(s) not found';
+  const item = oneRecord('renders <Cart> & qty', [
+    attempt('failed', message, 0),
+    attempt('failed', message, 1),
+    attempt('failed', message, 2),
+  ]);
+  item.file = '<home>/proj/a.spec.ts';
+  item.id = '<home>/proj/a.spec.ts::chromium::renders <Cart> & qty';
+  const report = buildTriageReport([item]);
+  const markdown = renderTriageMarkdown(report);
+  const json = renderTriageJson(report);
+  assert.equal(markdown.includes('<Cart>'), false);
+  assert.equal(markdown.includes('<home>'), false);
+  assert.match(markdown, /\| &lt;home&gt;\/proj\/a\.spec\.ts::chromium::renders &lt;Cart&gt; &amp; qty \|/);
+  assert.match(markdown, /^## &lt;home&gt;\/proj\/a\.spec\.ts::chromium::renders &lt;Cart&gt; &amp; qty$/m);
+  assert.match(markdown, /qa-core-flaky rerun "&lt;home&gt;\/proj\/a\.spec\.ts" -g "renders &lt;Cart&gt; &amp; qty"/);
+  assert.equal(markdown.includes('&amp;amp;'), false);
+  assert.equal(json.includes('renders <Cart> & qty'), true);
+  assert.equal(json.includes('<home>/proj/a.spec.ts'), true);
+  assert.equal(json.includes('&lt;'), false);
 });

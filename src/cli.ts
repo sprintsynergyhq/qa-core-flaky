@@ -9,6 +9,7 @@ import type { ParseResult, TestRecord } from './model.js';
 import { detectFormat } from './parsers/detect.js';
 import { parseJunit } from './parsers/junit.js';
 import { parsePlaywrightJson } from './parsers/playwright-json.js';
+import { redactHomeText } from './report-path.js';
 import { renderTriageMarkdown } from './report/markdown.js';
 import { buildTriageReport, renderTriageJson } from './report/json.js';
 
@@ -208,8 +209,11 @@ function formatCauses(result: ParseResult, testTimeoutMs: number | undefined, as
   const rows = result.records
     .filter((record) => record.outcome === 'failed' || record.outcome === 'flaky')
     .map((record) => ({
-      id: record.id,
-      findings: classifyCauses(record, testTimeoutMs === undefined ? {} : { testTimeoutMs }),
+      id: redactHomeText(record.id),
+      findings: classifyCauses(record, testTimeoutMs === undefined ? {} : { testTimeoutMs }).map((finding) => ({
+        ...finding,
+        evidence: finding.evidence.map((line) => redactHomeText(line)),
+      })),
     }));
   if (asJson) return `${JSON.stringify(rows, null, 2)}\n`;
   return formatCauseText(rows);

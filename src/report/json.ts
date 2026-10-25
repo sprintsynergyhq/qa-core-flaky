@@ -2,6 +2,7 @@ import { classifyCauses } from '../causes/index.js';
 import type { Cause, CauseFinding } from '../causes/types.js';
 import { suggestFix } from '../fixes/templates.js';
 import type { TestRecord } from '../model.js';
+import { redactHomeText } from '../report-path.js';
 import { decideVerdict, VERDICT_ORDER } from '../verdict.js';
 import type { TriageEntry, TriageReport } from './schema.js';
 
@@ -70,16 +71,20 @@ function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefi
   const classifyOptions = testTimeoutMs === undefined ? {} : { testTimeoutMs };
   const findings = classifyCauses(merged, classifyOptions);
   const decision = decideVerdict(group, findings, classifyOptions);
-  const causes = orderCauses(decision.findings, decision.cause);
+  const causes = orderCauses(decision.findings, decision.cause).map((finding) => ({
+    ...finding,
+    evidence: finding.evidence.map((line) => redactHomeText(line)),
+  }));
   const evidence = flattenEvidence(causes, decision.note);
   const failed = attempts.filter(
     (attempt) => attempt.status === 'failed' || attempt.status === 'timedOut' || attempt.status === 'interrupted',
   ).length;
   const passed = attempts.filter((attempt) => attempt.status === 'passed').length;
-  const title = base.titlePath[base.titlePath.length - 1] ?? base.id;
+  const title = redactHomeText(base.titlePath[base.titlePath.length - 1] ?? base.id);
+  const file = redactHomeText(base.file);
 
   return {
-    id: base.id,
+    id: redactHomeText(base.id),
     verdict: decision.verdict,
     confidence: decision.confidence,
     ruleId: decision.ruleId,
@@ -98,7 +103,7 @@ function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefi
     },
     suggestedFix: suggestFix(decision.ruleIds),
     healProposal: null,
-    nextStep: `Review the suggested fix. To see the test again, run: qa-core-flaky rerun ${JSON.stringify(base.file)} -g ${JSON.stringify(title)} --times 10`,
+    nextStep: `Review the suggested fix. To see the test again, run: qa-core-flaky rerun ${JSON.stringify(file)} -g ${JSON.stringify(title)} --times 10`,
     note: decision.note,
     llm: null,
     review: {

@@ -21,7 +21,7 @@ export function renderTriageMarkdown(report: TriageReport): string {
 
 function renderEntry(entry: TriageEntry): string[] {
   const lines = [
-    `## ${entry.id}`,
+    `## ${escapeHtml(entry.id)}`,
     '',
     `Verdict: ${entry.verdict}`,
     `Confidence: ${entry.confidence}`,
@@ -55,7 +55,7 @@ function renderEntry(entry: TriageEntry): string[] {
   } else {
     for (const signal of entry.signals) lines.push(`- ${signal.kind}: ${signal.detail}`);
   }
-  lines.push('', '### Suggested Fix', '', entry.suggestedFix, '', '### Next Step', '', entry.nextStep);
+  lines.push('', '### Suggested Fix', '', entry.suggestedFix, '', '### Next Step', '', escapeHtml(entry.nextStep));
   if (entry.note) {
     lines.push('', '### Note', '', entry.note);
   }
@@ -64,7 +64,7 @@ function renderEntry(entry: TriageEntry): string[] {
 }
 
 function cell(value: string): string {
-  return value.replaceAll('|', '\\|');
+  return escapeHtml(value).replaceAll('|', '\\|');
 }
 
 /** Keep `<`, `>`, and `&` visible in a GitHub Markdown quote. */

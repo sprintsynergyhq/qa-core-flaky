@@ -29,16 +29,11 @@
  * comma list are not paths. When a report root is known, a token outside
  * that root that starts with a known folder is rewritten up to the first of
  * those characters, and the rest is kept, so `/home/bob/file#1.json` does
- * not leave the absolute `/home/bob` path in the text. Without a report
- * root, a home directory is rewritten to `<home>/` on the whole text before
- * tokens are split. The username runs up to the next separator and may
- * contain spaces. `Users` and the drive letter match in any case. The home
- * folder must start a path, or follow `/tmp/`, `/var/`, `/private/`,
- * `/mnt/<segment>/`, or a drive letter. A URL such as
- * `/api/home/settings/save`, `GET /home/index/page`, or `/Users/42/orders`
- * stays as written. The same rewrite stops at the first `?`, `*`, `#`,
- * `=`, or `,`. This rewrite does not add a warning. A blocked token that
- * is not a home path stays as written. A single segment such as `/var/`,
+ * not leave the absolute `/home/bob` path in the text. Error text keeps the
+ * original home directory. Cause rules and signatures read that text.
+ * `redactHomeText` hides the username later, when output strings are built.
+ * A structured file path with no report root still hides the username here,
+ * and that rewrite does not add a warning. A single segment such as `/var/`,
  * `/Ready/`, or
  * `"/inventory.html"`, a quoted URL path such as `"/cart/checkout.html"`,
  * and prose such as `/and/or` stay as written.
@@ -134,26 +129,28 @@ export function toPortablePath(
   file: string | undefined,
   rootDir: string | undefined,
   warnings: string[],
+  redactUser = true,
 ): string | undefined {
   if (file === undefined) return undefined;
   let normalized = stripTrailingSlash(normalizeSlashes(file));
   if (normalized === '') return '';
   const root = normalizeRoot(rootDir);
-  if (!root) normalized = redactHomeUser(normalized);
+  // Structured file paths can hide a home directory here. Error text does not:
+  // cause rules read the original message, and the report redacts at output.
+  if (!root && redactUser) normalized = redactHomeText(normalized);
   if (!root && isBareHomePath(normalized)) return normalized;
   if (root) {
     if (normalized === root) return '';
     if (normalized.startsWith(`${root}/`)) return normalized.slice(root.length + 1);
   }
-  if (!isAbsolutePath(normalized)) return revealHome(normalized);
+  if (!isAbsolutePath(normalized)) return normalized;
   if (isWindowsDrivePath(normalized) && !sameDrive(root, normalized)) {
-    const shown = revealHome(normalized);
-    pushWarning(warnings, `${WINDOWS_WARNING}${shown}`);
-    return shown;
+    pushWarning(warnings, `${WINDOWS_WARNING}${normalized}`);
+    return normalized;
   }
   const rewritten =
     root && isAbsolutePath(root) ? relativeFrom(root, normalized) : stripAbsolutePrefix(normalized);
-  const safe = revealHome(isAbsolutePath(rewritten) ? stripAbsolutePrefix(rewritten) : rewritten);
+  const safe = isAbsolutePath(rewritten) ? stripAbsolutePrefix(rewritten) : rewritten;
   const prefix = root ? OUTSIDE_ROOT_WARNING : ABSOLUTE_WARNING;
   pushWarning(warnings, `${prefix}${safe}`);
   return safe;
@@ -172,14 +169,12 @@ export function toPortablePath(
 export function relativizeText(text: string, rootDir: string | undefined, warnings: string[]): string {
   const root = normalizeRoot(rootDir);
   const masked = maskUrls(text);
-  // Home paths are rewritten before the text is split, so a username may contain spaces.
-  const prepared = root ? masked.text : redactHomeUser(masked.text);
-  const tokenized = prepared.replace(TEXT_TOKEN, (full, prefix: string, token: string) => {
+  const tokenized = masked.text.replace(TEXT_TOKEN, (full, prefix: string, token: string) => {
     const rewritten = rewriteErrorToken(token, root, warnings);
     if (rewritten === undefined) return full;
     return `${prefix}${rewritten}`;
   });
-  return revealHome(unmaskUrls(replaceRootPrefixes(tokenized, root), masked.urls));
+  return unmaskUrls(replaceRootPrefixes(tokenized, root), masked.urls);
 }
 
 export function stripAnsi(text: string): string {
@@ -216,67 +211,221 @@ function splitAbsolute(value: string): { drive: string; parts: string[] } {
   return { drive: '', parts: value.split('/').filter(Boolean) };
 }
 
-/** Internal stand-in. `<` would split a later path token, so it is revealed at the end. */
-const HOME_PLACEHOLDER = '__home__/';
+type HomeMatch =
+  | { kind: 'replace'; replaceFrom: number; replacement: string; tail: string; next: number }
+  | { kind: 'skip'; next: number };
 
 /**
- * Folder plus separator. `Users` and the drive letter are case-insensitive.
- * The username is read separately so it can contain spaces.
- */
-const HOME_MARK = /(?:[A-Za-z]:)?[\\/](?:home|[Uu][Ss][Ee][Rr][Ss])[\\/]/g;
-
-/**
- * Replace a home directory and its username with `<home>/`.
+ * Hide a home directory and its username.
  *
- * The username is everything up to the next separator, including spaces.
- * The match must start a path, or follow `/tmp/`, `/var/`, `/private/`,
- * `/mnt/<segment>/`, or a drive letter. An HTTP request line and a numeric
- * `/Users/<id>/` route are not home directories. A blocked character ends
- * the rewritten path, and the rest stays as written.
+ * Call this when building evidence, ids, titles, and the next step.
+ * Cause rules and signatures read the original error text, so this must not
+ * run before classification.
+ *
+ * The username stops at a newline, `\r`, whitespace, `:`, `;`, `,`, a quote,
+ * `)`, `]`, or `>`. A space is part of the name only when a path separator
+ * follows on the same line before one of those stops, as in `Jöhn Smith`.
+ * With no separator after the name, `/home/alice` becomes `<home>` and the
+ * text after the name stays. With a separator, the result is `<home>/` plus
+ * the rest of the path. A path tail stops at whitespace, a quote, `)`, `]`,
+ * `>`, or `?`, `*`, `#`, `=`, `,`. It does not stop at `:`.
+ *
+ * A letter before `:` is a drive letter only at the start of the text or
+ * after a character that is not a letter or digit. `file:///` and `\\?\`
+ * qualify. `cwd:/home/ci/w` does not: `d` is preceded by a letter, so the
+ * path is POSIX `/home/`.
+ *
+ * POSIX paths match `/home/` and `/Users/` with a capital U. Lowercase
+ * `users` matches only after a drive letter. A segment that starts with `:`
+ * is not a username. `/users/:id`, `/api/home/settings/save`,
+ * `GET /home/index/page`, and `/Users/42/orders` stay as written.
+ *
+ * Inside an Expected or Received value, a home path is rewritten only when
+ * at least two segments follow the username, or the last segment has a file
+ * extension. `Expected: "/home/feed"` and `Received: "/home/login"` stay, so
+ * the two routes are still visible. `Expected: "/home/alice/notes.txt"` and
+ * `Expected: "/home/alice/proj/a.json"` are rewritten.
+ *
+ * `http://` and `https://` URLs are left as written. This function does not
+ * add a warning.
  */
-function redactHomeUser(value: string): string {
-  const marks = [...value.matchAll(HOME_MARK)];
-  if (marks.length === 0) return value;
+export function redactHomeText(value: string): string {
+  const masked = maskUrls(value);
+  const text = masked.text;
   let out = '';
   let cursor = 0;
-  for (const mark of marks) {
-    const index = mark.index ?? 0;
-    if (index < cursor) continue;
-    const folder = mark[0] ?? '';
-    if (!homeContextOk(value, index, folder)) continue;
-    const userStart = index + folder.length;
-    const userEnd = readUsernameEnd(value, userStart);
-    if (userEnd === userStart) continue;
-    const username = value.slice(userStart, userEnd);
-    if (!/\p{L}/u.test(username)) continue;
-    let end = userEnd;
-    if (end < value.length && (value[end] === '/' || value[end] === '\\')) end += 1;
-    out += value.slice(cursor, index);
-    out += homeReplacement(value, index, folder);
-    const tail = readPathTail(value, end);
-    out += tail.text;
-    cursor = tail.next;
+  while (cursor < text.length) {
+    const hit = findHome(text, cursor);
+    if (!hit || hit.kind !== 'replace') {
+      out += text.slice(cursor);
+      break;
+    }
+    out += text.slice(cursor, hit.replaceFrom);
+    out += hit.replacement;
+    out += hit.tail;
+    if (hit.next <= cursor) break;
+    cursor = hit.next;
   }
-  out += value.slice(cursor);
-  return out === value ? value : out;
+  return unmaskUrls(out, masked.urls);
+}
+
+function findHome(text: string, from: number): HomeMatch | undefined {
+  for (let index = from; index < text.length; index += 1) {
+    const hit = matchDriveHome(text, index) ?? matchSlashHome(text, index);
+    if (!hit) continue;
+    if (hit.kind === 'skip') {
+      if (hit.next <= index) continue;
+      index = hit.next - 1;
+      continue;
+    }
+    return hit;
+  }
+  return undefined;
+}
+
+function matchDriveHome(text: string, index: number): HomeMatch | undefined {
+  if (!isDriveLetter(text, index)) return undefined;
+  const sep = text[index + 2];
+  if (sep !== '/' && sep !== '\\') return undefined;
+  const folder = readHomeFolder(text, index + 3, true);
+  if (!folder) return undefined;
+  return finishHome(text, index, folder.userStart);
+}
+
+function matchSlashHome(text: string, index: number): HomeMatch | undefined {
+  const sep = text[index];
+  if (sep !== '/' && sep !== '\\') return undefined;
+  const folder = readHomeFolder(text, index + 1, false);
+  if (!folder) return undefined;
+  if (!slashContextOk(text, index)) return undefined;
+  return finishHome(text, index, folder.userStart);
+}
+
+function readHomeFolder(text: string, start: number, drive: boolean): { userStart: number } | undefined {
+  let end = start;
+  while (end < text.length && /[A-Za-z]/.test(text[end] ?? '')) end += 1;
+  if (end === start) return undefined;
+  const name = text.slice(start, end);
+  const sep = text[end];
+  if (sep !== '/' && sep !== '\\') return undefined;
+  const allowed = drive ? /^home$/i.test(name) || /^users$/i.test(name) : name === 'home' || name === 'Users';
+  if (!allowed) return undefined;
+  return { userStart: end + 1 };
+}
+
+/** A drive letter is at the start, or the previous character is not a letter or digit. */
+function isDriveLetter(text: string, index: number): boolean {
+  if (!/[A-Za-z]/.test(text[index] ?? '')) return false;
+  if (text[index + 1] !== ':') return false;
+  if (index === 0) return true;
+  return !/[A-Za-z0-9]/.test(text[index - 1] ?? '');
+}
+
+function slashContextOk(text: string, index: number): boolean {
+  if (isKnownHomePrefix(text.slice(0, index))) return true;
+  return isPathStart(text, index);
+}
+
+function finishHome(text: string, replaceFrom: number, userStart: number): HomeMatch | undefined {
+  const userEnd = readUsernameEnd(text, userStart);
+  if (userEnd === userStart) return undefined;
+  const username = text.slice(userStart, userEnd);
+  if (username.startsWith(':') || !/\p{L}/u.test(username)) return undefined;
+  const hasSep = userEnd < text.length && (text[userEnd] === '/' || text[userEnd] === '\\');
+  const tail = hasSep ? readPathTail(text, userEnd + 1) : { text: '', next: userEnd };
+  if (inExpectedOrReceived(text, replaceFrom) && !expectedHomeRewrites(tail.text, hasSep)) {
+    return { kind: 'skip', next: tail.next };
+  }
+  return {
+    kind: 'replace',
+    replaceFrom,
+    replacement: homeToken(text, replaceFrom, hasSep),
+    tail: tail.text,
+    next: tail.next,
+  };
 }
 
 /**
- * The matched folder includes its leading slash. After `/tmp` that slash is
- * the separator, so it has to be written back. At the start of a path the
- * slash is part of `/home` and `<home>` replaces it.
+ * The match includes the slash before `home`. After `/tmp` that slash is the
+ * separator, so the replacement writes it back. A drive letter is replaced
+ * together with the folder.
  */
-function homeReplacement(text: string, index: number, folder: string): string {
-  if (/^[A-Za-z]:/.test(folder) || index === 0) return HOME_PLACEHOLDER;
-  if (isKnownHomePrefix(text.slice(0, index))) return `/${HOME_PLACEHOLDER}`;
-  if (text.slice(Math.max(0, index - 7), index) === 'file://') return `/${HOME_PLACEHOLDER}`;
-  return HOME_PLACEHOLDER;
+function homeToken(text: string, index: number, hasSep: boolean): string {
+  const mark = hasSep ? '<home>/' : '<home>';
+  if (index === 0 || isDriveLetter(text, index)) return mark;
+  if (isKnownHomePrefix(text.slice(0, index))) return `/${mark}`;
+  if (text.slice(Math.max(0, index - 7), index) === 'file://') return `/${mark}`;
+  return mark;
 }
 
-function homeContextOk(text: string, index: number, folder: string): boolean {
-  const drive = /^[A-Za-z]:/.test(folder);
-  if (!drive && isKnownHomePrefix(text.slice(0, index))) return true;
-  return isPathStart(text, index);
+function inExpectedOrReceived(text: string, index: number): boolean {
+  const lineStart = text.lastIndexOf('\n', index - 1) + 1;
+  return /^[ \t]*(?:Expected|Received):/.test(text.slice(lineStart, index));
+}
+
+/**
+ * Quoted app routes such as `/home/feed` have no file extension and fewer
+ * than two segments after the username. A seed file does.
+ */
+function expectedHomeRewrites(tail: string, hasSep: boolean): boolean {
+  if (!hasSep) return false;
+  const segments = tail.split('/').filter((part) => part.length > 0);
+  if (segments.length >= 2) return true;
+  const last = segments[segments.length - 1] ?? '';
+  return /\.[A-Za-z0-9]+$/.test(last);
+}
+
+function readUsernameEnd(text: string, start: number): number {
+  const allowSpace = separatorFollowsOnLine(text, start);
+  let index = start;
+  while (index < text.length) {
+    const ch = text[index] ?? '';
+    if (ch === '/' || ch === '\\' || ch === '\n' || ch === '\r') break;
+    if (ch === ' ' || ch === '\t') {
+      if (!allowSpace) break;
+      index += 1;
+      continue;
+    }
+    if (
+      ch === ':' ||
+      ch === ';' ||
+      ch === ',' ||
+      ch === '"' ||
+      ch === "'" ||
+      ch === '`' ||
+      ch === ')' ||
+      ch === ']' ||
+      ch === '>'
+    ) {
+      break;
+    }
+    index += 1;
+  }
+  return index;
+}
+
+/** A separator later on this line, before a username stop, allows spaces in the name. */
+function separatorFollowsOnLine(text: string, start: number): boolean {
+  for (let index = start; index < text.length; index += 1) {
+    const ch = text[index] ?? '';
+    if (ch === '\n' || ch === '\r') return false;
+    if (ch === '/' || ch === '\\') return true;
+    if (ch === ' ' || ch === '\t') continue;
+    if (
+      ch === ':' ||
+      ch === ';' ||
+      ch === ',' ||
+      ch === '"' ||
+      ch === "'" ||
+      ch === '`' ||
+      ch === ')' ||
+      ch === ']' ||
+      ch === '>'
+    ) {
+      return false;
+    }
+  }
+  return false;
 }
 
 function isKnownHomePrefix(before: string): boolean {
@@ -300,16 +449,6 @@ function isPathStart(text: string, index: number): boolean {
   return true;
 }
 
-function readUsernameEnd(value: string, start: number): number {
-  let index = start;
-  while (index < value.length) {
-    const ch = value[index] ?? '';
-    if (ch === '/' || ch === '\\' || /[?*#=,"'`()<>|[\]{}]/.test(ch)) break;
-    index += 1;
-  }
-  return index;
-}
-
 function readPathTail(value: string, start: number): { text: string; next: number } {
   let text = '';
   let index = start;
@@ -327,13 +466,12 @@ function readPathTail(value: string, start: number): { text: string; next: numbe
   return { text, next: index };
 }
 
-function revealHome(value: string): string {
-  return value.replaceAll(HOME_PLACEHOLDER, '<home>/');
-}
-
-/** A `/home/` or `/Users/` path the home rewrite left in place. It is a URL, not a filesystem path. */
+/**
+ * A `/home/` or `/Users/` path left in the text on purpose.
+ * Lowercase `users` is a home folder only after a drive letter.
+ */
 function isBareHomePath(value: string): boolean {
-  return /^(?:[A-Za-z]:\/)?\/(?:home|[Uu][Ss][Ee][Rr][Ss])\//.test(value);
+  return /^\/(?:home|Users)\//.test(value) || /^[A-Za-z]:\/(?:home|users)\//i.test(value);
 }
 
 function stripAbsolutePrefix(value: string): string {
@@ -346,8 +484,8 @@ function stripAbsolutePrefix(value: string): string {
  * A token under the report root is rewritten whole, even when it contains
  * `?`, `*`, `#`, `=`, or `,`. When a report root is known, any other token
  * that starts with a known folder is rewritten only up to the first of
- * those characters. Without a report root, the home rewrite has already run
- * on the whole text. Any other blocked token stays as written.
+ * those characters. Without a report root, a home directory stays in the
+ * error text. Any other blocked token stays as written.
  */
 function rewriteErrorToken(token: string, root: string | undefined, warnings: string[]): string | undefined {
   const whole = rewritePathToken(token, root, warnings);
@@ -370,7 +508,7 @@ function rewritePathToken(token: string, root: string | undefined, warnings: str
   const parts = splitErrorToken(token);
   if (parts.path === '') return undefined;
   if (!shouldRewriteErrorToken(parts.path, root)) return undefined;
-  const portable = toPortablePath(parts.path, root, warnings);
+  const portable = toPortablePath(parts.path, root, warnings, false);
   if (portable === undefined) return undefined;
   const body = portable === '' ? '.' : portable;
   return `${parts.lead}${body}${parts.trailing}`;
@@ -441,7 +579,11 @@ function shouldRewriteErrorToken(token: string, root: string | undefined): boole
   if (OUTSIDE_ROOT_BLOCKED.test(stripped) || OUTSIDE_ROOT_BLOCKED.test(normalized)) return false;
   if (isRegexLiteral(stripped) || isRegexLiteral(normalized)) return false;
   if (!hasAllowedOutsideSegments(stripped)) return false;
-  if (!root && (isBareHomePath(stripped) || isBareHomePath(normalized))) return false;
+  // Leave home paths in the error text. Classification reads that text, and
+  // the triage report redacts the username when it builds output strings.
+  if (!root && (isBareHomePath(stripped) || isBareHomePath(normalized) || redactHomeText(stripped) !== stripped)) {
+    return false;
+  }
   if (isWindowsDrivePath(stripped) && windowsHasSegment(stripped)) return true;
   if (normalized.startsWith('/') && SOURCE_LOCATION.test(normalized)) return true;
   return pathSegments(stripped).length >= 2 && FILESYSTEM_PREFIXES.some((prefix) => stripped.startsWith(prefix));
