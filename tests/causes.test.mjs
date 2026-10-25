@@ -260,6 +260,30 @@ test('titles, source frames, headers, and assertion lines do not choose a cause'
   assert.equal(http.evidence.some((item) => item.startsWith('Expected:')), false);
 });
 
+test('prose that starts with at is still evidence', () => {
+  const text = 'Error: at least one row is a duplicate';
+  const findings = causesOf(text);
+  const data = causeNamed(findings, 'test-data');
+  assert.deepEqual(data.ruleIds, ['DATA-ALREADY-EXISTS']);
+  assert.ok(data.evidence.some((item) => item.includes('at least one row is a duplicate')));
+});
+
+test('a long run of spaces does not stall cause rules or cross a line', () => {
+  const text = [
+    'expect(locator).toHaveText(expected) failed',
+    ' '.repeat(80000),
+    '    Expected: "9"',
+    '    Received: "1"',
+  ].join('\n');
+  const started = Date.now();
+  const findings = causesOf(text);
+  assert.equal(Date.now() - started < 1000, true);
+  assert.equal(findings.length, 1);
+  assert.deepEqual(findings[0].ruleIds, ['UNK-NONE']);
+  assert.ok(findings[0].evidence.some((item) => item.includes('Expected: "9"')));
+  assert.equal(findings[0].evidence.some((item) => item.includes('\n')), false);
+});
+
 test('two selector rules on different lines are high', () => {
   const text = [
     "Error: strict mode violation: getByRole('button') resolved to 2 elements",

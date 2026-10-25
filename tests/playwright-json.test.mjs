@@ -519,6 +519,40 @@ test('a report root followed by a non-name character is rewritten', () => {
   }
 });
 
+test('queries, globs, url paths, and prose stay as written', () => {
+  const input = [
+    'Received string: "/api/search?q=1&x=2"',
+    "page.route('/api/users/*', h)",
+    'glob /src/**/*.ts',
+    'list /a/b,/c/d',
+    'Expected: "/cart/checkout.html"',
+    'text /and/or more',
+    'price /month/user',
+    'wrote /srv/ci/out.json and /opt/app/data.json',
+  ].join(' ');
+  const expected = [
+    'Received string: "/api/search?q=1&x=2"',
+    "page.route('/api/users/*', h)",
+    'glob /src/**/*.ts',
+    'list /a/b,/c/d',
+    'Expected: "/cart/checkout.html"',
+    'text /and/or more',
+    'price /month/user',
+    'wrote ../../../srv/ci/out.json and ../../../opt/app/data.json',
+  ].join(' ');
+  const result = parsePlaywrightJson(rootReport(input, '/home/ci/w'), 'not-a-path.json');
+  const message = result.records[0].attempts[0].errors[0].message;
+  assert.equal(message, expected);
+  for (const warning of result.warnings) {
+    assert.equal(warning.includes('/api/'), false);
+    assert.equal(warning.includes('/cart/'), false);
+    assert.equal(warning.includes('/src/'), false);
+    assert.equal(warning.includes('/and/'), false);
+    assert.equal(warning.includes('/month/'), false);
+    assert.equal(warning.includes('/a/b'), false);
+  }
+});
+
 test('escaped Windows backslashes keep the drive and use single separators', () => {
   const message = 'Error at C:\\\\Users\\\\bob\\\\a.ts:12:3';
   const result = parsePlaywrightJson(errorReport(message), 'windows.json');

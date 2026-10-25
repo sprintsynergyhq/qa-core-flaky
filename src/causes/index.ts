@@ -65,9 +65,10 @@ const SELECTOR_MISS_GROUP = ['SEL-NOTFOUND', 'SEL-ZERO', 'SEL-UNRESOLVED'] as co
 /** A test timeout is already past the near-timeout line, so the pair is one signal. */
 const TEST_TIMEOUT_GROUP = ['TIM-TEST-TIMEOUT', 'TIM-NEAR-TIMEOUT'] as const;
 
-const SOURCE_FRAME_LINE = /^\s*>?\s*\d+\s*\|/;
-const CARET_LINE = /^\s*\|\s*\^/;
-const STACK_FRAME_LINE = /^\s*at\s+/;
+const SOURCE_FRAME_LINE = /^[ \t]*(?:>[ \t]*)?\d+[ \t]*\|/;
+const CARET_LINE = /^[ \t]*\|[ \t]*\^/;
+/** A stack frame ends in `:line:col` or in `(...)`. Prose such as `at least one row` stays. */
+const STACK_FRAME_LINE = /^[ \t]*at \S.*(?::\d+:\d+|\([^)\r\n]*\))[ \t]*$/;
 const JUNIT_HEADER_LINE = /^\s*\[[^\]]+\]\s*\u203A.*(?:\u2500|-{3})/;
 
 type Hit = {
@@ -242,8 +243,8 @@ function unknownEvidence(attempts: readonly Attempt[]): string[] {
     for (const error of attempt.errors ?? []) {
       for (const text of errorTexts(error)) {
         const readable = filterCauseLines(text);
-        const expected = lineOf(readable, /^\s*Expected:\s*.+$/);
-        const received = lineOf(readable, /^\s*Received:\s*.+$/);
+        const expected = lineOf(readable, /^[ \t]*Expected:[ \t]*.+$/);
+        const received = lineOf(readable, /^[ \t]*Received:[ \t]*.+$/);
         if (expected || received) {
           pushEvidence(evidence, expected);
           pushEvidence(evidence, received);

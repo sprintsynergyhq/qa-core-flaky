@@ -264,9 +264,9 @@ test('a root-shaped absolute path is rewritten when the next character is not a 
     'a=home/ci/w&b',
     'cd home/ci/w&&npm test',
     'bang home/ci/w!',
-    'query home/ci/w?',
-    'hash home/ci/w#x',
-    'star home/ci/w*',
+    'query /home/ci/w?',
+    'hash /home/ci/w#x',
+    'star /home/ci/w*',
     'pct home/ci/w%20',
     'tilde home/ci/w~',
     'dollar home/ci/w$HOME',
@@ -288,6 +288,37 @@ test('a root-shaped absolute path is rewritten when the next character is not a 
   for (const warning of result.warnings) {
     assert.equal(warning.includes('/home/ci/w'), false);
   }
+});
+
+test('queries, globs, url paths, and prose stay as written', () => {
+  const input = [
+    'Received string: "/api/search?q=1&x=2"',
+    "page.route('/api/users/*', h)",
+    'glob /src/**/*.ts',
+    'list /a/b,/c/d',
+    'Expected: "/cart/checkout.html"',
+    'text /and/or more',
+    'price /month/user',
+    'wrote /srv/ci/out.json and /opt/app/data.json',
+  ].join(' ');
+  const expected = [
+    'Received string: "/api/search?q=1&x=2"',
+    "page.route('/api/users/*', h)",
+    'glob /src/**/*.ts',
+    'list /a/b,/c/d',
+    'Expected: "/cart/checkout.html"',
+    'text /and/or more',
+    'price /month/user',
+    'wrote srv/ci/out.json and opt/app/data.json',
+  ].join(' ');
+  const escaped = input.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="paths" classname="a.spec.ts">
+      <failure message="${escaped}">kept</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/not-a-path.xml');
+  assert.equal(result.records[0].attempts[0].errors[0].message, expected);
 });
 
 test('an absolute JUnit path is rewritten and does not stay absolute', () => {

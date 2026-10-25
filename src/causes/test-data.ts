@@ -26,13 +26,13 @@ export type ReceivedSample = {
  * Returns undefined when the text has no received value.
  */
 export function readReceived(text: string): ReceivedSample | undefined {
-  const receivedLine = lineContaining(text, /^\s*Received:\s*.+$/);
-  const expectedLine = lineContaining(text, /^\s*Expected:\s*.+$/);
+  const receivedLine = lineContaining(text, /^[ \t]*Received:[ \t]*.+$/);
+  const expectedLine = lineContaining(text, /^[ \t]*Expected:[ \t]*.+$/);
   if (!receivedLine || !expectedLine) return undefined;
   const matcher =
     /expect\(locator\)\.(\w+)\(/.exec(text)?.[1] ?? /Expect "(\w+)"/.exec(text)?.[1] ?? '';
   if (!matcher) return undefined;
-  const locatorLine = lineContaining(text, /^\s*Locator:\s*.+$/) ?? '';
+  const locatorLine = lineContaining(text, /^[ \t]*Locator:[ \t]*.+$/) ?? '';
   return {
     key: `${matcher}\n${locatorLine}\n${expectedLine}`,
     receivedLine,

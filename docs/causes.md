@@ -27,7 +27,7 @@ Before any rule runs, these lines are removed:
 | --- | --- |
 | Playwright source frame | A line number, then a pipe, then source. A leading `>` is the same kind of line |
 | Caret line under a source frame | a line of spaces, a pipe, spaces, and `^` |
-| Stack frame | `    at fixtures/pw-project/tests/causes.spec.ts:21:1` |
+| Stack frame | `    at fixtures/pw-project/tests/causes.spec.ts:21:1`, or a line that ends in `(...)`. Prose that only starts with `at`, such as `at least one row is a duplicate`, stays |
 | JUnit header | `[chromium] › tests/a.spec.ts:21:1 › title` followed by a box-drawing rule |
 
 `DATA-ALREADY-EXISTS`, `ENV-NET`, and `ENV-HTTP5XX` also skip `Locator:` lines, `Expected:` lines, `waiting for ...` lines, and `locator resolved to ...` lines. A button named `Email already exists`, or `Expected: "503 Service Unavailable"`, is Unknown.

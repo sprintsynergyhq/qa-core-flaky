@@ -14,23 +14,28 @@
  * kept, because dropping the drive would throw away the only root the path
  * has. That case adds a warning that quotes the normalized path.
  *
- * Error text keeps its slashes except inside a rewritten token. A token is
- * rewritten when it is the report root, when it is an absolute POSIX path
- * with at least two segments, when it is a Windows path with a drive and a
- * segment, or when it is a source location ending in `.ts`, `.js`, or
- * `.mjs` with a line number. A single segment such as `/var/`, `/Ready/`,
- * or `"/inventory.html"` is left alone. `http://` and `https://` URLs are
- * left alone, including a query such as `?x=/home/a` and a root prefix that
- * sits inside the URL. A token may start after whitespace, a quote, `=`,
- * `(`, a backtick, `[`, `{`, `:`, or `file://`. Trailing `,`, `.`, `;`, and
- * `)` stay outside the rewritten path. The report root is also removed
- * wherever it still appears as its own prefix, but not inside a URL. The
- * root matches when the next character does not continue the path name.
- * Letters, digits, `_`, and `-` continue the name. A `.` continues the name
- * only when a name character follows it, so `project-other` and `project.txt`
- * stay whole, while `root&b`, `root&&npm`, and `root!` are still the root.
- * A path segment may also contain `%`, `~`, `$`, `&`, `!`, `#`, `?`, `*`,
- * `@`, `+`, `,`, or `=`.
+ * Error text keeps its slashes except inside a rewritten token. A token
+ * under the report root is rewritten with the root rules below. A token
+ * outside the root is rewritten only when it starts with a known filesystem
+ * folder (`/home/`, `/Users/`, `/tmp/`, `/var/`, `/runner/`, `/srv/`,
+ * `/opt/`, `/etc/`, `/usr/`, `/root/`, `/mnt/`, `/private/`, `/workspace/`,
+ * `/builds/`), when it has a drive letter and a segment, or when it ends in
+ * a source location such as `file.ts:12` or `file.ts:12:3`. Those outside
+ * tokens may contain `%`, `~`, `$`, `&`, `!`, `@`, and `+`. A token that
+ * contains `?`, `*`, `#`, `=`, or `,` stays as written, so a query, a glob,
+ * and a comma list are not paths. A single segment such as `/var/`,
+ * `/Ready/`, or `"/inventory.html"`, a quoted URL path such as
+ * `"/cart/checkout.html"`, and prose such as `/and/or` stay as written.
+ * `http://` and `https://` URLs are left alone, including a query such as
+ * `?x=/home/a` and a root prefix that sits inside the URL. A token may start
+ * after whitespace, a quote, `=`, `(`, a backtick, `[`, `{`, `:`, or
+ * `file://`. Trailing `,`, `.`, `;`, and `)` stay outside the rewritten
+ * path. The report root is also removed wherever it still appears as its
+ * own prefix, but not inside a URL. The root matches when the next character
+ * does not continue the path name. Letters, digits, `_`, and `-` continue
+ * the name. A `.` continues the name only when a name character follows it,
+ * so `project-other` and `project.txt` stay whole, while `root&b`,
+ * `root&&npm`, `root!`, `root?`, `root#x`, and `root*` are still the root.
  */
 
 const OUTSIDE_ROOT_WARNING =
@@ -50,6 +55,33 @@ const TRAILING_PUNCTUATION = /[,.;)]+$/;
 
 /** `file.ts:12` or `file.ts:12:3` at the end of a token. */
 const SOURCE_LOCATION = /\.(?:ts|js|mjs):\d+(?::\d+)?$/;
+
+/**
+ * Top-level folders that identify a real filesystem path outside the report
+ * root. A URL path such as `/cart/` or prose such as `/and/` is not in this list.
+ */
+const FILESYSTEM_PREFIXES = [
+  '/home/',
+  '/Users/',
+  '/tmp/',
+  '/var/',
+  '/runner/',
+  '/srv/',
+  '/opt/',
+  '/etc/',
+  '/usr/',
+  '/root/',
+  '/mnt/',
+  '/private/',
+  '/workspace/',
+  '/builds/',
+] as const;
+
+/** Query, glob, and list characters. A token that contains one is not a path. */
+const OUTSIDE_ROOT_BLOCKED = /[?*#=,]/;
+
+/** Base path characters plus `% ~ $ & ! @ +`. */
+const OUTSIDE_ROOT_SEGMENT = /^[A-Za-z0-9._+@%~$&!-]+$/;
 
 /**
  * Turn Windows separators into forward slashes.
@@ -226,10 +258,23 @@ function shouldRewriteErrorToken(token: string, root: string | undefined): boole
   const normalized = normalizeSlashes(token);
   const stripped = stripLocationSuffix(normalized);
   if (root && (pathStartsWithRoot(stripped, root) || pathStartsWithRoot(normalized, root))) return true;
-  if (isWindowsDrivePath(stripped) && windowsHasSegment(stripped)) return true;
+  if (OUTSIDE_ROOT_BLOCKED.test(stripped) || OUTSIDE_ROOT_BLOCKED.test(normalized)) return false;
   if (isRegexLiteral(stripped) || isRegexLiteral(normalized)) return false;
+  if (!hasAllowedOutsideSegments(stripped)) return false;
+  if (isWindowsDrivePath(stripped) && windowsHasSegment(stripped)) return true;
   if (normalized.startsWith('/') && SOURCE_LOCATION.test(normalized)) return true;
-  return isMultiSegmentPosixPath(stripped);
+  return pathSegments(stripped).length >= 2 && FILESYSTEM_PREFIXES.some((prefix) => stripped.startsWith(prefix));
+}
+
+function hasAllowedOutsideSegments(value: string): boolean {
+  const segments = pathSegments(value);
+  if (segments.length === 0) return false;
+  return segments.every((segment) => OUTSIDE_ROOT_SEGMENT.test(segment));
+}
+
+function pathSegments(value: string): string[] {
+  const withoutDrive = value.replace(/^[A-Za-z]:/, '');
+  return withoutDrive.replace(/\/+$/, '').split('/').filter((part) => part.length > 0);
 }
 
 function pathStartsWithRoot(value: string, root: string): boolean {
@@ -258,22 +303,6 @@ function windowsHasSegment(value: string): boolean {
 /** A `/pattern/` token, including flags. A filesystem path with two segments does not match. */
 function isRegexLiteral(value: string): boolean {
   return /^\/(?:[^/\n\\]|\\.)+\/[gimsuy]*$/.test(value);
-}
-
-/**
- * An absolute POSIX path with at least two segments, such as
- * `/opt/app/data.json` or `/home/ci/w/a%20b.ts`. One segment (`/var/`,
- * `/inventory.html`) is not a filesystem path. A regex literal is rejected
- * before this check. A segment may contain `% ~ $ & ! # ? * @ + , =`.
- */
-function isMultiSegmentPosixPath(value: string): boolean {
-  if (!value.startsWith('/') || value.startsWith('//')) return false;
-  const segments = value
-    .replace(/\/+$/, '')
-    .split('/')
-    .filter((part) => part.length > 0);
-  if (segments.length < 2) return false;
-  return segments.every((segment) => /^[A-Za-z0-9._+@%~$&!#?=*,-]+$/.test(segment));
 }
 
 function maskUrls(text: string): { text: string; urls: string[] } {

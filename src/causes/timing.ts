@@ -4,7 +4,7 @@ import { lineContaining } from './text.js';
 const TIMEOUT_EXCEEDED = /Timeout \d+ms exceeded/;
 const TEST_TIMEOUT = /Test timeout of \d+ms exceeded/;
 const INTERCEPT_PHRASE = 'intercepts pointer events';
-const SOURCE_FRAME_LINE = /^\s*>?\s*\d+\s*\|/;
+const SOURCE_FRAME_LINE = /^[ \t]*(?:>[ \t]*)?\d+[ \t]*\|/;
 const RESOLVED_REAL = /locator resolved to </;
 const STATE_MATCHER =
   /(?:expect\(locator\)\.(?:toBeVisible|toBeHidden|toBeEnabled|toBeDisabled)\(|Expect "(?:toBeVisible|toBeHidden|toBeEnabled|toBeDisabled)")/;

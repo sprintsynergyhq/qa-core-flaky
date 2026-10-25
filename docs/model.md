@@ -121,12 +121,12 @@ Paths inside error text are rewritten only when the token looks like a real file
 | Token | What Happens |
 | --- | --- |
 | Report root, or a path inside it | The root prefix is removed. No warning. |
-| Absolute POSIX path with at least two segments, such as `/opt/app/data.json` or `/srv/ci/out.json` | Rewritten to a relative path. One warning. |
+| Absolute path outside the root that starts with `/home/`, `/Users/`, `/tmp/`, `/var/`, `/runner/`, `/srv/`, `/opt/`, `/etc/`, `/usr/`, `/root/`, `/mnt/`, `/private/`, `/workspace/`, or `/builds/`, or that ends in a source location such as `file.ts:12` | Rewritten to a relative path. One warning. `/srv/ci/out.json` and `/opt/app/data.json` are examples. |
 | Windows path | Backslash runs become one forward slash, and the drive letter stays (`C:/Users/bob/a.ts`). Relative only when the root uses that drive. Otherwise the normalized form is kept and one warning quotes it. |
 | `http://` or `https://` URL | Left as written, including `?x=/home/a` and a root prefix inside the URL. No warning. |
-| One segment, a regex, or a quoted URL path | Left as written. `/var/`, `/Ready/`, `/\d+/`, and `"/inventory.html"` are examples. No warning. |
+| One segment, a regex, a quoted URL path, a glob, or prose | Left as written. `/var/`, `/Ready/`, `/\d+/`, `"/inventory.html"`, `"/cart/checkout.html"`, `/api/search?q=1`, `/src/**/*.ts`, `/and/or`, and `/month/user` are examples. No warning. |
 
-The report root matches when the next character does not continue the path name. Letters, digits, `_`, and `-` continue the name. A `.` continues the name only when a name character follows it, so `project-other` and `project.txt` stay whole. `root&b`, `root&&npm`, `root!`, `root?`, `root#x`, `root*`, `root%20`, `root~`, and `root$HOME` are still the root. A path segment may also contain `%`, `~`, `$`, `&`, `!`, `#`, `?`, `*`, `@`, `+`, `,`, or `=`, so `/home/ci/w/a%20b.ts` and `/home/ci/w/a&b.ts` are paths. A regex literal such as `/pattern/` is still left as written.
+The report root matches when the next character does not continue the path name. Letters, digits, `_`, and `-` continue the name. A `.` continues the name only when a name character follows it, so `project-other` and `project.txt` stay whole. `root&b`, `root&&npm`, `root!`, `root?`, `root#x`, `root*`, `root%20`, `root~`, and `root$HOME` are still the root. Outside the root, a token may contain `%`, `~`, `$`, `&`, `!`, `@`, and `+`, which is why `/home/ci/w/a%20b.ts` and `/home/ci/w/a&b.ts` are paths. A token that contains `?`, `*`, `#`, `=`, or `,` stays as written. A regex literal such as `/pattern/` is still left as written.
 
 ## Known Gaps
 

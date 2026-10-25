@@ -29,7 +29,7 @@ export function lineContaining(
  * or `locator resolved to`.
  */
 export function isQuotedContextLine(line: string): boolean {
-  if (/^\s*(?:Locator:|Expected:)/.test(line)) return true;
+  if (/^[ \t]*(?:Locator:|Expected:)/.test(line)) return true;
   if (line.includes('waiting for ')) return true;
   if (line.includes('locator resolved to ')) return true;
   return false;
