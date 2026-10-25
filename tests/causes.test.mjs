@@ -268,6 +268,36 @@ test('prose that starts with at is still evidence', () => {
   assert.ok(data.evidence.some((item) => item.includes('at least one row is a duplicate')));
 });
 
+test('CRLF stack frames are dropped and evidence keeps no trailing CR', () => {
+  const text = 'Error: boom\r\n    at seedDuplicateUser (/w/tests/a.spec.ts:3:5)\r\n';
+  const findings = classifyCauses(failedRecord([{ message: text, stack: text }]));
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].cause, 'unknown');
+  assert.equal(findings[0].confidence, 'low');
+  assert.deepEqual(findings[0].ruleIds, ['UNK-NONE']);
+  assert.deepEqual(findings[0].evidence, ['Error: boom']);
+  assert.equal(findings[0].evidence.some((item) => item.includes('\r')), false);
+
+  const net = '    at async connectECONNREFUSED (node:internal/x:1:2)\r';
+  const netFindings = causesOf(net);
+  assert.equal(netFindings.length, 1);
+  assert.equal(netFindings[0].cause, 'unknown');
+  assert.equal(netFindings[0].confidence, 'low');
+  assert.deepEqual(netFindings[0].ruleIds, ['UNK-NONE']);
+  assert.equal(netFindings.some((finding) => finding.ruleIds.includes('ENV-NET')), false);
+  assert.equal(netFindings[0].evidence.some((item) => item.includes('\r')), false);
+});
+
+test('a long run of opening parens does not stall the at frame check', () => {
+  const text = `at a${'('.repeat(79996)}`;
+  assert.equal(text.length, 80000);
+  const started = Date.now();
+  const findings = causesOf(text);
+  assert.equal(Date.now() - started < 100, true);
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].cause, 'unknown');
+});
+
 test('a long run of spaces does not stall cause rules or cross a line', () => {
   const text = [
     'expect(locator).toHaveText(expected) failed',

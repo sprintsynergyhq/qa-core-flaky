@@ -67,8 +67,7 @@ const TEST_TIMEOUT_GROUP = ['TIM-TEST-TIMEOUT', 'TIM-NEAR-TIMEOUT'] as const;
 
 const SOURCE_FRAME_LINE = /^[ \t]*(?:>[ \t]*)?\d+[ \t]*\|/;
 const CARET_LINE = /^[ \t]*\|[ \t]*\^/;
-/** A stack frame ends in `:line:col` or in `(...)`. Prose such as `at least one row` stays. */
-const STACK_FRAME_LINE = /^[ \t]*at \S.*(?::\d+:\d+|\([^)\r\n]*\))[ \t]*$/;
+const LINE_COL_ENDING = /:\d+:\d+$/;
 const JUNIT_HEADER_LINE = /^\s*\[[^\]]+\]\s*\u203A.*(?:\u2500|-{3})/;
 
 type Hit = {
@@ -262,21 +261,47 @@ function unknownEvidence(attempts: readonly Attempt[]): string[] {
  * Drop lines that quote the test instead of the failure.
  * Source frames (`  21 | test(...)` and `> 21 |`), the caret line (`|   ^`),
  * `at ...` stack frames, and the JUnit `[project] › ...` header.
+ * Each line loses a trailing CR first, so a CRLF frame matches the same way
+ * an LF frame does, and evidence does not keep that CR.
  */
 function filterCauseLines(text: string): string {
   return text
     .split('\n')
+    .map(stripTrailingCr)
     .filter((line) => !isIgnoredCauseLine(line))
     .join('\n');
+}
+
+function stripTrailingCr(line: string): string {
+  return line.endsWith('\r') ? line.slice(0, -1) : line;
 }
 
 function isIgnoredCauseLine(line: string): boolean {
   return (
     SOURCE_FRAME_LINE.test(line) ||
     CARET_LINE.test(line) ||
-    STACK_FRAME_LINE.test(line) ||
+    isStackFrameLine(line) ||
     JUNIT_HEADER_LINE.test(line)
   );
+}
+
+/**
+ * A real stack frame starts with `at ` and ends in `:line:col` or in a
+ * parenthesized group with no nested parens. The ending is read from the
+ * tail of the line. Prose such as `at least one row` stays.
+ */
+function isStackFrameLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('at ')) return false;
+  if (LINE_COL_ENDING.test(trimmed)) return true;
+  return endsWithParenGroup(trimmed);
+}
+
+function endsWithParenGroup(value: string): boolean {
+  if (!value.endsWith(')')) return false;
+  const open = value.lastIndexOf('(');
+  if (open < 0) return false;
+  return !value.slice(open + 1, -1).includes(')');
 }
 
 function clipEvidenceLine(line: string): string {
