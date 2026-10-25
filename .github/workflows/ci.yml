@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Check for em dashes
+        run: |
+          # grep exits 1 when it finds nothing. That is the passing case.
+          if grep -rn $'\u2014' . --exclude-dir=node_modules --exclude-dir=.git; then
+            echo "Found an em dash. Remove it."
+            exit 1
+          fi
