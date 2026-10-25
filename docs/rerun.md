@@ -14,7 +14,7 @@ Defaults are `--times 5`, `--modes repeat,isolated`, and `--max-tests 20`. Repea
 
 The cap line and each Playwright command go to stderr. The triage report goes to stdout. `--json` prints JSON on stdout. `--out-dir` writes `triage.json` and `triage.md` with the same pair rule as `triage`. Exit codes match `triage`.
 
-The flags were checked against `npx playwright test --help` for Playwright 1.60.0: `--repeat-each`, `--retries`, `--workers`, `--reporter`, `-g`, `--project`, `--output`, and `--config`.
+The flags were checked against `npx playwright test --help` for Playwright 1.60.0: `--repeat-each`, `--retries`, `--workers`, `--reporter`, `-g`, `--project`, `--output`, and `--config`. `--project` is passed as one `--project=<name>` argument. In 1.60.0 that option takes one or more names, so a following file filter would be read as another project name.
 
 ## Modes
 

@@ -97,6 +97,8 @@ test('the argument builder is an array, escapes titles, and refuses snapshot upd
     'json',
   ]);
   assert.equal(args.includes('--repeat-each'), false);
+  assert.equal(args.includes('--project=chromium'), true);
+  assert.equal(args.includes('--project'), false);
   assert.equal(args.at(-2), '-g');
   assert.equal(args.at(-1), 'a\\.b \\(c\\)$');
   assert.equal(args.includes('tests/a\\.spec\\.ts'), true);

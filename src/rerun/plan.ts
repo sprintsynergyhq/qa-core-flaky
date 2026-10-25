@@ -124,7 +124,10 @@ export function buildPlaywrightArgs(input: {
   if (input.config) args.push('--config', input.config);
   args.push('--retries', '0', '--workers', '1', '--reporter', 'json');
   if (input.mode === 'repeat') args.push('--repeat-each', String(input.times));
-  if (input.project && input.project !== 'default') args.push('--project', input.project);
+  // Playwright 1.60.0 declares `--project <project-name...>`. A separate
+  // value would swallow the file filter that follows. One `--project=name`
+  // argument keeps the file as a positional test filter.
+  if (input.project && input.project !== 'default') args.push(`--project=${input.project}`);
   if (input.outputDir) args.push('--output', input.outputDir);
   args.push(escapeRegex(input.file));
   // Playwright 1.60.0 matches `-g` against the file title, describe titles,
