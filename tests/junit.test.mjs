@@ -802,11 +802,108 @@ test('a later Windows or UNC home on the same line is redacted', () => {
   assert.equal(unc.includes('carol'), false);
   assert.equal(unc, String.raw`<home>/a.txt and \\server<home>/y`);
   assert.equal(redactHomeText('toMatch(/a\\/b/)'), 'toMatch(/a\\/b/)');
-  assert.equal(
-    redactHomeText('home/alice/proj/test-results/error-context.md'),
-    '<home>/proj/test-results/error-context.md',
-  );
-  assert.equal(redactHomeText('users/carol/notes'), '<home>/notes');
+  assert.equal(redactHomeText('home/alice/proj/test-results/error-context.md'), 'home/alice/proj/test-results/error-context.md');
+  assert.equal(redactHomeText('users/carol/notes'), 'users/carol/notes');
+  for (const sample of [
+    'users/list.spec.ts',
+    'home/page.spec.ts',
+    'users/admin/edit.spec.ts',
+    'at users/list.spec.ts:3:5',
+    '"users/profile"',
+    'expected home/settings to be visible',
+    'Users/Shared/x',
+  ]) {
+    assert.equal(redactHomeText(sample), sample, sample);
+  }
+});
+
+test('a JUnit attachment home is redacted and a relative test path is not', () => {
+  const xml = `<testsuite hostname="chromium">
+    <testcase name="users/list" classname="users/list.spec.ts" file="users/list.spec.ts">
+      <failure message="missing users/list.spec.ts">missing users/list.spec.ts at users/list.spec.ts:3:5</failure>
+      <system-out><![CDATA[
+[[ATTACHMENT|home/alice/proj/test-results/missing-reads-the-seed-file-chromium/error-context.md]]
+[[ATTACHMENT|Users/alice/notes/a.txt]]
+[[ATTACHMENT|users/list.spec.ts]]
+[[ATTACHMENT|home/page.spec.ts]]
+[[ATTACHMENT|Users/Shared]]
+]]></system-out>
+    </testcase>
+  </testsuite>`;
+  const result = parseJunit(xml, 'reports/users-home.xml');
+  const record = result.records[0];
+  assert.equal(record.file, 'users/list.spec.ts');
+  assert.equal(record.id, 'users/list.spec.ts::chromium::users/list');
+  assert.equal(record.attempts[0].errors[0].message.includes('users/list.spec.ts'), true);
+  const paths = record.attempts[0].attachments.map((item) => item.path);
+  assert.equal(paths[0], '<home>/proj/test-results/missing-reads-the-seed-file-chromium/error-context.md');
+  assert.equal(paths[1], '<home>/notes/a.txt');
+  assert.equal(paths[2], 'users/list.spec.ts');
+  assert.equal(paths[3], 'home/page.spec.ts');
+  assert.equal(paths[4], 'Users/Shared');
+  assert.equal(JSON.stringify(result).includes('alice'), false);
+});
+
+test('a UNC line stays absolute so the username can be redacted later', () => {
+  const line = String.raw`at \\srv\Users\bob\proj\a.ts:3:1`;
+  const extended = String.raw`\\?\UNC\server\Users\carol\y`;
+  const smb = 'smb://server/Users/alice/z.ts';
+  const xml = `<testsuite hostname="chromium">
+    <testcase name="unc" classname="a.spec.ts" file="a.spec.ts">
+      <failure message="unc"><![CDATA[${line}]]></failure>
+    </testcase>
+  </testsuite>`;
+  const storedError = parseJunit(xml, 'reports/unc.xml').records[0].attempts[0].errors[0];
+  const stored = storedError.stack ?? storedError.message;
+  assert.equal(stored, line);
+  assert.equal(stored.includes('srv/Users'), false);
+  assert.equal(redactHomeText(stored).includes('bob'), false);
+  assert.match(redactHomeText(stored), /\\\\srv<home>\/proj\/a\.ts:3:1/);
+  const raw = JSON.stringify({
+    config: { rootDir: '/workspace/app' },
+    suites: [
+      {
+        title: 'a.spec.ts',
+        file: 'a.spec.ts',
+        specs: [
+          {
+            title: 'unc',
+            file: 'a.spec.ts',
+            tests: [
+              {
+                projectName: 'chromium',
+                expectedStatus: 'passed',
+                status: 'unexpected',
+                results: [
+                  {
+                    retry: 0,
+                    status: 'failed',
+                    duration: 1,
+                    errors: [
+                      {
+                        message: line,
+                        stack: extended,
+                        location: { file: String.raw`\\srv\Users\bob\proj\a.ts`, line: 3, column: 1 },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const json = parsePlaywrightJson(raw, 'unc.json');
+  const error = json.records[0].attempts[0].errors[0];
+  assert.equal(error.message, line);
+  assert.equal(error.stack, extended);
+  assert.equal(error.message.includes('../../srv'), false);
+  assert.equal(error.location.file.includes('bob'), false);
+  assert.match(error.location.file, /\\\\srv<home>\/proj\/a\.ts/);
+  assert.equal(json.warnings.some((warning) => warning.includes('bob') || warning.includes('carol')), false);
+  assert.equal(redactHomeText(smb).includes('alice'), false);
 });
 
 test('a long line after a home stays under the bound', () => {

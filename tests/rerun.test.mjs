@@ -15,6 +15,8 @@ import {
   formatCap,
   formatPrintedCommand,
   guardPipe,
+  parseJunit,
+  parsePlaywrightJson,
   redactHomeText,
   launchRerunChild,
   mergeRerunRecords,
@@ -662,6 +664,99 @@ test('an unselectable rerun does not change the verdict or the cause', () => {
   assert.equal(observedReport.entries[0].observation, 'no flake observed in 2 runs');
   assert.match(renderTriageMarkdown(observedReport), /isolated total 2, failed 0, passed 2; isolated not run 1: could not select/);
   assert.equal(observedReport.entries[0].attempts.total, 3);
+});
+
+test('relative users and home paths stay and --only selects one test', () => {
+  const evidence =
+    'missing users/list.spec.ts at users/list.spec.ts:3:5 "users/profile" expected home/settings to be visible Users/Shared/x users/admin/edit.spec.ts';
+  const cases = [
+    ['users/list.spec.ts', 'users/list'],
+    ['users/edit.spec.ts', 'users/edit'],
+    ['home/page.spec.ts', 'home/page'],
+    ['users/admin/edit.spec.ts', 'users/admin/edit'],
+  ];
+  const json = JSON.stringify({
+    suites: cases.map(([file, title]) => ({
+      title: file,
+      file,
+      specs: [
+        {
+          title,
+          file,
+          line: 3,
+          tests: [
+            {
+              projectName: 'chromium',
+              expectedStatus: 'passed',
+              status: 'unexpected',
+              results: [
+                {
+                  retry: 0,
+                  status: 'failed',
+                  duration: 1,
+                  errors: [
+                    {
+                      message: evidence,
+                      location: { file: 'Users/Shared/x', line: 3, column: 5 },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    })),
+  });
+  const xml = `<testsuites>${cases
+    .map(
+      ([file, title]) => `<testsuite hostname="chromium">
+        <testcase name="${title}" classname="${file}" file="${file}">
+          <failure><![CDATA[${evidence}]]></failure>
+        </testcase>
+      </testsuite>`,
+    )
+    .join('')}</testsuites>`;
+  for (const [label, records] of [
+    ['json', parsePlaywrightJson(json, 'r6users.json').records],
+    ['junit', parseJunit(xml, 'r6users.xml').records],
+  ]) {
+    assert.equal(records.length, 4, label);
+    for (const [file, title] of cases) {
+      const record = records.find((item) => item.file === file);
+      assert.ok(record, `${label} ${file}`);
+      assert.equal(record.id, `${file}::chromium::${title}`);
+      assert.deepEqual(record.titlePath, [title]);
+      assert.equal(record.attempts[0].errors[0].message, evidence);
+    }
+    assert.equal(records[0].attempts[0].errors[0].location?.file ?? 'Users/Shared/x', 'Users/Shared/x');
+    const report = buildTriageReport(records);
+    const rendered = `${renderTriageJson(report)}\n${renderTriageMarkdown(report)}`;
+    for (const sample of [
+      'users/list.spec.ts',
+      'users/edit.spec.ts',
+      'home/page.spec.ts',
+      'users/admin/edit.spec.ts',
+      'users/list',
+      'users/edit',
+      'home/page',
+      'at users/list.spec.ts:3:5',
+      '"users/profile"',
+      'expected home/settings to be visible',
+      'Users/Shared/x',
+    ]) {
+      assert.equal(rendered.includes(sample), true, `${label} dropped ${sample}`);
+    }
+    assert.equal(rendered.includes('<home>'), false, label);
+    const entry = report.entries.find((item) => item.id.startsWith('users/list.spec.ts'));
+    assert.ok(entry, label);
+    const only = /--only '([^']+)'/.exec(entry.nextStep)?.[1];
+    assert.equal(only, 'users/list.spec.ts::chromium::users/list');
+    const plan = planReruns(records, { only: [only], times: 1, modes: ['isolated'] });
+    assert.equal(plan.tests.length, 1);
+    assert.equal(plan.tests[0].id, only);
+    assert.equal(plan.cap.selected, 1);
+  }
 });
 
 test('only accepts a newline written as a backslash n', () => {

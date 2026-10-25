@@ -232,13 +232,28 @@ function readFailure(failure: unknown, warnings: string[]): AttemptError | undef
   return { message, stack };
 }
 
+/**
+ * A JUnit `[[ATTACHMENT|...]]` path can be `home/<name>/<more>` or
+ * `Users/<name>/<more>` with no leading slash. That is a home only in this
+ * attachment slot. Ids, files, titles, locations, evidence, and `--only`
+ * do not use this rule, so `users/list.spec.ts` and `home/page.spec.ts` stay.
+ */
+function redactJunitAttachmentHome(file: string): string {
+  const match = /^(home|Users)\/([^/]+)\/(.+)$/u.exec(file);
+  if (!match) return file;
+  const username = match[2] ?? '';
+  const rest = match[3] ?? '';
+  if (username === '' || username.startsWith(':') || !/\p{L}/u.test(username)) return file;
+  return `<home>/${rest}`;
+}
+
 function readAttachments(testcase: XmlNode, warnings: string[]): Attachment[] {
   const chunks = [...asArray(testcase['system-out']), ...asArray(testcase['system-err'])];
   const text = chunks.map((chunk) => textOf(chunk)).join('\n');
   const attachments: Attachment[] = [];
   for (const match of text.matchAll(ATTACHMENT_PATTERN)) {
     const raw = match[1] ?? '';
-    const portable = toPortablePath(raw, undefined, warnings) ?? '';
+    const portable = redactJunitAttachmentHome(toPortablePath(raw, undefined, warnings) ?? '');
     const name = portable.split('/').pop() || 'attachment';
     attachments.push({
       name,

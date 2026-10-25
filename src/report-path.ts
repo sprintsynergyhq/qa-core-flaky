@@ -33,7 +33,10 @@
  * original home directory. Cause rules and signatures read that text.
  * `redactHomeText` hides the username later, when output strings are built.
  * A structured file path with no report root still hides the username here,
- * and that rewrite does not add a warning. A single segment such as `/var/`,
+ * and that rewrite does not add a warning. A UNC path (`\\server\...` or
+ * `//server/...`), an extended path (`\\?\...`), and an SMB path (`smb://...`)
+ * stay absolute. They are not turned into a relative path first, because that
+ * drops the marker redaction needs. A single segment such as `/var/`,
  * `/Ready/`, or
  * `"/inventory.html"`, a quoted URL path such as `"/cart/checkout.html"`,
  * and prose such as `/and/or` stay as written.
@@ -132,6 +135,9 @@ export function toPortablePath(
   redactUser = true,
 ): string | undefined {
   if (file === undefined) return undefined;
+  // Normalize would turn `\\srv\Users\bob` into `/srv/Users/bob` and then a
+  // relative path, and the username would no longer look like a home.
+  if (isNetworkAbsolute(file)) return redactUser ? redactHomeText(file) : file;
   let normalized = stripTrailingSlash(normalizeSlashes(file));
   if (normalized === '') return '';
   const root = normalizeRoot(rootDir);
@@ -250,6 +256,10 @@ export type HomeMarks = ReadonlyMap<string, string>;
  * stays its own home. `^` is a path boundary. An escaped slash is not
  * rewritten to `/`. `\/home\/name` and `C:\/Users\/name` hide the username
  * and leave every other escape as written.
+ * A relative path with no leading slash is not a home. `users/list.spec.ts`,
+ * `home/page.spec.ts`, and `Users/Shared/x` stay as written. A JUnit
+ * attachment of the form `home/<name>/<more>` or `Users/<name>/<more>` is
+ * handled in the JUnit parser, not here.
  *
  * A letter before `:` is a drive letter only at the start of the text or
  * after a character that is not a letter or digit. `file:///` and `\\?\`
@@ -351,8 +361,7 @@ function findHome(text: string, from: number): HomeMatch | undefined {
       matchDriveHome(text, index) ??
       matchTildeHome(text, index) ??
       matchDotDotHome(text, index) ??
-      matchSlashHome(text, index) ??
-      matchBareFolderHome(text, index);
+      matchSlashHome(text, index);
     if (!hit) continue;
     if (hit.kind === 'skip') {
       if (hit.next <= index) continue;
@@ -369,24 +378,6 @@ function matchDriveHome(text: string, index: number): HomeMatch | undefined {
   const afterDrive = readSeparator(text, index + 2);
   if (afterDrive === undefined) return undefined;
   const folder = readHomeFolder(text, afterDrive, true);
-  if (!folder) return undefined;
-  return finishHome(text, index, folder.userStart);
-}
-
-/**
- * `home/alice/...` with no leading slash. A JUnit attachment can be stored
- * that way. The folder name is at most `users` (5 letters), so a longer
- * word is rejected without scanning it.
- */
-function matchBareFolderHome(text: string, index: number): HomeMatch | undefined {
-  const ch = text[index] ?? '';
-  if (ch !== 'h' && ch !== 'H' && ch !== 'u' && ch !== 'U') return undefined;
-  if (!isPathStart(text, index)) return undefined;
-  let end = index;
-  const cap = Math.min(text.length, index + 6);
-  while (end < cap && /[A-Za-z]/.test(text[end] ?? '')) end += 1;
-  if (end - index > 5) return undefined;
-  const folder = readHomeFolder(text, index, false);
   if (!folder) return undefined;
   return finishHome(text, index, folder.userStart);
 }
@@ -764,6 +755,16 @@ function isUncStart(value: string, index: number): boolean {
 }
 
 /**
+ * UNC (`\\server\...` or `//server/...`), extended (`\\?\...`), and SMB
+ * (`smb://...`, any case). These stay absolute so redaction still sees the
+ * home. `\\?\` is included because it starts with `\\`.
+ */
+function isNetworkAbsolute(value: string): boolean {
+  if (value.startsWith('\\\\') || value.startsWith('//')) return true;
+  return /^smb:\/\//i.test(value);
+}
+
+/**
  * A `/home/` or `/Users/` path left in the text on purpose.
  * `home` and `users` match in any case.
  */
@@ -870,6 +871,7 @@ function isPathNameChar(ch: string): boolean {
 }
 
 function shouldRewriteErrorToken(token: string, root: string | undefined): boolean {
+  if (isNetworkAbsolute(token)) return false;
   const normalized = normalizeSlashes(token);
   const stripped = stripLocationSuffix(normalized);
   if (root && (pathStartsWithRoot(stripped, root) || pathStartsWithRoot(normalized, root))) return true;

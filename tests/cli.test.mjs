@@ -540,3 +540,103 @@ test('parsing the JUnit fixture twice is byte identical', () => {
   assert.equal(first.stdout, second.stdout);
   assert.ok(first.stdout.endsWith('\n'));
 });
+
+test('a UNC, extended, or SMB path is redacted from JSON and JUnit', (t) => {
+  const dir = keepTemp(t, 'qa-core-flaky-unc-');
+  const unc = String.raw`at \\srv\Users\bob\proj\a.ts:3:1`;
+  const extended = String.raw`\\?\UNC\server\Users\carol\y`;
+  const smb = 'smb://server/Users/alice/z.ts';
+  const specs = [
+    ['unc.spec.ts', 'unc', unc],
+    ['ext.spec.ts', 'extended', extended],
+    ['smb.spec.ts', 'smb', smb],
+  ];
+  const jsonPath = path.join(dir, 'unc.json');
+  const xmlPath = path.join(dir, 'unc.xml');
+  fs.writeFileSync(
+    jsonPath,
+    JSON.stringify({
+      config: { rootDir: '/workspace/app' },
+      suites: specs.map(([file, title, message]) => ({
+        title: file,
+        file,
+        specs: [
+          {
+            title,
+            file,
+            tests: [
+              {
+                projectName: 'chromium',
+                expectedStatus: 'passed',
+                status: 'unexpected',
+                results: [
+                  {
+                    retry: 0,
+                    status: 'failed',
+                    duration: 1,
+                    errors: [{ message, stack: message }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      })),
+    }),
+  );
+  fs.writeFileSync(
+    xmlPath,
+    `<testsuites>${specs
+      .map(
+        ([file, title, message]) => `<testsuite hostname="chromium">
+          <testcase name="${title}" classname="${file}" file="${file}">
+            <failure message="path"><![CDATA[${message}]]></failure>
+          </testcase>
+        </testsuite>`,
+      )
+      .join('')}</testsuites>`,
+  );
+
+  function hidden(text, label) {
+    for (const name of ['alice', 'bob', 'carol']) {
+      assert.equal(text.includes(name), false, `${label} contains ${name}`);
+    }
+    assert.equal(text.includes('srv/Users'), false, `${label} made the UNC path relative`);
+    assert.equal(text.includes('../../srv'), false, `${label} made the UNC path relative`);
+    assert.equal(text.includes('<home>') || text.includes('&lt;home&gt;'), true, `${label} did not redact`);
+  }
+
+  for (const report of [jsonPath, xmlPath]) {
+    const parsed = run(['parse', report]);
+    assert.equal(parsed.status, 0, parsed.stderr);
+    const stored = JSON.parse(parsed.stdout).records.flatMap((record) =>
+      record.attempts.flatMap((attempt) =>
+        attempt.errors.flatMap((error) => [error.message, error.stack].filter((item) => item !== undefined)),
+      ),
+    );
+    assert.equal(stored.includes(unc), true, report);
+    assert.equal(stored.some((item) => item.includes('srv/Users') || item.includes('../../srv')), false, report);
+
+    const redacted = run(['parse', report, '--redact']);
+    assert.equal(redacted.status, 0, redacted.stderr);
+    hidden(redacted.stdout, `parse --redact ${path.basename(report)}`);
+
+    const out = path.join(dir, `${path.basename(report)}-out`);
+    fs.mkdirSync(out);
+    const triage = run(['triage', report, '--out-dir', out, '--fail-on', 'never']);
+    assert.equal(triage.status, 0, triage.stderr);
+    assert.equal(triage.stdout, '');
+    hidden(fs.readFileSync(path.join(out, 'triage.md'), 'utf8'), `triage.md ${path.basename(report)}`);
+    hidden(fs.readFileSync(path.join(out, 'triage.json'), 'utf8'), `triage.json ${path.basename(report)}`);
+    const asJson = run(['triage', report, '--json', '--fail-on', 'never']);
+    assert.equal(asJson.status, 0, asJson.stderr);
+    hidden(asJson.stdout, `triage --json ${path.basename(report)}`);
+
+    const causes = run(['causes', report]);
+    assert.equal(causes.status, 0, causes.stderr);
+    hidden(causes.stdout, `causes ${path.basename(report)}`);
+    const causesJson = run(['causes', report, '--json']);
+    assert.equal(causesJson.status, 0, causesJson.stderr);
+    hidden(causesJson.stdout, `causes --json ${path.basename(report)}`);
+  }
+});
