@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { detectFormat, homeMarks, parseJunit, parsePlaywrightJson, redactHomeText } from '../dist/index.js';
+import {
+  detectFormat,
+  homeMarks,
+  parseJunit,
+  parsePlaywrightJson,
+  redactHomeText,
+  redactParseResult,
+} from '../dist/index.js';
 
 const jsonPath = 'fixtures/reports/pw-1.60.0-outcomes.json';
 const junitPath = 'fixtures/reports/pw-1.60.0-outcomes.junit.xml';
@@ -702,4 +709,39 @@ test('two files that differ only by the home username stay distinct ids', () => 
   assert.equal(result.records[1].file, '<home~2>/proj/a.spec.ts');
   assert.equal(result.records[0].id.includes('alice'), false);
   assert.equal(result.records[1].id.includes('bob'), false);
+});
+
+test('redactParseResult hides a made-up home in source.reportPath', () => {
+  const paths = ['/home/alice/r.xml', 'C:\\Users\\alice\\r.xml'];
+  for (const reportPath of paths) {
+    const result = {
+      schemaVersion: 1,
+      records: [
+        {
+          id: 'a.spec.ts::default::t',
+          file: 'a.spec.ts',
+          project: 'default',
+          titlePath: ['t'],
+          expectedStatus: 'passed',
+          outcome: 'failed',
+          attempts: [
+            {
+              retry: 0,
+              status: 'failed',
+              durationMs: 1,
+              errors: [{ message: 'Error: gave up' }],
+              attachments: [],
+            },
+          ],
+          source: { format: 'junit', reportPath },
+        },
+      ],
+      warnings: [],
+    };
+    const hidden = redactParseResult(result);
+    assert.equal(hidden.records[0].source.reportPath, '<home>/r.xml');
+    assert.equal(hidden.records[0].source.reportPath, redactHomeText(reportPath));
+    assert.equal(result.records[0].source.reportPath, reportPath);
+    assert.equal(hidden.records[0].attempts[0].errors[0].message, 'Error: gave up');
+  }
 });

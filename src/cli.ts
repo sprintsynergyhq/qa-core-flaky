@@ -249,7 +249,13 @@ function formatCauses(result: ParseResult, testTimeoutMs: number | undefined, as
     .filter((record) => record.outcome === 'failed' || record.outcome === 'flaky')
     .map((record) => {
       const findings = classifyCauses(record, testTimeoutMs === undefined ? {} : { testTimeoutMs });
-      const marks = homeMarks([record.id, ...findings.flatMap((finding) => finding.evidence)]);
+      const titleRaw = record.titlePath[record.titlePath.length - 1] ?? record.id;
+      const marks = homeMarks([
+        record.id,
+        titleRaw,
+        record.file,
+        ...findings.flatMap((finding) => finding.evidence),
+      ]);
       return {
         id: redactHomeText(record.id, marks),
         findings: findings.map((finding) => ({

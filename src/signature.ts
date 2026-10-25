@@ -13,9 +13,11 @@ import { stripAnsi } from './report-path.js';
  * 5. Digits inside a `/tmp/`, `/private/tmp/`, or `/var/folders/` path become `N`.
  * 6. A UUID becomes `ID`. Digits after `id=` or `id:` become `N`.
  * 7. A count is rewritten only when it starts a call-log line. Optional
- *    spaces and an optional `-` come first, then the count, then `×` or `x`,
- *    then `locator`. That count becomes `N ×`. A count inside a quoted
- *    value, or on an Expected or Received line, stays.
+ *    spaces come first, then an optional `-` and the spaces after it, then
+ *    the count, then `×` or `x`, then `locator`. That count becomes `N ×`.
+ *    A count on an Expected or Received line stays. A quoted value which
+ *    runs onto a line starting with a count followed by `locator` can still
+ *    be rewritten.
  * 8. Runs of spaces or tabs become one space, then the ends are trimmed.
  *
  * Numbers in assertion values are kept, including `Expected: "1 × 4"`,
@@ -36,7 +38,7 @@ export function normalizeErrorSignature(text: string): string {
     'ID',
   );
   out = out.replace(/\bid[=:]\s*\d+/gi, 'id=N');
-  out = out.replace(/^([ \t]*-?[ \t]*)\d+[ \t]*[×x][ \t]+(?=locator\b)/gm, '$1N × ');
+  out = out.replace(/^([ \t]*(?:-[ \t]*)?)\d+[ \t]*[×x][ \t]+(?=locator\b)/gm, '$1N × ');
   out = out.replace(/[ \t]+/g, ' ');
   return out.trim();
 }

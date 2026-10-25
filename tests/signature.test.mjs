@@ -51,6 +51,18 @@ test('call-log repeat counts share a signature', () => {
   const dashedOther = '  - 2 × locator.click';
   assert.equal(normalizeErrorSignature(dashed), normalizeErrorSignature(dashedOther));
   assert.match(normalizeErrorSignature(dashed), /N × locator/);
+  assert.equal(normalizeErrorSignature('  - 9 × locator'), '- N × locator');
+  assert.equal(normalizeErrorSignature('    9 x locator'), 'N × locator');
+  assert.equal(normalizeErrorSignature('9× locator'), 'N × locator');
+  assert.equal(normalizeErrorSignature('-9 × locator'), '-N × locator');
+});
+
+test('a long run of spaces does not stall call-log normalization', () => {
+  const text = [' '.repeat(60000), ' '.repeat(60000), ' '.repeat(60000)].join('\n');
+  const started = Date.now();
+  const signature = normalizeErrorSignature(text);
+  assert.equal(Date.now() - started < 1000, true);
+  assert.equal(signature, '');
 });
 
 test('a count inside an assertion value does not share a signature', () => {

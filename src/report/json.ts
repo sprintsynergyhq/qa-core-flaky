@@ -74,16 +74,17 @@ function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefi
   const findings = classifyCauses(merged, classifyOptions);
   const decision = decideVerdict(records, findings, classifyOptions);
   const ordered = orderCauses(decision.findings, decision.cause);
-  // Dedupe the original lines first. Different usernames in this entry then
-  // become `<home>`, `<home~2>`, and so on, so the drift stays readable.
+  // Dedupe the original lines first. Number homes from the id, then the
+  // title and file, then the evidence, so the id stays the same when only
+  // the error text changes. Later usernames are `<home~2>`, `<home~3>`.
   const rawEvidence = flattenEvidence(ordered, decision.note);
   const titleRaw = base.titlePath[base.titlePath.length - 1] ?? base.id;
   const marks = homeMarks([
+    base.id,
+    titleRaw,
+    base.file,
     ...rawEvidence,
     ...ordered.flatMap((finding) => finding.evidence),
-    base.id,
-    base.file,
-    titleRaw,
   ]);
   const redact = (value: string) => redactHomeText(value, marks);
   const evidence = rawEvidence.map((line) => redact(line));
