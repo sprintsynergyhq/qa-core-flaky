@@ -675,7 +675,7 @@ test('rerun passes the typed config path to Playwright', async (t) => {
     }, 20000);
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString();
-      if (stderr.includes(config) || stderr.includes('Cannot find test file')) {
+      if (stderr.includes('playwright.root.config.ts') || stderr.includes('Cannot find test file')) {
         clearTimeout(timer);
         stop();
       }
@@ -686,7 +686,17 @@ test('rerun passes the typed config path to Playwright', async (t) => {
     });
   });
   assert.equal(stderr.includes('Cannot find test file'), false, stderr);
-  assert.equal(stderr.includes(config), true, stderr);
+  assert.match(stderr, /--config/);
+  assert.match(stderr, /playwright\.root\.config\.ts/);
+  assert.equal(stderr.includes('../playwright.root.config.ts'), false);
+  const home = os.homedir();
+  if (config.startsWith(`${home}${path.sep}`)) {
+    assert.equal(stderr.includes(config), false, stderr);
+    assert.match(stderr, /<home>\/.*playwright\.root\.config\.ts/);
+    assert.equal(stderr.includes(path.basename(home)), false, stderr);
+  } else {
+    assert.equal(stderr.includes(config), true, stderr);
+  }
 });
 
 test('an extended UNC home is redacted anywhere in a line', (t) => {
