@@ -834,6 +834,39 @@ test('printed paths and errors do not contain the username from the title', asyn
   assert.match(seen[0], /the title was redacted, so -g is omitted here/);
 });
 
+test('a missing Playwright beside the config is not a missing test file', async () => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-nopw-config-'));
+  const kit = path.join(parent, 'saucedemo-flaky-kit');
+  fs.mkdirSync(path.join(kit, 'tests'), { recursive: true });
+  fs.writeFileSync(path.join(kit, 'tests', 'flaky-slow-user.spec.ts'), 'test\n');
+  fs.writeFileSync(path.join(kit, 'playwright.config.ts'), 'export default {};\n');
+  const item = record('slow user reaches the inventory', [attempt('failed', VALUE)]);
+  item.file = 'flaky-slow-user.spec.ts';
+  item.id = 'flaky-slow-user.spec.ts::chromium::slow user reaches the inventory';
+  const plan = planReruns([item], {
+    times: 1,
+    modes: ['repeat'],
+    config: 'saucedemo-flaky-kit/playwright.config.ts',
+  });
+  try {
+    await assert.rejects(
+      executePlan({
+        records: [item],
+        plan,
+        cwd: parent,
+        print: () => {},
+      }),
+      (error) => {
+        assert.match(error.message, /Local Playwright was not found/);
+        assert.equal(error.message.includes('Cannot find test file'), false);
+        return true;
+      },
+    );
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
 test('a missing local Playwright is reported as itself', async () => {
   const item = record('same value', [attempt('failed', VALUE)]);
   const plan = planReruns([item], { times: 1, modes: ['repeat'] });

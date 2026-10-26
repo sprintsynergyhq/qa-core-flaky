@@ -967,7 +967,7 @@ test('the printed config path runs from the folder where triage ran', { timeout:
   };
   const spec = [
     "import { test, expect } from '@playwright/test';",
-    "test('sample', () => {",
+    "test('slow user reaches the inventory', () => {",
     '  expect(1).toBe(1);',
     '});',
     '',
@@ -985,11 +985,11 @@ test('the printed config path runs from the folder where triage ran', { timeout:
   const writeProject = (dir) => {
     fs.mkdirSync(path.join(dir, 'tests'), { recursive: true });
     fs.mkdirSync(path.join(dir, 'reports'), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'tests', 'slow.spec.ts'), spec);
+    fs.writeFileSync(path.join(dir, 'tests', 'flaky-slow-user.spec.ts'), spec);
     fs.writeFileSync(path.join(dir, 'playwright.config.ts'), config);
   };
   const writeReport = (dir) => {
-    const reportPath = path.join(dir, 'reports', 'session.json');
+    const reportPath = path.join(dir, 'reports', 'run-1.json');
     fs.writeFileSync(
       reportPath,
       JSON.stringify({
@@ -1000,12 +1000,12 @@ test('the printed config path runs from the folder where triage ran', { timeout:
         },
         suites: [
           {
-            title: 'slow.spec.ts',
-            file: 'slow.spec.ts',
+            title: 'flaky-slow-user.spec.ts',
+            file: 'flaky-slow-user.spec.ts',
             specs: [
               {
-                title: 'sample',
-                file: 'slow.spec.ts',
+                title: 'slow user reaches the inventory',
+                file: 'flaky-slow-user.spec.ts',
                 tests: [
                   {
                     projectName: 'chromium',
@@ -1043,31 +1043,34 @@ test('the printed config path runs from the folder where triage ran', { timeout:
   const assertRan = (result, label) => {
     const output = `${result.stdout}\n${result.stderr}`;
     assert.equal(result.error, undefined, output);
-    assert.notEqual(result.status, 1, `${label}\n${output}`);
+    assert.ok(result.status === 0 || result.status === 2, `${label} exit ${result.status}\n${output}`);
     assert.equal(output.includes('Cannot find test file'), false, output);
     assert.equal(output.includes('Local Playwright was not found'), false, output);
     assert.match(output, /Commands \d+/, output);
-    assert.equal(result.stdout.includes('sample'), true, output);
+    assert.match(result.stdout, /Reruns:/, output);
+    assert.equal(result.stdout.includes('slow user reaches the inventory'), true, output);
   };
 
   try {
     fs.mkdirSync(parent, { recursive: true });
     writeProject(kit);
-    linkModules(parent);
+    // The real kit keeps node_modules inside the kit. The parent has none.
     linkModules(kit);
+    assert.equal(fs.existsSync(path.join(parent, 'node_modules')), false);
     writeReport(kit);
 
-    const fromKit = runIn(kit, ['triage', 'reports/session.json', '--fail-on', 'never', '--json']);
+    const fromKit = runIn(kit, ['triage', 'reports/run-1.json', '--fail-on', 'never', '--json']);
     assert.equal(fromKit.status, 0, fromKit.stderr);
     const kitStep = JSON.parse(fromKit.stdout).entries[0].nextStep;
     assert.match(kitStep, /--config 'playwright\.config\.ts'/);
     assert.equal(kitStep.includes('../playwright.config.ts'), false, kitStep);
-    assert.match(kitStep, /--from 'reports\/session\.json'/);
+    assert.match(kitStep, /--from 'reports\/run-1\.json'/);
+    assert.match(kitStep, /slow user reaches the inventory/);
     assertRan(paste(kitStep, kit), 'kit');
 
     const fromParent = runIn(parent, [
       'triage',
-      'saucedemo-flaky-kit/reports/session.json',
+      'saucedemo-flaky-kit/reports/run-1.json',
       '--fail-on',
       'never',
       '--json',
@@ -1075,18 +1078,21 @@ test('the printed config path runs from the folder where triage ran', { timeout:
     assert.equal(fromParent.status, 0, fromParent.stderr);
     const parentStep = JSON.parse(fromParent.stdout).entries[0].nextStep;
     assert.match(parentStep, /--config 'saucedemo-flaky-kit\/playwright\.config\.ts'/);
-    assert.match(parentStep, /--from 'saucedemo-flaky-kit\/reports\/session\.json'/);
+    assert.match(parentStep, /--from 'saucedemo-flaky-kit\/reports\/run-1\.json'/);
+    assert.match(parentStep, /slow user reaches the inventory/);
     assertRan(paste(parentStep, parent), 'parent');
 
     const e2e = path.join(project, 'e2e');
     writeProject(e2e);
+    // Hoisted monorepo: node_modules is only on the parent of the config.
     linkModules(project);
+    assert.equal(fs.existsSync(path.join(e2e, 'node_modules')), false);
     writeReport(e2e);
-    const fromProject = runIn(project, ['triage', 'e2e/reports/session.json', '--fail-on', 'never', '--json']);
+    const fromProject = runIn(project, ['triage', 'e2e/reports/run-1.json', '--fail-on', 'never', '--json']);
     assert.equal(fromProject.status, 0, fromProject.stderr);
     const projectStep = JSON.parse(fromProject.stdout).entries[0].nextStep;
     assert.match(projectStep, /--config 'e2e\/playwright\.config\.ts'/);
-    assert.match(projectStep, /--from 'e2e\/reports\/session\.json'/);
+    assert.match(projectStep, /--from 'e2e\/reports\/run-1\.json'/);
     assertRan(paste(projectStep, project), 'e2e');
   } finally {
     fs.rmSync(parent, { recursive: true, force: true });
