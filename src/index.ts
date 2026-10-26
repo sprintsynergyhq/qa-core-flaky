@@ -29,6 +29,8 @@ export { fixTemplates, suggestFix } from './fixes/templates.js';
 export { buildTriageReport, renderTriageJson } from './report/json.js';
 export type { BuildTriageOptions } from './report/json.js';
 export { renderTriageMarkdown } from './report/markdown.js';
+export { renderTriageHtml, writeTriageHtml } from './report/html.js';
+export type { HtmlRenderOptions } from './report/html.js';
 export { writeReportPair } from './report/pair.js';
 export type { PairOps } from './report/pair.js';
 export { orderDependencyEvidence } from './signals/order.js';

@@ -16,6 +16,7 @@ import { writeReportPair } from './report/pair.js';
 import { executePlan, guardPipe, isStoppedRun } from './rerun/run.js';
 import { formatCap, planReruns } from './rerun/plan.js';
 import { renderTriageMarkdown } from './report/markdown.js';
+import { renderTriageHtml, writeTriageHtml } from './report/html.js';
 import { buildTriageReport, renderTriageJson } from './report/json.js';
 
 /**
@@ -26,12 +27,12 @@ import { buildTriageReport, renderTriageJson } from './report/json.js';
  *                     [--out <file>] [--redact]
  *   qa-core-flaky causes <report> [--format json|junit] [--json]
  *                     [--test-timeout <ms>] [--root <dir>] [--out <file>]
- *   qa-core-flaky triage <report...> [--out-dir <dir>] [--json]
- *                     [--fail-on findings|never] [--timestamp] [--root <dir>]
+ *   qa-core-flaky triage <report...> [--out-dir <dir>] [--json] [--html]
+ *                     [--html-no-redact] [--fail-on findings|never] [--timestamp] [--root <dir>]
  *   qa-core-flaky rerun --from <report.json> [--times 5] [--retries <n>]
  *                     [--modes repeat,isolated] [--config <playwright.config>]
  *                     [--only <id>] [--max-tests 20] [--commit <sha>]
- *                     [--root <dir>] [--out-dir <dir>]
+ *                     [--root <dir>] [--html] [--out-dir <dir>]
  *
  * parse and causes exit 0 on success and 1 on error.
  * triage exits 0 when the report has no entries, 2 when it has entries
@@ -60,10 +61,14 @@ Options:
   --run-id <id>               Store this run id on every record
   --redact                    parse: hide home usernames in the printed records
   --out <file>                parse, causes: write the output to this file
-  --out-dir <dir>             triage: write triage.json and triage.md here.
+  --out-dir <dir>             triage, rerun: write triage.json and triage.md here.
                               Do not use a directory under /proc. Creating one
                               can hang (a Node bug) and this command does not
                               probe /proc.
+  --html                      triage, rerun: also write triage.html in --out-dir.
+                              The page is self-contained. Home usernames are hidden.
+  --html-no-redact            triage, rerun: write triage.html without hiding home
+                              usernames. Requires --html. Do not share that file.
   --json                      causes: print a JSON array. triage: also print JSON
   --fail-on <findings|never>  triage: exit 2 when there are entries (default findings)
   --timestamp                 triage: include generatedAt. Output then changes every run
@@ -109,6 +114,8 @@ type FlagValues = {
   config?: string;
   only?: string[];
   'max-tests'?: string;
+  html?: boolean;
+  'html-no-redact'?: boolean;
 };
 
 function main(): void {
@@ -164,6 +171,8 @@ function run(args: readonly string[]): void | Promise<void> {
         config: { type: 'string' },
         only: { type: 'string', multiple: true },
         'max-tests': { type: 'string' },
+        html: { type: 'boolean' },
+        'html-no-redact': { type: 'boolean' },
       },
     }));
   } catch (error) {
@@ -195,6 +204,9 @@ function run(args: readonly string[]): void | Promise<void> {
     fail(`Unknown command ${command}`);
   }
   assertNoRerunFlags(values);
+  if (values.html === true || values['html-no-redact'] === true) {
+    fail('--html is only valid for triage and rerun');
+  }
   if (values['out-dir'] !== undefined || values['fail-on'] !== undefined || values.timestamp === true) {
     fail('That option is only valid for triage');
   }
@@ -230,8 +242,9 @@ function run(args: readonly string[]): void | Promise<void> {
 function runTriage(reportPaths: readonly string[], values: FlagValues): void {
   if (reportPaths.length === 0) fail('Usage: qa-core-flaky triage <report...> [--out-dir <dir>]');
   if (values.out !== undefined) fail('--out is not used by triage. Use --out-dir.');
+  assertHtmlFlags(values);
   const format = readFormat(values.format);
-  const failOn = readFailOn(values['fail-on']);
+  readFailOn(values['fail-on']);
   const meta = {
     commitSha: values.commit,
     branch: values.branch,
@@ -256,16 +269,7 @@ function runTriage(reportPaths: readonly string[], values: FlagValues): void {
     testTimeoutMs: readTimeout(values['test-timeout']),
     timestamp: values.timestamp === true ? new Date().toISOString() : undefined,
   });
-  const json = renderTriageJson(report);
-  const markdown = renderTriageMarkdown(report);
-  if (values['out-dir'] !== undefined) {
-    writeTriagePair(values['out-dir'], json, markdown);
-  }
-  if (values['out-dir'] === undefined || values.json === true) {
-    process.stdout.write(values.json === true ? json : markdown);
-  }
-  const code = failOn === 'never' || report.entries.length === 0 ? 0 : 2;
-  if (code !== 0) process.exitCode = code;
+  publishTriage(values, report, renderTriageJson(report), renderTriageMarkdown(report));
 }
 
 async function runRerun(extra: readonly string[], values: FlagValues): Promise<void> {
@@ -274,6 +278,7 @@ async function runRerun(extra: readonly string[], values: FlagValues): Promise<v
   }
   if (values.out !== undefined) fail('--out is not used by rerun. Use --out-dir.');
   if (values.redact === true) fail('--redact is only valid for parse');
+  assertHtmlFlags(values);
   const reportPath = values.from;
   let records: TestRecord[];
   try {
@@ -331,9 +336,36 @@ async function runRerun(extra: readonly string[], values: FlagValues): Promise<v
     testTimeoutMs: readTimeout(values['test-timeout']),
     timestamp: values.timestamp === true ? new Date().toISOString() : undefined,
   });
-  const json = renderTriageJson(report);
-  const markdown = renderTriageMarkdown(report);
-  if (values['out-dir'] !== undefined) writeTriagePair(values['out-dir'], json, markdown);
+  publishTriage(values, report, renderTriageJson(report), renderTriageMarkdown(report));
+}
+
+function assertHtmlFlags(values: FlagValues): void {
+  if (values['html-no-redact'] === true && values.html !== true) {
+    fail('--html-no-redact requires --html');
+  }
+  if (values.html === true && values['out-dir'] === undefined) {
+    fail('--html needs --out-dir');
+  }
+}
+
+function publishTriage(values: FlagValues, report: ReturnType<typeof buildTriageReport>, json: string, markdown: string): void {
+  if (values['out-dir'] !== undefined) {
+    writeTriagePair(values['out-dir'], json, markdown);
+    if (values.html === true) {
+      try {
+        writeTriageHtml(
+          values['out-dir'],
+          renderTriageHtml(report, {
+            redact: values['html-no-redact'] !== true,
+            version: readVersion(),
+          }),
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'unknown error';
+        fail(`Cannot write ${values['out-dir']}: ${oneLine(detail)}`);
+      }
+    }
+  }
   if (values['out-dir'] === undefined || values.json === true) {
     process.stdout.write(values.json === true ? json : markdown);
   }

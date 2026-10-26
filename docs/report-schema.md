@@ -60,6 +60,10 @@ When more than one commit is present, the cause list, the evidence, and the sugg
 
 The review line is `Review status: Needs Review.`
 
+## HTML
+
+`--html` writes `triage.html` in `--out-dir`, next to `triage.json` and `triage.md`. `rerun` accepts the same flag. The page is built from this schema. It does not add a verdict, a cause, or a count. Home usernames are hidden again with the same rules as `parse --redact`, unless `--html-no-redact` is set. The file inlines its CSS and its script. It does not load a network resource. A Content-Security-Policy meta tag allows those inline blocks by hash and blocks every other source. `--html` needs `--out-dir`. Without script, the table is still readable and the filters stay hidden.
+
 ## Exit Codes
 
 | Code | When |

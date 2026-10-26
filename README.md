@@ -33,6 +33,26 @@ The format is detected from the file contents. The root element must be `testsui
 
 `triage` writes `triage.json` and `triage.md` for each failed or flaky test. The JSON schema is [docs/report-schema.md](docs/report-schema.md). The verdict rows are [docs/verdicts.md](docs/verdicts.md). The default exit code is 2 when the report has at least one entry, and 0 when it has none. `--fail-on never` exits 0 after the files are written. A tool error exits 1. Do not point `--out-dir` at a directory under `/proc`. Creating a directory there can hang, which is a Node bug, and the command does not probe `/proc`.
 
+## HTML Report
+
+`--html` writes `triage.html` in `--out-dir`, beside `triage.json` and `triage.md`. `rerun` accepts the same flag when it writes a triage report.
+
+```sh
+node dist/cli.js triage fixtures/reports/pw-1.60.0-outcomes.json --out-dir /tmp/qa-core-flaky-triage --html --fail-on never
+```
+
+The page is one file. CSS and script are inline. It does not call the network, load a font, or load an image. Open it from disk, or attach the file to a message. The table is still readable when script is off. Filters, sorting, and the copy button need script.
+
+The header is the report title. It shows the generated time when the JSON has `generatedAt`, and a commit when a signal names one. Branch and run id are shown when the JSON has those fields. Summary cards count the tests in the report and each verdict. A chart counts the primary cause. The table lists the test, verdict, cause, confidence, failed attempts out of the total, and runs seen. Open a row for the evidence, the signals, the suggested fix, the next step, rerun counts when the JSON has them, and the review status. A history strip is drawn when a test was seen in more than one run.
+
+Home usernames are hidden, with the same rules as `parse --redact`. That is the file to share. `--html-no-redact` leaves those names visible. Do not share a file made with that flag.
+
+The screenshots are a SauceDemo run stored in `fixtures/reports/saucedemo-kit-triage.json`. The report lists 6 flaky tests. Tests that passed are not listed.
+
+![Triage report, light](examples/triage.png)
+
+![Triage report, dark](examples/triage-dark.png)
+
 `rerun` runs the failing tests again with Playwright and merges the new attempts. `--retries` defaults to 0 so a retry cannot hide the first failure. `--root` is the JUnit project root. The modes and the safety rules are in [docs/rerun.md](docs/rerun.md). Unit tests do not launch a browser.
 
 ## Demo

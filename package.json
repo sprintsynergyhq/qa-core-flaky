@@ -18,7 +18,8 @@
     "demo:live": "playwright test --config demo/saucedemo/playwright.config.ts",
     "demo:record": "node scripts/record-demo.mjs",
     "demo:triage": "node dist/cli.js triage demo/saucedemo/reports/recorded-seed-443.json --fail-on never",
-    "fixtures": "node scripts/make-fixtures.mjs"
+    "fixtures": "node scripts/make-fixtures.mjs",
+    "test:html": "npm run build && playwright test --config playwright.html.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.60.0",
