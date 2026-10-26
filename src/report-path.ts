@@ -61,16 +61,18 @@ const OUTSIDE_ROOT_WARNING =
   'File path is outside the report root and was rewritten to a relative path: ';
 const ABSOLUTE_WARNING = 'File path was absolute and was rewritten to a relative path: ';
 const WINDOWS_WARNING = 'File path is a Windows path and was normalized: ';
+const OUTSIDE_HOME_WARNING =
+  'File path is outside the home of the report root and was left absolute: ';
 
 /**
  * A path token after a boundary.
- * `file://` and a drive letter may lead the token. `\\?\` and `//?/` stay
- * on that drive, so `\\?\C:\...` is one token and the colon does not split
- * it. `:12` or `:12:3` may follow it. Quotes, brackets, and the boundary
- * characters stay outside.
+ * `file://` and a drive letter may lead the token. `\\?\`, `//?/`, `\\.\`,
+ * and `//./` stay on that drive, so `\\?\C:\...` and `\\.\C:\...` are one
+ * token and the colon does not split them. `:12` or `:12:3` may follow.
+ * Quotes, brackets, and the boundary characters stay outside.
  */
 const TEXT_TOKEN =
-  /(^|[\s"'=(`\[{:])((?:(?:\\\\[?]\\|\/\/\?\/)?[A-Za-z]:[\\/]|file:\/\/)?[^\s"'=()<>|`\[\]{}:]+(?::\d+)*)/g;
+  /(^|[\s"'=(`\[{:])((?:(?:\\\\[.?]\\|\/\/[.?]\/)?[A-Za-z]:[\\/]|file:\/\/)?[^\s"'=()<>|`\[\]{}:]+(?::\d+)*)/g;
 
 const TRAILING_PUNCTUATION = /[,.;)]+$/;
 
@@ -147,6 +149,11 @@ export function toPortablePath(
   // as any other path under that root. The check is case-insensitive and
   // understands `\\?\UNC\` and `\\?\C:\`. Outside the root, or with no root,
   // the original text stays absolute so a later redaction still sees the home.
+  const escaped = root ? dotDotEscapedRelative(file, root) : undefined;
+  if (escaped !== undefined) {
+    pushWarning(warnings, `${OUTSIDE_ROOT_WARNING}${escaped}`);
+    return escaped;
+  }
   const inside = root ? portableInsideRoot(file, root) : undefined;
   if (inside !== undefined) return inside;
   if (isNetworkAbsolute(file)) return redactUser ? redactHomeText(file) : file;
@@ -164,6 +171,14 @@ export function toPortablePath(
   if (isWindowsDrivePath(normalized) && !sameDrive(root, normalized)) {
     pushWarning(warnings, `${WINDOWS_WARNING}${normalized}`);
     return normalized;
+  }
+  // Another user's home on this drive would become `../../<user>/...`.
+  // That relative form drops `Users/` or `home/`, so later redaction cannot
+  // see the username. Leave the normalized absolute path instead.
+  if (root && outsideOwnHome(root, normalized)) {
+    const shown = redactHomeText(normalized);
+    pushWarning(warnings, `${OUTSIDE_HOME_WARNING}${shown}`);
+    return redactUser ? shown : normalized;
   }
   const rewritten =
     root && isAbsolutePath(root) ? relativeFrom(root, normalized) : stripAbsolutePrefix(normalized);
@@ -271,9 +286,14 @@ export type HomeMarks = ReadonlyMap<string, string>;
  * `home/page.spec.ts`, and `Users/Shared/x` stay as written. A JUnit
  * attachment of the form `home/<name>/<more>` or `users/<name>/<more>`, in
  * any case, is handled in the JUnit parser, not here. `Users/Shared/`,
- * `Users/Public/`, and `Users/Default/` are not usernames there either.
- * The same three names stay on an absolute path: `C:\Users\Public`,
- * `C:\Users\Shared`, `C:\Users\Default`, and `/Users/Public`.
+ * `Users/Public/`, `Users/Default/`, `Users/Default User/`, and
+ * `Users/All Users/` are not usernames there either.
+ * The same names stay on an absolute path: `C:\Users\Public`,
+ * `C:\Users\Shared`, `C:\Users\Default`, `C:\Users\Default User`,
+ * `C:\Users\All Users`, and `/Users/Public`.
+ * `C:\Users\Public\..\zbob\x.ts` climbs out of the exempt folder, so `zbob`
+ * is still hidden. `C:\Users\Public C:\Users\zbob\x` does not join `Public`
+ * to the next drive letter.
  *
  * A letter before `:` is a drive letter only at the start of the text or
  * after a character that is not a letter or digit. `file:///` and `\\?\`
@@ -287,7 +307,10 @@ export type HomeMarks = ReadonlyMap<string, string>;
  * starts with a letter, a digit, or `_`, and a `/` or the end of the path
  * follows. `~/proj` is not, because it has no username. `~` inside
  * `locator('...')` or `locator("...")` is a CSS combinator and stays.
- * A path boundary may be `,`, `;`, `<`, `>`, or `^`.
+ * A path boundary may be `,`, `;`, `<`, `>`, `|`, or `^`.
+ * `/home/a/x|/home/b/y` hides both usernames. A home glued to a word, such
+ * as `at/home/bob/a`, is not a home: the same shape is an app route such as
+ * `/api/home/settings/save`.
  * `file://localhost/home/...` is a home. `../../../home/bob/...` is a home.
  * `\\server\Users\bob`, `\\?\UNC\server\Users\bob`, `//server/Users/bob`,
  * `smb://server/Users/bob`, `SMB://server/users/bob`, `x\\Users\\bob`, and
@@ -391,8 +414,9 @@ function matchDriveHome(text: string, index: number): HomeMatch | undefined {
   if (!isDriveLetter(text, index)) return undefined;
   const afterDrive = readSeparator(text, index + 2);
   if (afterDrive === undefined) return undefined;
-  const folder = readHomeFolder(text, afterDrive, true);
-  if (!folder || reservedUsersHome(text, folder)) return undefined;
+  const folder = readHomeFolder(text, afterDrive);
+  if (!folder) return undefined;
+  if (reservedUsersHome(text, folder)) return matchClimbOut(text, folder.userStart);
   return finishHome(text, index, folder.userStart);
 }
 
@@ -402,8 +426,9 @@ function matchSlashHome(text: string, index: number): HomeMatch | undefined {
   if (text[index] === '\\' && text[index - 1] === '\\') return undefined;
   const afterSep = readSeparator(text, index);
   if (afterSep === undefined) return undefined;
-  const folder = readHomeFolder(text, afterSep, false);
-  if (!folder || reservedUsersHome(text, folder)) return undefined;
+  const folder = readHomeFolder(text, afterSep);
+  if (!folder) return undefined;
+  if (reservedUsersHome(text, folder)) return matchClimbOut(text, folder.userStart);
   // A backslash home does not need a path boundary. `x\\Users\\bob` and
   // `\\server\Users\bob` are still home directories.
   if (text[index] !== '\\' && !slashContextOk(text, index)) return undefined;
@@ -452,19 +477,19 @@ function matchDotDotHome(text: string, index: number): HomeMatch | undefined {
   if (!isDotDotStart(text, index)) return undefined;
   let cursor = index;
   while (text.startsWith('../', cursor) || text.startsWith('..\\', cursor)) cursor += 3;
-  const folder = readHomeFolder(text, cursor, false);
+  const folder = readHomeFolder(text, cursor);
   if (!folder || reservedUsersHome(text, folder)) return undefined;
   return finishHome(text, index, folder.userStart);
 }
 
 function isMarkedStart(text: string, index: number): boolean {
   if (index === 0) return true;
-  return /[\s"'=(`\[{:,;<>^]/.test(text[index - 1] ?? '');
+  return /[\s"'=(`\[{:,;<>^|]/.test(text[index - 1] ?? '');
 }
 
 function isDotDotStart(text: string, index: number): boolean {
   if (index === 0) return true;
-  return /[\s"'=(`\[{:,;<>^/\\]/.test(text[index - 1] ?? '');
+  return /[\s"'=(`\[{:,;<>^|/\\]/.test(text[index - 1] ?? '');
 }
 
 /**
@@ -519,11 +544,7 @@ function readSeparator(text: string, index: number): number | undefined {
   return end;
 }
 
-function readHomeFolder(
-  text: string,
-  start: number,
-  _drive: boolean,
-): { userStart: number; folder: string } | undefined {
+function readHomeFolder(text: string, start: number): { userStart: number; folder: string } | undefined {
   let end = start;
   while (end < text.length && /[A-Za-z]/.test(text[end] ?? '')) end += 1;
   if (end === start) return undefined;
@@ -535,9 +556,50 @@ function readHomeFolder(
   return { userStart: afterName, folder: name };
 }
 
-/** `Public`, `Shared`, and `Default` under `Users` are shared folders, not usernames. */
+/**
+ * Shared Windows folders, not usernames.
+ * `Default User` and `All Users` are the older names of `Default` and the
+ * shared profile. A space is part of those names.
+ */
 function reservedUsersSegment(username: string): boolean {
-  return /^(?:shared|public|default)$/iu.test(username);
+  return /^(?:shared|public|default|default user|all users)$/iu.test(username);
+}
+
+/**
+ * `Users\Public\..\zbob\...` leaves the exempt folder. Hide `zbob`.
+ * The exempt folder itself stays in the text.
+ */
+function matchClimbOut(text: string, userStart: number): HomeMatch | undefined {
+  const userEnd = readUsernameEnd(text, userStart);
+  if (userEnd === userStart) return undefined;
+  if (!reservedUsersSegment(text.slice(userStart, userEnd))) return undefined;
+  let index = userEnd;
+  let climbed = false;
+  while (index < text.length) {
+    const sep = readSeparator(text, index);
+    if (sep === undefined) return undefined;
+    if (text.startsWith('..', sep) && isDotSegmentEnd(text, sep + 2)) {
+      climbed = true;
+      index = sep + 2;
+      continue;
+    }
+    if (text.startsWith('.', sep) && isDotSegmentEnd(text, sep + 1)) {
+      index = sep + 1;
+      continue;
+    }
+    if (!climbed) return undefined;
+    const landed = readUsernameEnd(text, sep);
+    if (landed === sep) return undefined;
+    if (reservedUsersSegment(text.slice(sep, landed))) return undefined;
+    // Keep the separator before the username so `Public\..\<home>` stays readable.
+    return finishHome(text, sep, sep);
+  }
+  return undefined;
+}
+
+function isDotSegmentEnd(text: string, index: number): boolean {
+  const next = text[index];
+  return next === undefined || next === '/' || next === '\\';
 }
 
 function reservedUsersHome(text: string, folder: { userStart: number; folder: string }): boolean {
@@ -565,8 +627,9 @@ function slashContextOk(text: string, index: number): boolean {
   if (isKnownHomePrefix(before)) return true;
   if (before.endsWith('file://localhost')) return true;
   // `//server/Users/...` and `\\server\Users\...` keep the server.
-  if (/(?:^|[\s"'=(`\[{:,;<>^])[/\\]{2}[^/\\]+$/.test(before)) return true;
-  if (/(?:^|[\s"'=(`\[{:,;<>^])smb:\/\/[^/\\]+$/i.test(before)) return true;
+  if (isExtendedUncServer(before)) return true;
+  if (/(?:^|[\s"'=(`\[{:,;<>^|])[/\\]{2}[^/\\]+$/.test(before)) return true;
+  if (/(?:^|[\s"'=(`\[{:,;<>^|])smb:\/\/[^/\\]+$/i.test(before)) return true;
   return isPathStart(text, index);
 }
 
@@ -646,6 +709,10 @@ function readUsernameEnd(text: string, start: number): number {
     const ch = text[index] ?? '';
     if (ch === '/' || ch === '\\' || ch === '\n' || ch === '\r') break;
     if (ch === ' ' || ch === '\t') {
+      let look = index;
+      while (text[look] === ' ' || text[look] === '\t') look += 1;
+      // `Public C:\Users\...` is two paths. The drive starts the next one.
+      if (isDriveLetter(text, look)) break;
       if (allowSpace) {
         index += 1;
         continue;
@@ -679,6 +746,8 @@ function separatorFollowsOnLine(text: string, start: number): boolean {
   for (let index = start; index < text.length; index += 1) {
     const ch = text[index] ?? '';
     if (ch === '\n' || ch === '\r') return false;
+    // A later drive is its own path. `Public C:\Users\...` is not one username.
+    if (isDriveLetter(text, index)) return false;
     if (ch === '/' || ch === '\\') return true;
     if (ch === ' ' || ch === '\t') continue;
     if (
@@ -711,7 +780,7 @@ function isPathStart(text: string, index: number): boolean {
   if (index === 0) return true;
   if (text.slice(Math.max(0, index - 7), index) === 'file://') return true;
   const prev = text[index - 1] ?? '';
-  if (!/[\s"'=(`\[{:,;<>^]/.test(prev)) return false;
+  if (!/[\s"'=(`\[{:,;<>^|]/.test(prev)) return false;
   if (/\s/.test(prev)) {
     const method = /([A-Za-z]+)\s+$/.exec(lookbehind(text, index, 80));
     if (method && /^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(method[1] ?? '')) return false;
@@ -762,23 +831,36 @@ function readMixedTail(value: string, start: number): { text: string; next: numb
   if (index >= value.length || isDriveLetter(value, index) || isUncStart(value, index)) return undefined;
   const segmentAt = index;
   let sawBackslash = false;
-  while (index < value.length) {
-    const ch = value[index] ?? '';
-    if (isTailStop(ch) || /\s/.test(ch) || ch === '/') break;
-    if (index !== segmentAt && (isDriveLetter(value, index) || isUncStart(value, index))) break;
-    if (ch === '\\') {
-      if (value[index + 1] === '\\') break;
-      if (isDriveLetter(value, index + 1)) break;
-      sawBackslash = true;
-      text += '/';
-      index += 1;
-      continue;
-    }
-    text += ch;
-    index += 1;
+  let cursor = index;
+  while (cursor < value.length) {
+    const ch = value[cursor] ?? '';
+    if (isTailStop(ch) || /\s/.test(ch)) break;
+    if (cursor !== segmentAt && (isDriveLetter(value, cursor) || isUncStart(value, cursor))) break;
+    if (ch === '\\' && value[cursor + 1] === '\\') break;
+    if (ch === '\\' && isDriveLetter(value, cursor + 1)) break;
+    if (isEmbeddedHome(value, cursor)) break;
+    if (ch === '\\') sawBackslash = true;
+    cursor += 1;
   }
   if (!sawBackslash) return undefined;
+  while (index < cursor) {
+    const ch = value[index] ?? '';
+    if (ch === '\\') {
+      text += '/';
+      while (value[index + 1] === '\\') index += 1;
+    } else {
+      text += ch;
+    }
+    index += 1;
+  }
   return { text, next: index };
+}
+
+/** A `/home/`, `/Users/`, `\home\`, or `\Users\` segment. The tail stops so that home is found next. */
+function isEmbeddedHome(value: string, index: number): boolean {
+  const sep = readSeparator(value, index);
+  if (sep === undefined) return false;
+  return readHomeFolder(value, sep) !== undefined;
 }
 
 function isUncStart(value: string, index: number): boolean {
@@ -800,9 +882,14 @@ function isNetworkAbsolute(value: string): boolean {
  * The returned text is the drive path the root check compares.
  */
 function stripExtendedDrivePrefix(token: string): string {
-  const match = /^(?:\\\\\?\\|\/\/\?\/)(?=[A-Za-z]:[\\/])/.exec(token);
+  const match = /^(?:\\\\[.?]\\|\/\/[.?]\/)(?=[A-Za-z]:[\\/])/.exec(token);
   if (!match) return token;
   return token.slice(match[0].length);
+}
+
+/** `//?/UNC/srv` and `\\?\UNC\srv`, including mixed separators. */
+function isExtendedUncServer(before: string): boolean {
+  return /^(?:\\\\|\/\/)[.?][\\/]unc[\\/][^\\/]+$/i.test(before);
 }
 
 function extendedDriveInsideRoot(token: string, root: string): boolean {
@@ -828,15 +915,141 @@ interface ClassifiedPath {
  * Returns `''` when `file` is the root. Returns undefined when it is outside.
  */
 function portableInsideRoot(file: string, root: string): string | undefined {
-  const left = classifyPath(file);
-  const right = classifyPath(root);
+  const left = resolvedClassified(stripLocationSuffix(file));
+  const right = resolvedClassified(root);
   if (!left || !right) return undefined;
   if (!familiesMatch(left.family, right.family)) return undefined;
   if (right.key.length === 0 || left.key.length < right.key.length) return undefined;
   for (let index = 0; index < right.key.length; index += 1) {
     if (left.key[index] !== right.key[index]) return undefined;
   }
-  return left.segments.slice(right.key.length).join('/');
+  const suffix = file.slice(stripLocationSuffix(file).length);
+  const relative = left.segments.slice(right.key.length).join('/');
+  return `${relative}${suffix}`;
+}
+
+/**
+ * `\\srv\share\proj\..\proj2\x.ts` is not inside `\\srv\share\proj`.
+ * A `..` that climbs out of the root is rewritten and warned. A `..` that
+ * stays inside is handled by `portableInsideRoot` with no warning.
+ * A climb into another user's home is left for `outsideOwnHome`.
+ */
+function dotDotEscapedRelative(file: string, root: string): string | undefined {
+  if (!hasDotDotSegment(file)) return undefined;
+  const stripped = stripLocationSuffix(file);
+  const left = classifyPath(stripped);
+  const right = resolvedClassified(root);
+  if (!left || !right) return undefined;
+  if (!familiesMatch(left.family, right.family)) return undefined;
+  const fileSegments = resolveDotSegments(left.segments);
+  if (!fileSegments) return undefined;
+  const fileKey = fileSegments.map((segment) => segment.toLowerCase());
+  if (isKeyPrefix(right.key, fileKey)) return undefined;
+  const resolved = joinClassified(left.family, fileSegments);
+  if (outsideOwnHome(root, resolved)) return undefined;
+  const suffix = file.slice(stripped.length);
+  return `${relativeSegments(right.segments, fileSegments)}${suffix}`;
+}
+
+function resolvedClassified(value: string): ClassifiedPath | undefined {
+  const classified = classifyPath(stripLocationSuffix(value));
+  if (!classified) return undefined;
+  const segments = resolveDotSegments(classified.segments);
+  if (!segments) return undefined;
+  return keyed(classified.family, segments);
+}
+
+function resolveDotSegments(segments: readonly string[]): string[] | undefined {
+  const out: string[] = [];
+  for (const segment of segments) {
+    if (segment === '.') continue;
+    if (segment === '..') {
+      if (out.length === 0) return undefined;
+      out.pop();
+      continue;
+    }
+    out.push(segment);
+  }
+  return out.length === 0 ? undefined : out;
+}
+
+function hasDotDotSegment(file: string): boolean {
+  return /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(file);
+}
+
+function isKeyPrefix(rootKey: readonly string[], fileKey: readonly string[]): boolean {
+  if (rootKey.length === 0 || fileKey.length < rootKey.length) return false;
+  for (let index = 0; index < rootKey.length; index += 1) {
+    if (rootKey[index] !== fileKey[index]) return false;
+  }
+  return true;
+}
+
+function relativeSegments(from: readonly string[], to: readonly string[]): string {
+  const fromKey = from.map((segment) => segment.toLowerCase());
+  const toKey = to.map((segment) => segment.toLowerCase());
+  let index = 0;
+  while (index < fromKey.length && index < toKey.length && fromKey[index] === toKey[index]) index += 1;
+  const up = fromKey.length - index;
+  const down = to.slice(index);
+  if (up === 0 && down.length === 0) return '.';
+  return [...Array.from({ length: up }, () => '..'), ...down].join('/');
+}
+
+function joinClassified(family: PathFamily, segments: readonly string[]): string {
+  if (family === 'drive') {
+    const drive = segments[0] ?? '';
+    return `${drive}:/${segments.slice(1).join('/')}`;
+  }
+  return `/${segments.join('/')}`;
+}
+
+/** Username of a `home/<name>` or `Users/<name>` path. Reserved folders have none. */
+function homeOwner(value: string): string | undefined {
+  const normalized = stripLocationSuffix(stripTrailingSlash(normalizeSlashes(value)));
+  const match = /^(?:[A-Za-z]:\/)?\/?(?:home|users)\/([^/]+)/i.exec(normalized);
+  const owner = match?.[1];
+  if (!owner || reservedUsersSegment(owner)) return undefined;
+  return owner.toLowerCase();
+}
+
+function outsideOwnHome(root: string, target: string): boolean {
+  const rootOwner = homeOwner(root);
+  const targetOwner = homeOwner(target);
+  if (!rootOwner || !targetOwner) return false;
+  return rootOwner !== targetOwner;
+}
+
+/**
+ * Config path for a command a person can run.
+ * Absolute paths become relative to `rootDir` when that stays free of a
+ * username. Otherwise the file name is used. The result is never `<home>`.
+ */
+export function runnableConfigPath(configFile: string, rootDir?: string): string {
+  const normalized = stripTrailingSlash(normalizeSlashes(configFile));
+  const base = normalized.split('/').filter((part) => part.length > 0).pop() ?? normalized;
+  if (!isAbsolutePath(normalized)) {
+    return redactHomeText(normalized) === normalized ? normalized : base;
+  }
+  const root = rootDir ? stripTrailingSlash(normalizeSlashes(rootDir)) : undefined;
+  let relative: string | undefined;
+  if (root && (normalized === root || normalized.startsWith(`${root}/`))) {
+    relative = normalized === root ? '.' : normalized.slice(root.length + 1);
+  } else if (root && isAbsolutePath(root)) {
+    relative = relativeFrom(root, normalized);
+  }
+  if (relative && safeConfigRelative(normalized, relative)) return relative;
+  return base;
+}
+
+function safeConfigRelative(absolute: string, relative: string): boolean {
+  if (relative.includes('<home') || redactHomeText(relative) !== relative) return false;
+  const owner = homeOwner(absolute);
+  if (!owner) return true;
+  return !relative
+    .toLowerCase()
+    .split('/')
+    .includes(owner);
 }
 
 function familiesMatch(file: PathFamily, root: PathFamily): boolean {
@@ -850,7 +1063,7 @@ function classifyPath(value: string): ClassifiedPath | undefined {
   if (trimmed === '' || trimmed === '.') return undefined;
   const smb = /^smb:\/\//i.exec(trimmed);
   if (smb) return keyed('smb', splitPathParts(trimmed.slice(smb[0].length)));
-  const extended = /^(?:\\\\\?\\|\/\/\?\/|\/\?\/)/.exec(trimmed);
+  const extended = /^(?:\\\\[.?]\\|\/\/[.?]\/|\/[.?]\/)/.exec(trimmed);
   if (extended) return classifyExtended(trimmed.slice(extended[0].length));
   if (trimmed.startsWith('\\\\') || trimmed.startsWith('//')) {
     return keyed('unc', splitPathParts(trimmed.replace(/^[/\\]+/u, '')));

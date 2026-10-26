@@ -28,6 +28,9 @@ export function timingMatches(text: string, nearTimeout: boolean): RuleMatch[] {
   const testTimeout = lineContaining(text, TEST_TIMEOUT);
   if (testTimeout) hits.push({ ruleId: 'TIM-TEST-TIMEOUT', evidence: [testTimeout] });
 
+  const slow = slowLoadMatch(text);
+  if (slow) hits.push(slow);
+
   const intercept = interceptEvidence(text);
   if (intercept) hits.push({ ruleId: 'TIM-INTERCEPT', evidence: [intercept] });
 
@@ -42,6 +45,38 @@ export function timingMatches(text: string, nearTimeout: boolean): RuleMatch[] {
  * plus `locator resolved to <...>`. A value mismatch such as `toHaveText`
  * is not this rule.
  */
+const NAV_SLOW =
+  /page\.goto:\s*Timeout\s+\d+ms exceeded|Navigation timeout of \d+ms exceeded|navigating to .+waiting until "(?:load|domcontentloaded|networkidle)"|page was still loading|page never loaded/i;
+
+/**
+ * The page had not finished loading.
+ * A navigation or load timeout is enough. `element(s) not found` after a
+ * wait longer than 1000ms is the same signal when the locator never resolved
+ * to a real element: the page was still loading, as with a slow first paint.
+ * A miss of 1000ms or less stays a selector finding. That includes a 400ms
+ * miss and the recorded typo locator, which uses `Timeout: 1000ms`.
+ */
+export function pageStillLoading(text: string): boolean {
+  if (NAV_SLOW.test(text)) return true;
+  if (/locator resolved to </.test(text)) return false;
+  if (!/element\(s\) not found|locator resolved to 0 elements/.test(text)) return false;
+  const timeout = /(?:Timeout:\s*|Timeout\s+|with timeout\s+|Test timeout of\s+)(\d+)ms/.exec(text);
+  const ms = timeout?.[1];
+  if (ms === undefined) return false;
+  return Number(ms) > 1000;
+}
+
+function slowLoadMatch(text: string): RuleMatch | undefined {
+  if (!pageStillLoading(text)) return undefined;
+  const evidence =
+    lineContaining(text, /page\.goto:\s*Timeout|Navigation timeout|navigating to /) ??
+    lineContaining(text, /Timeout:\s*\d+ms|Timeout \d+ms exceeded|Test timeout of \d+ms exceeded/) ??
+    lineContaining(text, /element\(s\) not found/) ??
+    lineContaining(text, /locator resolved to 0 elements/);
+  if (!evidence) return undefined;
+  return { ruleId: 'TIM-SLOW-LOAD', evidence: [evidence] };
+}
+
 function expectTimedOut(text: string): boolean {
   if (/element\(s\) not found/.test(text)) return false;
   if (/locator resolved to 0 elements/.test(text)) return false;

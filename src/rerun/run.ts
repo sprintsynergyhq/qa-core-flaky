@@ -330,7 +330,15 @@ async function prepareArgs(
 }
 
 const rootCache = new Map<string, string>();
-let playwrightLoaded = false;
+
+const ROOT_CHILD_SCRIPT = [
+  "const common = await import('playwright/lib/common');",
+  'const file = process.env.QA_CORE_FLAKY_CONFIG;',
+  "if (typeof file !== 'string' || file === '') process.exit(0);",
+  'const loaded = await common.configLoader?.loadConfigFromFile?.(file);',
+  'const root = loaded?.config?.rootDir;',
+  "if (typeof root === 'string' && root !== '') process.stdout.write('QA_CORE_ROOT ' + root + '\\n');",
+].join('\n');
 
 export async function resolveProjectFile(
   file: string,
@@ -363,52 +371,81 @@ export async function resolveProjectFile(
 async function loadRootDir(configFile: string, cacheRoot?: string): Promise<string | undefined> {
   const cached = rootCache.get(configFile);
   if (cached) return cached;
-  // Playwright chooses `playwright-transform-cache-<uid>` when its module
-  // is first loaded, from `PWTEST_CACHE_DIR` or `os.tmpdir()`. Point that
-  // at the rerun directory so the parent does not leave the cache in the
-  // real temp directory. A process that already loaded Playwright keeps
-  // the directory chosen by that first load.
-  const redirect = cacheRoot !== undefined && !playwrightLoaded;
-  const saved = redirect ? snapshotTempEnv() : undefined;
-  if (redirect && cacheRoot) {
-    fs.mkdirSync(cacheRoot, { recursive: true });
-    process.env.PWTEST_CACHE_DIR = path.join(cacheRoot, 'playwright-transform-cache');
-    process.env.TMPDIR = cacheRoot;
-    process.env.TMP = cacheRoot;
-    process.env.TEMP = cacheRoot;
-  }
+  // The parent must not import Playwright. The first import chooses
+  // `playwright-transform-cache` from `PWTEST_CACHE_DIR` or the real temp
+  // directory, and a later change of those variables does not move it.
+  // A child loads the config with those variables pointed at this directory,
+  // so the cache is removed with the rerun directory.
+  const owned = cacheRoot === undefined;
+  const dir = cacheRoot ?? fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-root-'));
   try {
-    const specifier: string = 'playwright/lib/common';
-    const common = (await import(specifier)) as {
-      configLoader?: { loadConfigFromFile?: (file: string) => Promise<{ config?: { rootDir?: string } }> };
-    };
-    playwrightLoaded = true;
-    const loaded = await common.configLoader?.loadConfigFromFile?.(configFile);
-    const root = loaded?.config?.rootDir;
-    if (typeof root !== 'string' || root === '') return undefined;
+    fs.mkdirSync(dir, { recursive: true });
+    const root = await readRootDirFromChild(configFile, dir);
+    if (!root) return undefined;
     rootCache.set(configFile, root);
     return root;
   } catch {
     return undefined;
   } finally {
-    if (saved) restoreTempEnv(saved);
+    if (owned) {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 40 });
+    }
   }
 }
 
-function snapshotTempEnv(): NodeJS.ProcessEnv {
-  return {
-    PWTEST_CACHE_DIR: process.env.PWTEST_CACHE_DIR,
-    TMPDIR: process.env.TMPDIR,
-    TMP: process.env.TMP,
-    TEMP: process.env.TEMP,
-  };
+function readRootDirFromChild(configFile: string, cacheDir: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', ROOT_CHILD_SCRIPT], {
+      cwd: process.cwd(),
+      detached: true,
+      env: {
+        ...process.env,
+        QA_CORE_FLAKY_CONFIG: configFile,
+        PWTEST_CACHE_DIR: path.join(cacheDir, 'playwright-transform-cache'),
+        TMPDIR: cacheDir,
+        TMP: cacheDir,
+        TEMP: cacheDir,
+      },
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    let out = '';
+    let settled = false;
+    const finish = (value: string | undefined) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      killChildGroup(child);
+      setTimeout(() => finish(undefined), 1000);
+    }, 20_000);
+    child.stdout?.on('data', (chunk: Buffer) => {
+      out += chunk.toString('utf8');
+    });
+    child.on('error', () => finish(undefined));
+    child.on('close', () => {
+      const line = out
+        .split(/\r?\n/)
+        .map((item) => item.trim())
+        .find((item) => item.startsWith('QA_CORE_ROOT '));
+      const root = line?.slice('QA_CORE_ROOT '.length).trim();
+      finish(root && root.length > 0 ? root : undefined);
+    });
+  });
 }
 
-function restoreTempEnv(saved: NodeJS.ProcessEnv): void {
-  for (const key of ['PWTEST_CACHE_DIR', 'TMPDIR', 'TMP', 'TEMP'] as const) {
-    const value = saved[key];
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
+function killChildGroup(child: ChildProcess): void {
+  const pid = child.pid;
+  if (pid === undefined) return;
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // The child has already exited.
+    }
   }
 }
 

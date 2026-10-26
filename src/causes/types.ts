@@ -30,13 +30,13 @@ export type CauseFinding = {
 /**
  * Options for `classifyCauses`.
  * `testTimeoutMs` is the test timeout, when the caller knows it.
- * `orderDependency` is the PR 6 hook. It returns evidence substrings when a
- * failure depends on test order. The default hook returns none.
+ * `orderDependency` returns evidence substrings when a failure depends on
+ * test order. The default hook returns none.
  */
 export type ClassifyOptions = {
   /** Test timeout in milliseconds. Used only by the near-timeout rule. */
   testTimeoutMs?: number;
-  /** PR 6 hook. Return evidence substrings, or an empty list. */
+  /** Return evidence substrings, or an empty list. */
   orderDependency?: OrderDependencyHook;
   /**
    * Filled when the order-dependency hook throws.
@@ -45,7 +45,7 @@ export type ClassifyOptions = {
   debugNotes?: string[];
 };
 
-/** Returns evidence lines when a failure depends on test order. PR 6 fills this in. */
+/** Returns evidence lines when a failure depends on test order. */
 export type OrderDependencyHook = (record: TestRecord) => string[];
 
 /** A single rule match inside one error text. */

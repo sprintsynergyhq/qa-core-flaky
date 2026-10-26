@@ -245,17 +245,22 @@ function readFailure(failure: unknown, warnings: string[], rootDir: string | und
  * `users/<name>/<more>` in any case, with no leading slash. That is a home
  * only in this attachment slot. Ids, files, titles, locations, evidence,
  * and `--only` do not use this rule, so `users/list.spec.ts` and
- * `home/page.spec.ts` stay. `Users/Shared/`, `Users/Public/`, and
- * `Users/Default/` are shared Windows folders, not a username.
+ * `home/page.spec.ts` stay. `home/<name>` and `home/<name>/` are homes too.
+ * `Users/Shared/`, `Users/Public/`, `Users/Default/`, `Users/Default User/`,
+ * and `Users/All Users/` are shared Windows folders, not a username.
  */
 function redactJunitAttachmentHome(file: string): string {
-  const match = /^(home|users)\/([^/]+)\/(.+)$/iu.exec(file);
+  const match = /^(home|users)\/([^/]+)(?:\/(.*))?$/iu.exec(file);
   if (!match) return file;
   const folder = match[1] ?? '';
   const username = match[2] ?? '';
-  const rest = match[3] ?? '';
+  const rest = match[3];
   if (username === '' || username.startsWith(':') || !/\p{L}/u.test(username)) return file;
-  if (/^users$/iu.test(folder) && /^(?:shared|public|default)$/iu.test(username)) return file;
+  if (/^users$/iu.test(folder) && /^(?:shared|public|default|default user|all users)$/iu.test(username)) return file;
+  // `users/list.spec.ts` and `home/page.spec.ts` are files. A bare
+  // `home/<name>` has no dot in the name.
+  if (rest === undefined) return username.includes('.') ? file : '<home>';
+  if (rest === '') return '<home>/';
   return `<home>/${rest}`;
 }
 
@@ -265,7 +270,9 @@ function readAttachments(testcase: XmlNode, warnings: string[], rootDir: string 
   const attachments: Attachment[] = [];
   for (const match of text.matchAll(ATTACHMENT_PATTERN)) {
     const raw = match[1] ?? '';
-    const portable = redactJunitAttachmentHome(toPortablePath(raw, rootDir, warnings) ?? '');
+    const trailingHome = /[\\/]$/.test(raw);
+    let portable = redactJunitAttachmentHome(toPortablePath(raw, rootDir, warnings) ?? '');
+    if (trailingHome && portable === '<home>') portable = '<home>/';
     const name = portable.split('/').pop() || 'attachment';
     attachments.push({
       name,

@@ -38,11 +38,11 @@ Before any rule runs, these lines are removed:
 | --- | --- |
 | high | Two or more independent rules of the same cause matched, or one strong rule matched on every failed attempt and there are at least two failed attempts |
 | medium | One strong rule matched on one attempt. Rules that quote the same line, or that sit in one dependent group, count as that one rule |
-| low | The only match is `TIM-NEAR-TIMEOUT` |
+| low | The only match is `TIM-NEAR-TIMEOUT`, or the finding is selectors while `TIM-SLOW-LOAD` also matched |
 
 Two rules are independent when their evidence lines differ and they are not in the same group. `SEL-NOTFOUND`, `SEL-ZERO`, and `SEL-UNRESOLVED` are one group, so a single `toBeVisible` miss or a single `toHaveCount` of zero stays medium. `TIM-TEST-TIMEOUT` and `TIM-NEAR-TIMEOUT` are one group, because a test timeout is already past the near-timeout line. `TIM-NEAR-TIMEOUT` by itself stays low even when it matches every failed attempt. `TIM-NEAR-TIMEOUT` with an independent timing rule, such as `TIM-EXPECT-TIMEOUT` or `TIM-INTERCEPT`, is high.
 
-Findings are sorted by confidence (`high`, then `medium`, then `low`). The same confidence is sorted by cause: selectors, environment, timing, test-data. Unknown is returned only when no other rule matched, so it is alone.
+Findings are sorted by confidence (`high`, then `medium`, then `low`). The same confidence is sorted by cause: selectors, environment, timing, test-data. Unknown is returned only when no other rule matched, so it is alone. When `TIM-SLOW-LOAD` matches, every selector finding on that test is low, so timing is listed first.
 
 ## How To Run
 
@@ -109,6 +109,16 @@ The `8 ×` count is the count from one local run of the fixture. It is not a ben
 | Confidence | Medium on one attempt |
 
 Playwright 1.60.0 does not print `Timeout 400ms exceeded` for this expect. It prints `Timeout:  400ms` and the resolved element. `toHaveText` uses that same `Timeout:` field for a wrong value, and it is not this rule. Captured in `fixtures/errors/tim-expect-timeout.txt`.
+
+### TIM-SLOW-LOAD
+
+| | |
+| --- | --- |
+| Check | The page had not finished loading. A navigation or load timeout is enough: `page.goto: Timeout <digits>ms exceeded`, `Navigation timeout of <digits>ms exceeded`, `navigating to ... waiting until "load"`, `"domcontentloaded"`, or `"networkidle"`, or the phrases `page was still loading` and `page never loaded`. The same rule matches `element(s) not found` or `locator resolved to 0 elements` when the locator never resolved to a real element and the stated timeout is greater than 1000ms. A miss of 1000ms or less stays a selector finding, including the recorded typo locator at `Timeout: 1000ms` and the 400ms fixture. A test timeout of 800ms with no `element(s) not found` stays `SEL-UNRESOLVED` and `TIM-TEST-TIMEOUT`. |
+| Example | `Timeout: 2000ms` with `Error: element(s) not found` while waiting for `getByTestId('inventory-list')` |
+| Confidence | Medium on one failed attempt. High when it matches every failed attempt and there are two or more. Selector findings on the same test are forced to low |
+
+The suggested fix says to wait for the page to finish loading and then assert what the user sees. It does not say to only raise a timeout. A resolved element that then times out stays `TIM-EXPECT-TIMEOUT`, including `Timeout 2000ms exceeded` with `locator resolved to <button`.
 
 ### TIM-TEST-TIMEOUT
 

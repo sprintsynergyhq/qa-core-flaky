@@ -1,0 +1,97 @@
+{
+  "config": {
+    "rootDir": "/home/synthetic/kit",
+    "configFile": "/home/synthetic/kit/playwright.config.ts",
+    "metadata": {
+      "gitCommit": "abc1234"
+    }
+  },
+  "suites": [
+    {
+      "title": "tests/flaky-slow-user.spec.ts",
+      "file": "tests/flaky-slow-user.spec.ts",
+      "specs": [
+        {
+          "title": "slow user reaches the inventory",
+          "file": "tests/flaky-slow-user.spec.ts",
+          "line": 6,
+          "tests": [
+            {
+              "projectName": "chromium",
+              "expectedStatus": "passed",
+              "status": "flaky",
+              "results": [
+                {
+                  "retry": 0,
+                  "status": "failed",
+                  "duration": 2100,
+                  "errors": [
+                    {
+                      "message": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByTestId('inventory-list')\nExpected: visible\nTimeout: 2000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 2000ms\n  - waiting for getByTestId('inventory-list')\n\n\n   7 |   await login(page, 'performance_glitch_user');\n   8 |   const timeout = testInfo.retry === 0 ? 2000 : 15000;\n>  9 |   await expect(page.getByTestId('inventory-list')).toBeVisible({ timeout });\n     |                                                    ^\n  10 | });\n\n    at /home/synthetic/kit/tests/flaky-slow-user.spec.ts:9:52"
+                    }
+                  ]
+                },
+                {
+                  "retry": 1,
+                  "status": "passed",
+                  "duration": 4000,
+                  "errors": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "tests/flaky-random.spec.ts",
+      "file": "tests/flaky-random.spec.ts",
+      "specs": [
+        {
+          "title": "random coin flip after login",
+          "file": "tests/flaky-random.spec.ts",
+          "line": 6,
+          "tests": [
+            {
+              "projectName": "chromium",
+              "expectedStatus": "passed",
+              "status": "unexpected",
+              "results": [
+                {
+                  "retry": 0,
+                  "status": "failed",
+                  "duration": 800,
+                  "errors": [
+                    {
+                      "message": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n\n   7 |   await loginAndWait(page);\n   8 |   const heads = Math.random() >= 0.5;\n>  9 |   expect(heads, 'random coin flip').toBe(true);\n     |                                     ^\n\n    at /home/synthetic/kit/tests/flaky-random.spec.ts:9:37"
+                    }
+                  ]
+                },
+                {
+                  "retry": 1,
+                  "status": "failed",
+                  "duration": 700,
+                  "errors": [
+                    {
+                      "message": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n\n   7 |   await loginAndWait(page);\n   8 |   const heads = Math.random() >= 0.5;\n>  9 |   expect(heads, 'random coin flip').toBe(true);\n     |                                     ^\n\n    at /home/synthetic/kit/tests/flaky-random.spec.ts:9:37"
+                    }
+                  ]
+                },
+                {
+                  "retry": 2,
+                  "status": "failed",
+                  "duration": 750,
+                  "errors": [
+                    {
+                      "message": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n\n   7 |   await loginAndWait(page);\n   8 |   const heads = Math.random() >= 0.5;\n>  9 |   expect(heads, 'random coin flip').toBe(true);\n     |                                     ^\n\n    at /home/synthetic/kit/tests/flaky-random.spec.ts:9:37"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

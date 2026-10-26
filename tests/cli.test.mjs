@@ -440,7 +440,7 @@ test('rerun of a passing id prints the cap and does not launch Playwright', (t) 
   );
   const result = run(['rerun', '--from', report, '--fail-on', 'never']);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stderr, /Cap: max-tests 20, times 5, modes repeat,isolated\. Selected 0 of 0 failing tests\. Commands 0\./);
+  assert.match(result.stderr, /Cap: max-tests 20, times 5, retries 0, modes repeat,isolated\. Selected 0 of 0 failing tests\. Commands 0\./);
   assert.equal(result.stderr.includes('npx'), false);
 });
 

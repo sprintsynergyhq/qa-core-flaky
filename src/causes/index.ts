@@ -17,6 +17,7 @@ const RULE_ORDER = [
   'ENV-HTTP5XX',
   'ENV-BROWSER',
   'TIM-EXPECT-TIMEOUT',
+  'TIM-SLOW-LOAD',
   'TIM-TEST-TIMEOUT',
   'TIM-INTERCEPT',
   'TIM-NEAR-TIMEOUT',
@@ -36,6 +37,7 @@ const CAUSE_BY_RULE: Readonly<Record<string, Cause>> = {
   'ENV-HTTP5XX': 'environment',
   'ENV-BROWSER': 'environment',
   'TIM-EXPECT-TIMEOUT': 'timing',
+  'TIM-SLOW-LOAD': 'timing',
   'TIM-TEST-TIMEOUT': 'timing',
   'TIM-INTERCEPT': 'timing',
   'TIM-NEAR-TIMEOUT': 'timing',
@@ -418,9 +420,10 @@ function findingsFromHits(hits: Hit[], failedCount: number): CauseFinding[] {
         for (const item of hit.evidence) pushEvidence(evidence, item);
       }
     }
+    const slowLoad = hits.some((hit) => hit.ruleId === 'TIM-SLOW-LOAD');
     findings.push({
       cause,
-      confidence: confidenceFor(ruleIds, causeHits, failedCount),
+      confidence: cause === 'selectors' && slowLoad ? 'low' : confidenceFor(ruleIds, causeHits, failedCount),
       evidence,
       ruleIds: [...ruleIds],
     });

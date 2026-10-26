@@ -152,6 +152,24 @@ A quoted mark that the text already contains, such as `Expected: "<home~2>"`, is
 
 A structured file path with no report root is still stored as `<home>/...`. When one report has two files that redact to the same `<home>` path, the first id stays `<home>` and the later ones become `<file~2>`, `<file~3>`, in the order the parser saw them. `<home~2>` is only the second username inside one triage entry. The mark is not the username. Triage also keeps entries whose ids differed only by a username: the first redacted id is unchanged, and the next ones gain ` (2)`, ` (3)`.
 
+## Paths That Stay Absolute Or Unredacted
+
+A `|` between two paths is a boundary, so `/home/a/x|/home/b/y` hides both usernames. A home glued to a word is not a home. `at/home/bob/a` stays, because treating a letter as a boundary would also hide `/api/home/settings/save`.
+
+A space continues a path tail for one segment when that segment contains a backslash. `/home/bob/my project/a\b.ts` becomes `<home>/my project/a/b.ts`. The continuation stops before another home, a drive letter, or a UNC path.
+
+`Users/Default User` and `Users/All Users` are shared Windows folders, in any case, including a JUnit attachment. `C:\Users\Public\..\zbob\x.ts` keeps `Public` and hides `zbob`. `C:\Users\Public C:\Users\zbob\x` does not join `Public` to the next drive, so the result is `C:\Users\Public <home>/x`. `Jöhn Smith` and `Jo Smith Failed Again` are unchanged.
+
+`\\.\` and `//./` are stripped the same way as `\\?\` and `//?/` before a drive root check. Inside that root the frame becomes a relative path. Outside it, the stored text stays absolute and output redaction is `\\.\<home>/...`, not `\\.\C:Users/...`. `//?/UNC/srv/Users/<name>/...` and `\\?\UNC\srv/Users/<name>/...` are homes. The server name stays.
+
+A `..` segment is resolved before the inside-root check. A climb that leaves the root is rewritten to a relative path and warned. A `..` that stays inside becomes a clean relative path with no warning. A root of `/` or `\\` is empty after slash collapsing, so a UNC path stays absolute and redaction still sees the home. A UNC path is not rewritten to `srv/Users/<name>` under that root.
+
+A same-drive path in another user's home stays absolute. Root `C:\Users\zalice\proj` and file `C:\Users\zeve\proj2\a.ts` are not stored as `../../zeve/proj2/a.ts`. The warning quotes the redacted absolute path. The same rule applies to `/home/zeve` when the root is `/home/zalice/proj`. A root that is not itself a home, such as `/tmp/project`, still rewrites `/home/bob/...` to a relative path. A sibling share such as `\\srv\share\proj2\...` with root `\\srv\share\proj` stays absolute so two servers are not collapsed into `../`. Those names are not usernames.
+
+These contrived forms are still not fully hidden, and they stay that way: `x:\\?\C:\Users\<name>\...`, `file:///\\?\C:\...`, and `x://?/C:/...`. A single letter before `:` is read as a drive, and a `file:///` prefix in front of `\\?\` is not the device path above.
+
+A JUnit attachment whose whole path is `home/<name>` or `home/<name>/` is stored as `<home>` or `<home>/`.
+
 ## Known Gaps
 
 These gaps were checked against the Playwright 1.60.0 JUnit fixture produced with the reporter's default options. `includeRetries` was left unset. The file has one `testcase` per test. It has no `flakyFailure`, `flakyError`, `rerunFailure`, or `rerunError` elements.
