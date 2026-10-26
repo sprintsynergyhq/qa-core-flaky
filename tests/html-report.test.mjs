@@ -32,8 +32,7 @@ function escapeHtml(value) {
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
+    .replaceAll('"', '&quot;');
 }
 
 function entry(overrides = {}) {
@@ -121,9 +120,15 @@ test('html shows only counts from the report, including an empty report', () => 
   const stamped = renderTriageHtml(report([], { generatedAt: '2026-10-26T18:07:00.000Z', branch: 'main', runId: 'kit-1' }), {
     version: '0.0.1',
   });
-  assert.match(stamped, /<dt>Generated<\/dt><dd>2026-10-26T18:07:00.000Z<\/dd>/);
-  assert.match(stamped, /<dt>Branch<\/dt><dd>main<\/dd>/);
-  assert.match(stamped, /<dt>Run Id<\/dt><dd>kit-1<\/dd>/);
+  assert.match(stamped, /<dt>Generated<\/dt><dd>26 Oct 2026, 18:07 UTC<\/dd>/);
+  assert.equal(stamped.includes('<dt>Branch</dt>'), false);
+  assert.equal(stamped.includes('<dt>Run Id</dt>'), false);
+  assert.equal(stamped.includes('kit-1'), false);
+  const poisoned = renderTriageHtml(report([], { generatedAt: '3"><meta http-equiv="refresh" content="0;url=https://evil.example/">' }), {
+    version: '0.0.1',
+  });
+  assert.equal(poisoned.includes('http-equiv="refresh"'), false);
+  assert.equal(poisoned.includes('<dt>Generated</dt>'), false);
 
   const rerun = renderTriageHtml(
     report([
@@ -150,26 +155,58 @@ test('html shows only counts from the report, including an empty report', () => 
   assert.match(rerun, /data-summary="likely-real-bug">0</);
   assert.match(rerun, /data-cause-count="timing">1</);
   assert.match(rerun, /data-cause-count="selectors">0</);
-  assert.match(rerun, /<dt>Commit<\/dt><dd>tonight<\/dd>/);
+  assert.equal(rerun.includes('<dt>Commit</dt>'), false);
   assert.match(rerun, /data-rerun="isolated"/);
   assert.match(rerun, /In Order: total 1, failed 1, passed 0/);
   assert.match(rerun, /In Order not run 2: could not select/);
   assert.match(rerun, /no flake observed in 3 runs/);
-  assert.match(rerun, /Runs Seen: 3/);
-  assert.equal(rerun.match(/<ol class="strip"[^>]*>((?:<li><\/li>)*)<\/ol>/)?.[1].match(/<li>/g)?.length, 3);
+  assert.match(rerun, /Seen In 3 Runs/);
+  assert.equal(rerun.includes('class="strip"'), false);
+  assert.match(rerun, /Tests Flagged/);
+  assert.equal(rerun.includes('Tests Seen'), false);
+  assert.match(rerun, /Triage Tests/);
+  assert.match(rerun, /<p class="note">/);
 });
 
-test('two hundred entries stay under 300 KB and use a strict policy', () => {
-  const entries = Array.from({ length: 200 }, (_, index) =>
-    entry({
-      id: `tests/file.spec.ts::chromium::case ${index}`,
-      verdict: index % 5 === 0 ? 'likely-real-bug' : 'flaky',
-      evidence: [`Expected: "${index}"`, 'Received: "no"'],
-      history: { runsSeen: 1, firstFailingCommit: null },
-    }),
-  );
-  const html = renderTriageHtml(report(entries), { version: '0.0.1' });
+test('a commit is shown only when it is 7 to 40 hex characters', () => {
+  const page = (detail) =>
+    renderTriageHtml(
+      report([
+        entry({
+          signals: [{ kind: 'same-code-flip', detail }],
+        }),
+      ]),
+      { version: '0.0.1' },
+    );
+  const short = page('At least one pass and one fail share commit abcdef1.');
+  assert.match(short, /<dt>Commit<\/dt><dd class="sha">abcdef1<\/dd>/);
+  const longSha = 'ab'.repeat(20);
+  const long = page(`At least one pass and one fail share commit ${longSha}.`);
+  assert.match(long, /<dt>Commit<\/dt><dd class="sha">abababa<\/dd>/);
+  assert.equal(long.includes(`<dd class="sha">${longSha}</dd>`), false);
+  for (const detail of [
+    'At least one pass and one fail share commit tonight.',
+    'At least one pass and one fail share commit abc123.',
+    'At least one pass and one fail share commit abc123g.',
+    `At least one pass and one fail share commit ${'a'.repeat(41)}.`,
+  ]) {
+    assert.equal(page(detail).includes('<dt>Commit</dt>'), false, detail);
+  }
+});
+
+test('kit sized reports stay under 300 KB at 200 entries and use a strict policy', () => {
+  const kit = JSON.parse(fs.readFileSync(kitJson, 'utf8'));
+  const copies = (count) =>
+    Array.from({ length: count }, (_, index) => {
+      const source = structuredClone(kit.entries[index % kit.entries.length]);
+      source.id = `${source.id} #${index}`;
+      return source;
+    });
+  const html = renderTriageHtml(report(copies(200)), { version: '0.0.1' });
   const bytes = Buffer.byteLength(html);
+  const thousand = Buffer.byteLength(renderTriageHtml(report(copies(1000)), { version: '0.0.1' }));
+  console.log(`html bytes 200 ${bytes}`);
+  console.log(`html bytes 1000 ${thousand}`);
   assert.equal(bytes < 300 * 1024, true, `html is ${bytes} bytes`);
   assert.match(html, /data-summary="tests">200</);
   const style = html.match(/<style>([\s\S]*)<\/style>/);
@@ -207,17 +244,20 @@ test('the SauceDemo example is the rendered kit triage', () => {
   assert.match(html, /data-cause-count="selectors">1</);
   assert.match(html, /data-cause-count="environment">1</);
   assert.match(html, /data-cause-count="test-data">0</);
-  assert.match(html, /<dt>Commit<\/dt><dd>tonight<\/dd>/);
+  assert.equal(html.includes('<dt>Commit</dt>'), false);
   const version = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
-  assert.match(html, new RegExp(`Generated by qa-core-flaky ${version}`));
+  assert.match(html, new RegExp(`Generated by qa-core-flaky ${version}\\. Built by SprintSynergy\\.`));
+  assert.match(html, /Tests Flagged/);
+  assert.match(html, /Seen In 3 Runs/);
+  assert.match(html, /Triage Tests/);
   for (const item of source.entries) {
-    assert.equal(html.includes(escapeHtml(item.id)), true, item.id);
-    assert.equal(html.includes(`data-verdict="${item.verdict}"`), true, item.id);
-    assert.equal(html.includes(`data-cause="${item.causes[0].cause}"`), true, item.id);
-    assert.equal(html.includes(`data-confidence="${item.confidence}"`), true, item.id);
-    assert.equal(html.includes(`data-failed="${item.attempts.failed}"`), true, item.id);
-    assert.equal(html.includes(`data-total="${item.attempts.total}"`), true, item.id);
-    assert.equal(html.includes(`data-runs="${item.history.runsSeen}"`), true, item.id);
+    assert.equal(html.includes(`data-test="${escapeHtml(item.id)}"`), true, item.id);
+    assert.equal(html.includes(`data-v="${item.verdict}"`), true, item.id);
+    assert.equal(html.includes(`data-c="${item.causes[0].cause}"`), true, item.id);
+    assert.equal(html.includes(`data-k="${item.confidence}"`), true, item.id);
+    assert.equal(html.includes(`data-f="${item.attempts.failed}"`), true, item.id);
+    assert.equal(html.includes(`data-n="${item.attempts.total}"`), true, item.id);
+    assert.equal(html.includes(`data-r="${item.history.runsSeen}"`), true, item.id);
     assert.equal(html.includes(`data-rule="${item.ruleId}"`), true, item.id);
     for (const line of item.evidence) assert.equal(html.includes(escapeHtml(line)), true, line);
     for (const signal of item.signals) {
@@ -316,6 +356,38 @@ test('rerun --html writes a page when no command runs', (t) => {
   const html = fs.readFileSync(path.join(out, 'triage.html'), 'utf8');
   assert.match(html, /No Entries/);
   assert.equal(fs.existsSync(path.join(out, 'triage.json')), true);
+});
+
+test('a count that is not a finite number throws and is not written', () => {
+  const attack = '3"><meta http-equiv="refresh" content="0;url=https://evil.example/">';
+  const fields = [
+    ['attempts.total', (row) => { row.attempts.total = attack; }],
+    ['attempts.failed', (row) => { row.attempts.failed = attack; }],
+    ['attempts.passed', (row) => { row.attempts.passed = attack; }],
+    ['history.runsSeen', (row) => { row.history.runsSeen = attack; }],
+    ['attempts.reruns.repeat.total', (row) => { row.attempts.reruns = { repeat: { total: attack, failed: 0, passed: 0 } }; }],
+    ['attempts.reruns.repeat.failed', (row) => { row.attempts.reruns = { repeat: { total: 1, failed: attack, passed: 0 } }; }],
+    ['attempts.reruns.repeat.passed', (row) => { row.attempts.reruns = { repeat: { total: 1, failed: 0, passed: attack } }; }],
+    ['attempts.reruns.repeat.notRun', (row) => { row.attempts.reruns = { repeat: { total: 1, failed: 0, passed: 0, notRun: attack } }; }],
+    ['attempts.reruns.isolated.total', (row) => { row.attempts.reruns = { isolated: { total: attack, failed: 0, passed: 0 } }; }],
+    ['attempts.reruns.isolated.failed', (row) => { row.attempts.reruns = { isolated: { total: 1, failed: attack, passed: 0 } }; }],
+    ['attempts.reruns.isolated.passed', (row) => { row.attempts.reruns = { isolated: { total: 1, failed: 0, passed: attack } }; }],
+    ['attempts.reruns.isolated.notRun', (row) => { row.attempts.reruns = { isolated: { total: 1, failed: 0, passed: 0, notRun: attack } }; }],
+    ['attempts.reruns.in-order.total', (row) => { row.attempts.reruns = { 'in-order': { total: attack, failed: 0, passed: 0 } }; }],
+    ['attempts.reruns.in-order.failed', (row) => { row.attempts.reruns = { 'in-order': { total: 1, failed: attack, passed: 0 } }; }],
+    ['attempts.reruns.in-order.passed', (row) => { row.attempts.reruns = { 'in-order': { total: 1, failed: 0, passed: attack } }; }],
+    ['attempts.reruns.in-order.notRun', (row) => { row.attempts.reruns = { 'in-order': { total: 1, failed: 0, passed: 0, notRun: attack } }; }],
+  ];
+  for (const [name, mutate] of fields) {
+    const row = entry();
+    mutate(row);
+    assert.throws(() => renderTriageHtml(report([row]), { version: '0.0.1' }), new RegExp(`${name.replaceAll('.', '\\.')} must be a finite number`));
+  }
+  for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    const row = entry();
+    row.attempts.total = value;
+    assert.throws(() => renderTriageHtml(report([row]), { version: '0.0.1' }), /attempts\.total must be a finite number/);
+  }
 });
 
 test('writeTriageHtml replaces a file and refuses a directory', (t) => {

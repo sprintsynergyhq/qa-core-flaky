@@ -5,400 +5,47 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-ZfJ92TyvrWi+uzLTpPOVZntA0DioKR8PwEJDoDTsetQ='; style-src 'sha256-aX4KXd5J/R7hPdfN7AvhupigTp2Luq3u3A3LySvwui0='; img-src data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-gL/mFb68P19T/rwiWn9CT1FCK5f1B2rMTkHva/8U9To='; style-src 'sha256-Cw1Sz7iXs3ekQ/EDncfTrjZIxBS1hhzskWsBU9DNybo='; img-src data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Triage Report</title>
 <link rel="icon" href="data:,">
-<style>:root {
-  color-scheme: light;
-  --bg: #f4f4f5;
-  --bg-elevated: #fafafa;
-  --ink: #18181b;
-  --muted: #3f3f46;
-  --line: #d4d4d8;
-  --band: #18181b;
-  --band-ink: #fafafa;
-  --band-muted: #d4d4d8;
-  --bar: #3f3f46;
-  --bar-track: #e4e4e7;
-  --badge-bg: #f4f4f5;
-  --badge-ink: #18181b;
-  --accent-likely-real-bug: #9f1239;
-  --accent-flaky: #a16207;
-  --accent-broken-test: #9a3412;
-  --accent-environment-issue: #1e40af;
-  --accent-needs-more-runs: #52525b;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --bg: #09090b;
-    --bg-elevated: #18181b;
-    --ink: #fafafa;
-    --muted: #d4d4d8;
-    --line: #3f3f46;
-    --band: #27272a;
-    --band-ink: #fafafa;
-    --band-muted: #d4d4d8;
-    --bar: #d4d4d8;
-    --bar-track: #27272a;
-    --badge-bg: #27272a;
-    --badge-ink: #fafafa;
-    --accent-likely-real-bug: #fecdd3;
-    --accent-flaky: #fde68a;
-    --accent-broken-test: #fed7aa;
-    --accent-environment-issue: #bfdbfe;
-    --accent-needs-more-runs: #e4e4e7;
-  }
-}
-* { box-sizing: border-box; }
-[hidden] { display: none !important; }
-html, body { margin: 0; padding: 0; }
-body {
-  background: var(--bg);
-  color: var(--ink);
-  font-family: ui-sans-serif, system-ui, "Segoe UI", Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 1.5;
-}
-:focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: 2px;
-}
-.skip {
-  position: absolute;
-  left: 0.75rem;
-  top: -3rem;
-  z-index: 3;
-  background: var(--bg-elevated);
-  color: var(--ink);
-  padding: 0.4rem 0.7rem;
-  border-radius: 0.35rem;
-}
-.skip:focus { top: 0.75rem; }
-.top { background: var(--band); color: var(--band-ink); }
-.top-inner, main, .footer {
-  max-width: 72rem;
-  margin: 0 auto;
-  padding-left: 1.25rem;
-  padding-right: 1.25rem;
-}
-.top-inner { padding-top: 2rem; padding-bottom: 1.5rem; }
-.mark { margin: 0; color: var(--band-muted); font-size: 0.85rem; }
-h1 {
-  margin: 0.2rem 0 0;
-  font-size: 2rem;
-  font-weight: 650;
-  letter-spacing: -0.03em;
-  line-height: 1.15;
-}
-.lede { margin: 0.55rem 0 0; max-width: 40rem; color: var(--band-muted); }
-.meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem 1.5rem;
-  margin: 1.1rem 0 0;
-}
-.meta div { margin: 0; }
-.meta dt { margin: 0; font-size: 0.78rem; color: var(--band-muted); }
-.meta dd { margin: 0.1rem 0 0; font-weight: 600; overflow-wrap: anywhere; }
-main { padding-top: 0.25rem; padding-bottom: 1rem; }
-section { margin-top: 1.6rem; }
-h2 { margin: 0 0 0.75rem; font-size: 1.2rem; font-weight: 650; }
-h3 { margin: 1rem 0 0.35rem; font-size: 0.98rem; font-weight: 650; }
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
-  gap: 0.75rem;
-}
-.card, .table-wrap, .empty {
-  background: var(--bg-elevated);
-  border: 1px solid var(--line);
-  border-radius: 0.55rem;
-}
-.card { padding: 0.85rem 1rem 0.95rem; }
-.card-label { margin: 0; color: var(--muted); font-size: 0.82rem; }
-.card-value {
-  margin: 0.3rem 0 0;
-  font-size: 1.75rem;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-}
-.chart-wrap { overflow: auto; max-width: 100%; contain: inline-size; }
-.chart { width: 100%; height: auto; display: block; color: var(--ink); }
-.chart-label, .chart-count { fill: currentColor; font-size: 14px; font-family: inherit; }
-.chart-count { font-variant-numeric: tabular-nums; }
-.chart-track { fill: var(--bar-track); }
-.chart-bar { fill: var(--bar); }
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-.toolbar { display: none; flex-wrap: wrap; gap: 0.75rem; align-items: end; margin: 0 0 0.85rem; }
-.js .toolbar { display: flex; }
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-.toolbar select, .toolbar input[type="search"] {
-  font: inherit;
-  color: var(--ink);
-  background: var(--bg-elevated);
-  border: 1px solid var(--line);
-  border-radius: 0.4rem;
-  padding: 0.4rem 0.55rem;
-  min-width: 11rem;
-}
-.filter-status { margin: 0; align-self: center; color: var(--muted); font-size: 0.85rem; }
-.table-wrap { overflow: auto; max-width: 100%; width: 100%; contain: paint; }
-table { width: 100%; border-collapse: collapse; }
-caption { caption-side: bottom; }
-th, td {
-  text-align: left;
-  vertical-align: top;
-  padding: 0.7rem 0.75rem;
-  border-bottom: 1px solid var(--line);
-}
-thead th {
-  position: sticky;
-  top: 0;
-  background: var(--bg-elevated);
-  z-index: 1;
-}
-th button {
-  font: inherit;
-  font-weight: 650;
-  color: inherit;
-  background: transparent;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-  text-align: left;
-}
-th[aria-sort="ascending"] button::after,
-th[aria-sort="descending"] button::after {
-  content: "";
-  display: inline-block;
-  margin-left: 0.4rem;
-  vertical-align: middle;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-}
-th[aria-sort="ascending"] button::after { border-bottom: 6px solid currentColor; }
-th[aria-sort="descending"] button::after { border-top: 6px solid currentColor; }
-tbody th[scope="row"] { font-weight: 600; overflow-wrap: anywhere; }
-.frac { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.badge {
-  display: inline-block;
-  padding: 0.12rem 0.5rem 0.12rem 0.45rem;
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--accent, var(--line));
-  border-radius: 0.3rem;
-  background: var(--badge-bg);
-  color: var(--badge-ink);
-  font-weight: 650;
-  white-space: nowrap;
-}
-.verdict-likely-real-bug { --accent: var(--accent-likely-real-bug); }
-.verdict-flaky { --accent: var(--accent-flaky); }
-.verdict-broken-test { --accent: var(--accent-broken-test); }
-.verdict-environment-issue { --accent: var(--accent-environment-issue); }
-.verdict-needs-more-runs { --accent: var(--accent-needs-more-runs); }
-.detail-row td { background: var(--bg); }
-details { padding: 0.15rem 0 0.85rem; }
-summary { cursor: pointer; font-weight: 650; }
-.detail p, .detail li { overflow-wrap: anywhere; }
-.caution {
-  margin: 0.75rem 0 0;
-  padding-left: 0.7rem;
-  border-left: 3px solid var(--line);
-}
-pre {
-  margin: 0;
-  padding: 0.7rem 0.8rem;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  background: var(--bg-elevated);
-  border: 1px solid var(--line);
-  border-radius: 0.4rem;
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-  font-size: 0.88rem;
-}
-code {
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-  font-size: 0.88rem;
-  overflow-wrap: anywhere;
-}
-.command-line { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
-.copy {
-  font: inherit;
-  color: var(--ink);
-  background: var(--bg-elevated);
-  border: 1px solid var(--line);
-  border-radius: 0.4rem;
-  padding: 0.3rem 0.6rem;
-  cursor: pointer;
-}
-.strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  list-style: none;
-  margin: 0.35rem 0 0;
-  padding: 0;
-}
-.strip li {
-  width: 0.7rem;
-  height: 0.7rem;
-  background: var(--bar);
-  border-radius: 0.15rem;
-}
-.empty { padding: 1.1rem 1rem; }
-.empty-title { margin: 0; font-size: 1.05rem; font-weight: 650; }
-.empty p { margin: 0.4rem 0 0; color: var(--muted); }
-.footer { padding-bottom: 2rem; color: var(--muted); font-size: 0.85rem; }
-.copy-buffer {
-  position: fixed;
-  left: -9999px;
-  top: 0;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-}
-@media (max-width: 720px) {
-  h1 { font-size: 1.6rem; }
-  .cards { grid-template-columns: 1fr 1fr; }
-  .toolbar { align-items: stretch; }
-  .field, .toolbar select, .toolbar input[type="search"] { width: 100%; min-width: 0; }
-  thead th { position: static; }
-  table { min-width: 42rem; }
-}
-@media print {
-  :root {
-    color-scheme: light;
-    --bg: #fafafa;
-    --bg-elevated: #fafafa;
-    --ink: #18181b;
-    --muted: #3f3f46;
-    --line: #d4d4d8;
-    --band: #fafafa;
-    --band-ink: #18181b;
-    --band-muted: #3f3f46;
-    --bar: #3f3f46;
-    --bar-track: #e4e4e7;
-    --badge-bg: #f4f4f5;
-    --badge-ink: #18181b;
-  }
-  .skip, .toolbar, .copy { display: none !important; }
-  thead th { position: static; }
-  details > :not(summary) { display: block !important; }
-  tbody { break-inside: avoid; }
-  a { color: inherit; text-decoration: none; }
-}</style>
+<style>:root{color-scheme:light;--bg:#f4f4f5;--bg-elevated:#fafafa;--ink:#18181b;--muted:#3f3f46;--line:#d4d4d8;--band:#18181b;--band-ink:#fafafa;--band-muted:#d4d4d8;--bar:#3f3f46;--bar-track:#e4e4e7;--zero:#71717a}@media (prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#09090b;--bg-elevated:#18181b;--ink:#fafafa;--muted:#d4d4d8;--line:#3f3f46;--band:#27272a;--band-ink:#fafafa;--band-muted:#d4d4d8;--bar:#d4d4d8;--bar-track:#27272a;--zero:#a1a1aa}}*{box-sizing:border-box}[hidden]{display:none !important}html,body{margin:0;padding:0}body{background:var(--bg);color:var(--ink);font-family:ui-sans-serif,system-ui,"Segoe UI",Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5}:focus-visible{outline:2px solid var(--ink);outline-offset:2px}.skip{position:absolute;left:0.75rem;top:-3rem;z-index:3;background:var(--bg-elevated);color:var(--ink);padding:0.4rem 0.7rem;border-radius:0.35rem}.skip:focus{top:0.75rem}.top{background:var(--band);color:var(--band-ink)}.top-inner,main,.footer{max-width:72rem;margin:0 auto;padding-left:1.25rem;padding-right:1.25rem}.top-inner{padding-top:2rem;padding-bottom:1.5rem}.mark{margin:0;color:var(--band-muted);font-size:0.85rem}h1{margin:0.2rem 0 0;font-size:2rem;font-weight:650;letter-spacing:-0.03em;line-height:1.15}.lede{margin:0.55rem 0 0;max-width:40rem;color:var(--band-muted)}.meta{display:flex;flex-wrap:wrap;gap:0.75rem 1.5rem;margin:1.1rem 0 0}.meta div{margin:0}.meta dt{margin:0;font-size:0.78rem;color:var(--band-muted)}.meta dd{margin:0.1rem 0 0;font-weight:600;overflow-wrap:anywhere}.sha{font-family:ui-monospace,"SFMono-Regular",Consolas,monospace;font-weight:500}main{padding-top:0.25rem;padding-bottom:1rem}section{margin-top:1.6rem}h2{margin:0 0 0.75rem;font-size:1.2rem;font-weight:650}h3{margin:0.7rem 0 0.25rem;font-size:0.92rem;font-weight:650}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(9.5rem,1fr));gap:0.75rem}.card,.table-wrap,.empty{background:var(--bg-elevated);border:1px solid var(--line);border-radius:0.55rem}.card{padding:0.85rem 1rem 0.95rem}.card-label{margin:0;color:var(--muted);font-size:0.82rem}.card-value{margin:0.3rem 0 0;font-size:1.75rem;font-weight:650;font-variant-numeric:tabular-nums;letter-spacing:-0.03em;line-height:1.1}.z,.z .card-value,.bars .z{color:var(--zero)}.bars{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px;max-width:36rem}.bars li{display:grid;grid-template-columns:8.5rem minmax(0,1fr) 2rem;align-items:center;column-gap:0.75rem;height:24px}.bl{font-size:0.875rem;line-height:1;white-space:nowrap}.bt{display:block;height:8px;background:var(--bar-track);border-radius:999px;overflow:hidden}.bb{display:block;height:8px;background:var(--bar);border-radius:999px}.bars .z .bb{background:transparent}.bc{font-size:0.875rem;font-variant-numeric:tabular-nums;text-align:right}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.toolbar{display:none;flex-wrap:wrap;gap:0.75rem;align-items:end;margin:0 0 0.85rem}.js .toolbar{display:flex}.sort{display:none}.field{display:flex;flex-direction:column;gap:0.25rem;color:var(--muted);font-size:0.82rem}.toolbar select,.toolbar input[type="search"]{font:inherit;color:var(--ink);background:var(--bg-elevated);border:1px solid var(--line);border-radius:0.4rem;padding:0.4rem 0.55rem;min-width:11rem}.filter-status{margin:0;align-self:center;color:var(--muted);font-size:0.85rem}.note{margin:-0.35rem 0 0.85rem;color:var(--muted)}.table-wrap{overflow:auto;max-width:100%;width:100%}table{width:100%;border-collapse:collapse}caption{caption-side:bottom}th,td{text-align:left;vertical-align:top;padding:0.55rem 0.7rem;border-bottom:1px solid var(--line)}thead th{position:sticky;top:0;background:var(--bg-elevated);z-index:1}th button{font:inherit;font-weight:650;color:inherit;background:transparent;border:0;padding:0;cursor:pointer;text-align:left}th[aria-sort="ascending"] button::after,th[aria-sort="descending"] button::after{content:"";display:inline-block;margin-left:0.4rem;vertical-align:middle;border-left:4px solid transparent;border-right:4px solid transparent}th[aria-sort="ascending"] button::after{border-bottom:6px solid currentColor}th[aria-sort="descending"] button::after{border-top:6px solid currentColor}tbody th[scope="row"]{font-weight:400;overflow-wrap:anywhere}tbody th b{display:block;font-weight:600}tbody th small{display:block;color:var(--muted);font-size:0.82rem}td[data-label="Attempts"],td[data-label="Runs Seen"]{font-variant-numeric:tabular-nums;white-space:nowrap}.b1,.b2,.b3,.b4,.b5{display:inline-block;padding:0.12rem 0.45rem;border-radius:0.3rem;border:1px solid transparent;font-style:normal;font-weight:600;line-height:1.35;white-space:nowrap}.b1{background:#18181b;color:#fafafa}.b2{background:#3f3f46;color:#fafafa}.b3{background:#e4e4e7;color:#18181b}.b4{background:transparent;color:#18181b;border-color:#71717a}.b5{background:transparent;color:#52525b;border-style:dashed;border-color:#a1a1aa}@media (prefers-color-scheme:dark){.b1{background:#fafafa;color:#18181b}.b2{background:#d4d4d8;color:#18181b}.b3{background:#3f3f46;color:#fafafa}.b4{color:#fafafa;border-color:#71717a}.b5{color:#a1a1aa;border-color:#a1a1aa}}details{padding:0}summary{cursor:pointer;color:var(--muted);font-size:0.82rem;font-weight:500}tbody tr + tr td{padding-top:0.15rem;padding-bottom:0.4rem}p,li{overflow-wrap:anywhere}pre{margin:0;padding:0.7rem 0.8rem;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);border:1px solid var(--line);border-radius:0.4rem;font-family:ui-monospace,"SFMono-Regular",Consolas,monospace;font-size:0.88rem}code{font-family:ui-monospace,"SFMono-Regular",Consolas,monospace;font-size:0.88rem;overflow-wrap:anywhere}button{font:inherit;color:var(--ink);background:var(--bg-elevated);border:1px solid var(--line);border-radius:0.4rem;padding:0.3rem 0.6rem;cursor:pointer}.copy-buffer{position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0}.empty{padding:1.1rem 1rem}.empty-title{margin:0;font-size:1.05rem;font-weight:650}.empty p{margin:0.4rem 0 0;color:var(--muted)}.footer{padding-bottom:2rem;color:var(--muted);font-size:0.85rem}.footer p{margin:0}.w0{width:0%}.w1{width:1%}.w2{width:2%}.w3{width:3%}.w4{width:4%}.w5{width:5%}.w6{width:6%}.w7{width:7%}.w8{width:8%}.w9{width:9%}.w10{width:10%}.w11{width:11%}.w12{width:12%}.w13{width:13%}.w14{width:14%}.w15{width:15%}.w16{width:16%}.w17{width:17%}.w18{width:18%}.w19{width:19%}.w20{width:20%}.w21{width:21%}.w22{width:22%}.w23{width:23%}.w24{width:24%}.w25{width:25%}.w26{width:26%}.w27{width:27%}.w28{width:28%}.w29{width:29%}.w30{width:30%}.w31{width:31%}.w32{width:32%}.w33{width:33%}.w34{width:34%}.w35{width:35%}.w36{width:36%}.w37{width:37%}.w38{width:38%}.w39{width:39%}.w40{width:40%}.w41{width:41%}.w42{width:42%}.w43{width:43%}.w44{width:44%}.w45{width:45%}.w46{width:46%}.w47{width:47%}.w48{width:48%}.w49{width:49%}.w50{width:50%}.w51{width:51%}.w52{width:52%}.w53{width:53%}.w54{width:54%}.w55{width:55%}.w56{width:56%}.w57{width:57%}.w58{width:58%}.w59{width:59%}.w60{width:60%}.w61{width:61%}.w62{width:62%}.w63{width:63%}.w64{width:64%}.w65{width:65%}.w66{width:66%}.w67{width:67%}.w68{width:68%}.w69{width:69%}.w70{width:70%}.w71{width:71%}.w72{width:72%}.w73{width:73%}.w74{width:74%}.w75{width:75%}.w76{width:76%}.w77{width:77%}.w78{width:78%}.w79{width:79%}.w80{width:80%}.w81{width:81%}.w82{width:82%}.w83{width:83%}.w84{width:84%}.w85{width:85%}.w86{width:86%}.w87{width:87%}.w88{width:88%}.w89{width:89%}.w90{width:90%}.w91{width:91%}.w92{width:92%}.w93{width:93%}.w94{width:94%}.w95{width:95%}.w96{width:96%}.w97{width:97%}.w98{width:98%}.w99{width:99%}.w100{width:100%}@media (max-width:640px){h1{font-size:1.6rem}.top-inner,main,.footer{padding-left:1rem;padding-right:1rem}.cards{grid-template-columns:1fr 1fr}.js .sort{display:flex}.toolbar{align-items:stretch}.field,.toolbar select,.toolbar input[type="search"]{width:100%;min-width:0}.table-wrap{overflow:visible;border:0;background:transparent}table,thead,tbody,tr,th,td{display:block;width:auto}thead{display:none}tbody{margin:0 0 0.75rem;border:1px solid var(--line);border-radius:0.55rem;background:var(--bg-elevated);overflow:hidden}th,td{border-bottom:1px solid var(--line)}td[data-label]::before{content:attr(data-label);display:block;color:var(--muted);font-size:0.75rem;font-weight:600}tbody tr + tr td{border-bottom:0}td[data-label="Attempts"],td[data-label="Runs Seen"]{white-space:normal}}@media print{:root{color-scheme:light;--bg:#fafafa;--bg-elevated:#fafafa;--ink:#18181b;--muted:#3f3f46;--line:#d4d4d8;--band:#fafafa;--band-ink:#18181b;--band-muted:#3f3f46;--bar:#3f3f46;--bar-track:#e4e4e7;--zero:#71717a}.skip,.toolbar,button{display:none !important}thead{display:table-header-group;position:static}table{display:table;width:100%}tbody{display:table-row-group;margin:0;border:0;background:transparent;overflow:visible}tr{display:table-row}th,td{display:table-cell}td[data-label]::before{content:none;display:none}details,details > *{display:block !important;content-visibility:visible !important}summary{display:list-item !important}.b1{background:#18181b;color:#fafafa}.b2{background:#3f3f46;color:#fafafa}.b3{background:#e4e4e7;color:#18181b}.b4{color:#18181b;border-color:#71717a}.b5{color:#52525b;border-color:#a1a1aa}tbody{break-inside:avoid}}</style>
 </head>
 <body>
-<a class="skip" href="#tests">Skip To Tests</a><header class="top"><div class="top-inner"><p class="mark">qa-core-flaky</p><h1>Triage Report</h1><p class="lede">Failed and flaky tests. Passed tests are not listed.</p><dl class="meta"><div><dt>Commit</dt><dd>tonight</dd></div></dl></div></header><main><section aria-labelledby="summary-heading"><h2 id="summary-heading">Summary</h2><div class="cards"><article class="card"><p class="card-label">Tests Seen</p><p class="card-value" data-summary="tests">6</p></article><article class="card"><p class="card-label">Likely Real Bug</p><p class="card-value" data-summary="likely-real-bug">0</p></article><article class="card"><p class="card-label">Flaky</p><p class="card-value" data-summary="flaky">6</p></article><article class="card"><p class="card-label">Broken Test</p><p class="card-value" data-summary="broken-test">0</p></article><article class="card"><p class="card-label">Environment Issue</p><p class="card-value" data-summary="environment-issue">0</p></article><article class="card"><p class="card-label">Needs More Runs</p><p class="card-value" data-summary="needs-more-runs">0</p></article></div></section><section aria-labelledby="cause-heading"><h2 id="cause-heading">Cause Breakdown</h2><div class="chart-wrap"><svg class="chart" viewBox="0 0 640 160" width="640" height="160" aria-hidden="true"><text class="chart-label" x="0" y="21">Selectors</text><rect class="chart-track" x="150" y="10" width="360" height="12" rx="2"></rect><rect class="chart-bar" x="150" y="10" width="180" height="12" rx="2"></rect><text class="chart-count" x="522" y="21">1</text><text class="chart-label" x="0" y="53">Timing</text><rect class="chart-track" x="150" y="42" width="360" height="12" rx="2"></rect><rect class="chart-bar" x="150" y="42" width="360" height="12" rx="2"></rect><text class="chart-count" x="522" y="53">2</text><text class="chart-label" x="0" y="85">Test Data</text><rect class="chart-track" x="150" y="74" width="360" height="12" rx="2"></rect><rect class="chart-bar" x="150" y="74" width="0" height="12" rx="2"></rect><text class="chart-count" x="522" y="85">0</text><text class="chart-label" x="0" y="117">Environment</text><rect class="chart-track" x="150" y="106" width="360" height="12" rx="2"></rect><rect class="chart-bar" x="150" y="106" width="180" height="12" rx="2"></rect><text class="chart-count" x="522" y="117">1</text><text class="chart-label" x="0" y="149">Unknown</text><rect class="chart-track" x="150" y="138" width="360" height="12" rx="2"></rect><rect class="chart-bar" x="150" y="138" width="360" height="12" rx="2"></rect><text class="chart-count" x="522" y="149">2</text></svg></div><ul class="sr-only"><li><span>Selectors</span> <span data-cause-count="selectors">1</span></li><li><span>Timing</span> <span data-cause-count="timing">2</span></li><li><span>Test Data</span> <span data-cause-count="test-data">0</span></li><li><span>Environment</span> <span data-cause-count="environment">1</span></li><li><span>Unknown</span> <span data-cause-count="unknown">2</span></li></ul></section><section id="tests" aria-labelledby="tests-heading"><h2 id="tests-heading">Tests</h2><p class="caution">A flaky test can still point to a real app defect. Check the app behavior too.</p><div class="toolbar">
-<div class="field"><label for="filter-verdict">Verdict</label><select id="filter-verdict"><option value="">All</option><option value="flaky">Flaky</option></select></div>
-<div class="field"><label for="filter-cause">Cause</label><select id="filter-cause"><option value="">All</option><option value="selectors">Selectors</option><option value="timing">Timing</option><option value="environment">Environment</option><option value="unknown">Unknown</option></select></div>
-<div class="field"><label for="filter-confidence">Confidence</label><select id="filter-confidence"><option value="">All</option><option value="high">High</option><option value="medium">Medium</option></select></div>
-<div class="field"><label for="filter-search">Search</label><input id="filter-search" type="search" placeholder="Search Tests" autocomplete="off"></div>
-<p id="filter-status" class="filter-status" aria-live="polite"></p>
-</div><div class="table-wrap"><table data-report-table><caption class="sr-only">Triage tests</caption><thead><tr>
-<th scope="col" data-sort-key="test" aria-sort="none"><button type="button">Test</button></th>
-<th scope="col" data-sort-key="verdict" aria-sort="none"><button type="button">Verdict</button></th>
-<th scope="col" data-sort-key="cause" aria-sort="none"><button type="button">Cause</button></th>
-<th scope="col" data-sort-key="confidence" aria-sort="none"><button type="button">Confidence</button></th>
-<th scope="col" data-sort-key="attempts" aria-sort="none"><button type="button">Attempts</button></th>
-<th scope="col" data-sort-key="runs" aria-sort="none"><button type="button">Runs Seen</button></th>
-</tr></thead><tbody data-index="0" data-test="flaky-network.spec.ts::chromium::login page loads after a network drop" data-verdict="flaky" data-verdict-rank="1" data-cause="environment" data-confidence="high" data-confidence-rank="0" data-failed="3" data-total="6" data-runs="3" data-rule="FLAKY">
-<tr>
-<th scope="row">flaky-network.spec.ts::chromium::login page loads after a network drop</th>
-<td><span class="badge verdict-flaky">Flaky</span></td>
-<td>Environment</td>
-<td>High</td>
-<td><span class="frac">3/6</span><span class="sr-only"> failed of 6</span></td>
-<td>3</td>
-</tr>
-<tr class="detail-row"><td colspan="6"><details><summary>Show Details</summary><div class="detail"><h3>Evidence</h3><pre>Error: page.goto: net::ERR_INTERNET_DISCONNECTED at https://www.saucedemo.com/</pre><h3>Signals</h3><ul><li data-signal="same-code-flip"><strong>Same Code Flip</strong>: At least one pass and one fail share commit tonight.</li></ul><h3>Causes</h3><ul><li>Environment (High). Rules: ENV-NET</li></ul><h3>Suggested Fix</h3><p>Check the network and the base URL. Keep retries only for infrastructure errors.</p><h3>Next Step</h3><p>Review the suggested fix. To see the test again, run: </p><p class="command-line"><code>qa-core-flaky rerun --from &#39;reports/run-1.json&#39; --only &#39;flaky-network.spec.ts::chromium::login page loads after a network drop&#39; --config &#39;/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts&#39;</code><button type="button" class="copy">Copy Command</button></p><h3>History</h3><p>Runs Seen: 3</p><ol class="strip" aria-hidden="true"><li></li><li></li><li></li></ol><h3>Attempts</h3><p>Total 6, failed 3, passed 3. Same code for a pass and a fail: yes.</p><p class="review">Review Status: Needs Review.</p></div></details></td></tr>
-</tbody><tbody data-index="1" data-test="flaky-order.spec.ts::chromium::B expects a cart with only the bike light" data-verdict="flaky" data-verdict-rank="1" data-cause="unknown" data-confidence="medium" data-confidence-rank="1" data-failed="3" data-total="6" data-runs="3" data-rule="FLAKY">
-<tr>
-<th scope="row">flaky-order.spec.ts::chromium::B expects a cart with only the bike light</th>
-<td><span class="badge verdict-flaky">Flaky</span></td>
-<td>Unknown</td>
-<td>Medium</td>
-<td><span class="frac">3/6</span><span class="sr-only"> failed of 6</span></td>
-<td>3</td>
-</tr>
-<tr class="detail-row"><td colspan="6"><details><summary>Show Details</summary><div class="detail"><h3>Evidence</h3><pre>Expected: &quot;1&quot;
-Received: &quot;2&quot;</pre><h3>Signals</h3><ul><li data-signal="same-code-flip"><strong>Same Code Flip</strong>: At least one pass and one fail share commit tonight.</li></ul><h3>Causes</h3><ul><li>Unknown (Low). Rules: UNK-NONE</li></ul><h3>Suggested Fix</h3><p>The rules did not name a cause. Compare the quoted expected and received values with what the user sees. Do not loosen the assertion to make it pass.</p><h3>Next Step</h3><p>Review the suggested fix. To see the test again, run: </p><p class="command-line"><code>qa-core-flaky rerun --from &#39;reports/run-1.json&#39; --only &#39;flaky-order.spec.ts::chromium::B expects a cart with only the bike light&#39; --config &#39;/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts&#39;</code><button type="button" class="copy">Copy Command</button></p><h3>History</h3><p>Runs Seen: 3</p><ol class="strip" aria-hidden="true"><li></li><li></li><li></li></ol><h3>Attempts</h3><p>Total 6, failed 3, passed 3. Same code for a pass and a fail: yes.</p><p class="review">Review Status: Needs Review.</p></div></details></td></tr>
-</tbody><tbody data-index="2" data-test="flaky-random.spec.ts::chromium::random coin flip after login" data-verdict="flaky" data-verdict-rank="1" data-cause="unknown" data-confidence="medium" data-confidence-rank="1" data-failed="3" data-total="6" data-runs="3" data-rule="FLAKY">
-<tr>
-<th scope="row">flaky-random.spec.ts::chromium::random coin flip after login</th>
-<td><span class="badge verdict-flaky">Flaky</span></td>
-<td>Unknown</td>
-<td>Medium</td>
-<td><span class="frac">3/6</span><span class="sr-only"> failed of 6</span></td>
-<td>3</td>
-</tr>
-<tr class="detail-row"><td colspan="6"><details><summary>Show Details</summary><div class="detail"><h3>Evidence</h3><pre>Expected: true
-Received: false</pre><h3>Signals</h3><ul><li data-signal="same-code-flip"><strong>Same Code Flip</strong>: At least one pass and one fail share commit tonight.</li></ul><h3>Causes</h3><ul><li>Unknown (Low). Rules: UNK-NONE</li></ul><h3>Suggested Fix</h3><p>The rules did not name a cause. Compare the quoted expected and received values with what the user sees. Do not loosen the assertion to make it pass.</p><h3>Next Step</h3><p>Review the suggested fix. To see the test again, run: </p><p class="command-line"><code>qa-core-flaky rerun --from &#39;reports/run-1.json&#39; --only &#39;flaky-random.spec.ts::chromium::random coin flip after login&#39; --config &#39;/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts&#39;</code><button type="button" class="copy">Copy Command</button></p><h3>History</h3><p>Runs Seen: 3</p><ol class="strip" aria-hidden="true"><li></li><li></li><li></li></ol><h3>Attempts</h3><p>Total 6, failed 3, passed 3. Same code for a pass and a fail: yes.</p><p class="review">Review Status: Needs Review.</p></div></details></td></tr>
-</tbody><tbody data-index="3" data-test="flaky-slow-user.spec.ts::chromium::slow user reaches the inventory" data-verdict="flaky" data-verdict-rank="1" data-cause="selectors" data-confidence="high" data-confidence-rank="0" data-failed="3" data-total="6" data-runs="3" data-rule="FLAKY">
-<tr>
-<th scope="row">flaky-slow-user.spec.ts::chromium::slow user reaches the inventory</th>
-<td><span class="badge verdict-flaky">Flaky</span></td>
-<td>Selectors</td>
-<td>High</td>
-<td><span class="frac">3/6</span><span class="sr-only"> failed of 6</span></td>
-<td>3</td>
-</tr>
-<tr class="detail-row"><td colspan="6"><details><summary>Show Details</summary><div class="detail"><h3>Evidence</h3><pre>Error: element(s) not found</pre><h3>Signals</h3><ul><li data-signal="same-code-flip"><strong>Same Code Flip</strong>: At least one pass and one fail share commit tonight.</li></ul><h3>Causes</h3><ul><li>Selectors (High). Rules: SEL-NOTFOUND, SEL-ZERO</li></ul><h3>Suggested Fix</h3><p>Check whether the app changed or the locator is wrong. This is a candidate for qa-core-heal (PR 9).</p><h3>Next Step</h3><p>Review the suggested fix. To see the test again, run: </p><p class="command-line"><code>qa-core-flaky rerun --from &#39;reports/run-1.json&#39; --only &#39;flaky-slow-user.spec.ts::chromium::slow user reaches the inventory&#39; --config &#39;/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts&#39;</code><button type="button" class="copy">Copy Command</button></p><h3>History</h3><p>Runs Seen: 3</p><ol class="strip" aria-hidden="true"><li></li><li></li><li></li></ol><h3>Attempts</h3><p>Total 6, failed 3, passed 3. Same code for a pass and a fail: yes.</p><p class="review">Review Status: Needs Review.</p></div></details></td></tr>
-</tbody><tbody data-index="4" data-test="flaky-timing.spec.ts::chromium::fixed wait longer than the test timeout" data-verdict="flaky" data-verdict-rank="1" data-cause="timing" data-confidence="high" data-confidence-rank="0" data-failed="3" data-total="6" data-runs="3" data-rule="FLAKY">
-<tr>
-<th scope="row">flaky-timing.spec.ts::chromium::fixed wait longer than the test timeout</th>
-<td><span class="badge verdict-flaky">Flaky</span></td>
-<td>Timing</td>
-<td>High</td>
-<td><span class="frac">3/6</span><span class="sr-only"> failed of 6</span></td>
-<td>3</td>
-</tr>
-<tr class="detail-row"><td colspan="6"><details><summary>Show Details</summary><div class="detail"><h3>Evidence</h3><pre>Test timeout of 8000ms exceeded.
-Error: page.waitForTimeout: Test timeout of 8000ms exceeded.</pre><h3>Signals</h3><ul><li data-signal="same-code-flip"><strong>Same Code Flip</strong>: At least one pass and one fail share commit tonight.</li></ul><h3>Causes</h3><ul><li>Timing (High). Rules: TIM-TEST-TIMEOUT</li></ul><h3>Suggested Fix</h3><p>The test hit its time limit while waiting. Wait for what the user sees with a web-first assertion, and check whether the app itself is slow.</p><h3>Next Step</h3><p>Review the suggested fix. To see the test again, run: </p><p class="command-line"><code>qa-core-flaky rerun --from &#39;reports/run-1.json&#39; --only &#39;flaky-timing.spec.ts::chromium::fixed wait longer than the test timeout&#39; --config &#39;/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts&#39;</code><button type="button" class="copy">Copy Command</button></p><h3>History</h3><p>Runs Seen: 3</p><ol class="strip" aria-hidden="true"><li></li><li></li><li></li></ol><h3>Attempts</h3><p>Total 6, failed 3, passed 3. Same code for a pass and a fail: yes.</p><p class="review">Review Status: Needs Review.</p></div></details></td></tr>
-</tbody><tbody data-index="5" data-test="flaky-timing.spec.ts::chromium::product image visible within a too short timeout" data-verdict="flaky" data-verdict-rank="1" data-cause="timing" data-confidence="high" data-confidence-rank="0" data-failed="3" data-total="6" data-runs="3" data-rule="FLAKY">
-<tr>
-<th scope="row">flaky-timing.spec.ts::chromium::product image visible within a too short timeout</th>
-<td><span class="badge verdict-flaky">Flaky</span></td>
-<td>Timing</td>
-<td>High</td>
-<td><span class="frac">3/6</span><span class="sr-only"> failed of 6</span></td>
-<td>3</td>
-</tr>
-<tr class="detail-row"><td colspan="6"><details><summary>Show Details</summary><div class="detail"><h3>Evidence</h3><pre>       - unexpected value &quot;hidden&quot;</pre><h3>Signals</h3><ul><li data-signal="same-code-flip"><strong>Same Code Flip</strong>: At least one pass and one fail share commit tonight.</li></ul><h3>Causes</h3><ul><li>Timing (High). Rules: TIM-EXPECT-TIMEOUT</li></ul><h3>Suggested Fix</h3><p>Replace fixed waits with web-first assertions on what the user sees, and check whether the app itself is slow.</p><h3>Next Step</h3><p>Review the suggested fix. To see the test again, run: </p><p class="command-line"><code>qa-core-flaky rerun --from &#39;reports/run-1.json&#39; --only &#39;flaky-timing.spec.ts::chromium::product image visible within a too short timeout&#39; --config &#39;/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts&#39;</code><button type="button" class="copy">Copy Command</button></p><h3>History</h3><p>Runs Seen: 3</p><ol class="strip" aria-hidden="true"><li></li><li></li><li></li></ol><h3>Attempts</h3><p>Total 6, failed 3, passed 3. Same code for a pass and a fail: yes.</p><p class="review">Review Status: Needs Review.</p></div></details></td></tr>
-</tbody></table></div><p id="filter-empty" class="filter-empty" hidden>No Matching Tests</p></section></main><footer class="footer">Generated by qa-core-flaky 0.0.1</footer><script>(function () {
+<a class="skip" href="#tests">Skip To Tests</a><header class="top"><div class="top-inner"><p class="mark">qa-core-flaky</p><h1>Triage Report</h1><p class="lede">Failed and flaky tests. Passed tests are not listed.</p></div></header><main><section aria-labelledby="summary-heading"><h2 id="summary-heading">Summary</h2><div class="cards"><article class="card"><p class="card-label">Tests Flagged</p><p class="card-value" data-summary="tests">6</p></article><article class="card z"><p class="card-label">Likely Real Bug</p><p class="card-value" data-summary="likely-real-bug">0</p></article><article class="card"><p class="card-label">Flaky</p><p class="card-value" data-summary="flaky">6</p></article><article class="card z"><p class="card-label">Broken Test</p><p class="card-value" data-summary="broken-test">0</p></article><article class="card z"><p class="card-label">Environment Issue</p><p class="card-value" data-summary="environment-issue">0</p></article><article class="card z"><p class="card-label">Needs More Runs</p><p class="card-value" data-summary="needs-more-runs">0</p></article></div></section><section aria-labelledby="cause-heading"><h2 id="cause-heading">Cause Breakdown</h2><ul class="bars"><li class=""><span class="bl">Selectors</span><span class="bt" aria-hidden="true"><span class="bb w50"></span></span><span class="bc" data-cause-count="selectors">1</span></li><li class=""><span class="bl">Timing</span><span class="bt" aria-hidden="true"><span class="bb w100"></span></span><span class="bc" data-cause-count="timing">2</span></li><li class="z"><span class="bl">Test Data</span><span class="bt" aria-hidden="true"><span class="bb w0"></span></span><span class="bc" data-cause-count="test-data">0</span></li><li class=""><span class="bl">Environment</span><span class="bt" aria-hidden="true"><span class="bb w50"></span></span><span class="bc" data-cause-count="environment">1</span></li><li class=""><span class="bl">Unknown</span><span class="bt" aria-hidden="true"><span class="bb w100"></span></span><span class="bc" data-cause-count="unknown">2</span></li></ul></section><section id="tests" aria-labelledby="tests-heading"><h2 id="tests-heading">Tests</h2><p class="note">A flaky test can still point to a real app defect. Check the app behavior too.</p><div class="toolbar"><div class="field sort"><label for="sort-by">Sort By</label><select id="sort-by"><option value="">Report Order</option><option value="test">Test</option><option value="verdict">Verdict</option><option value="cause">Cause</option><option value="confidence">Confidence</option><option value="attempts">Attempts</option><option value="runs">Runs Seen</option></select></div><div class="field"><label for="filter-verdict">Verdict</label><select id="filter-verdict"><option value="">All</option><option value="flaky">Flaky</option></select></div><div class="field"><label for="filter-cause">Cause</label><select id="filter-cause"><option value="">All</option><option value="selectors">Selectors</option><option value="timing">Timing</option><option value="environment">Environment</option><option value="unknown">Unknown</option></select></div><div class="field"><label for="filter-confidence">Confidence</label><select id="filter-confidence"><option value="">All</option><option value="high">High</option><option value="medium">Medium</option></select></div><div class="field"><label for="filter-search">Search</label><input id="filter-search" type="search" placeholder="Search Tests" autocomplete="off"></div><p id="filter-status" class="filter-status" aria-live="polite"></p></div><div class="table-wrap"><table data-report-table><caption class="sr-only">Triage Tests</caption><thead><tr><th scope="col" data-sort-key="test" aria-sort="none"><button type="button">Test</button></th><th scope="col" data-sort-key="verdict" aria-sort="none"><button type="button">Verdict</button></th><th scope="col" data-sort-key="cause" aria-sort="none"><button type="button">Cause</button></th><th scope="col" data-sort-key="confidence" aria-sort="none"><button type="button">Confidence</button></th><th scope="col" data-sort-key="attempts" aria-sort="none"><button type="button">Attempts</button></th><th scope="col" data-sort-key="runs" aria-sort="none"><button type="button">Runs Seen</button></th></tr></thead><tbody data-test="flaky-network.spec.ts::chromium::login page loads after a network drop" data-v="flaky" data-c="environment" data-k="high" data-f="3" data-n="6" data-r="3" data-rule="FLAKY"><tr><th scope="row"><b>login page loads after a network drop</b><small>flaky-network.spec.ts · chromium</small></th><td data-label="Verdict"><i class="b3">Flaky</i></td><td data-label="Cause">Environment</td><td data-label="Confidence">High</td><td data-label="Attempts">3/6</td><td data-label="Runs Seen">3</td></tr><tr><td colspan="6"><details><summary>Details</summary><h3>Evidence</h3><pre>Error: page.goto: net::ERR_INTERNET_DISCONNECTED at https://www.saucedemo.com/</pre><h3>Signals</h3><p data-signal="same-code-flip">Same Code Flip: At least one pass and one fail share commit tonight.</p><h3>Causes</h3><p>Environment (High). ENV-NET</p><h3>Suggested Fix</h3><p>Check the network and the base URL. Keep retries only for infrastructure errors.</p><h3>Next Step</h3><p>Review the suggested fix. To see the test again, run: </p><p><code>qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-network.spec.ts::chromium::login page loads after a network drop' --config '/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts'</code><button>Copy Command</button></p><p>Seen In 3 Runs</p><p>passed 3. Same code: yes.</p><p>Review Status: Needs Review.</p></details></td></tr></tbody><tbody data-test="flaky-order.spec.ts::chromium::B expects a cart with only the bike light" data-v="flaky" data-c="unknown" data-k="medium" data-f="3" data-n="6" data-r="3" data-rule="FLAKY"><tr><th scope="row"><b>B expects a cart with only the bike light</b><small>flaky-order.spec.ts · chromium</small></th><td data-label="Verdict"><i class="b3">Flaky</i></td><td data-label="Cause">Unknown</td><td data-label="Confidence">Medium</td><td data-label="Attempts">3/6</td><td data-label="Runs Seen">3</td></tr><tr><td colspan="6"><details><summary>Details</summary><h3>Evidence</h3><pre>Expected: &quot;1&quot;
+Received: &quot;2&quot;</pre><h3>Signals</h3><p data-signal="same-code-flip">Same Code Flip: At least one pass and one fail share commit tonight.</p><h3>Causes</h3><p>Unknown (Low). UNK-NONE</p><h3>Suggested Fix</h3><p>The rules did not name a cause. Compare the quoted expected and received values with what the user sees. Do not loosen the assertion to make it pass.</p><h3>Next Step</h3><p>Review the suggested fix. To see the test again, run: </p><p><code>qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-order.spec.ts::chromium::B expects a cart with only the bike light' --config '/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts'</code><button>Copy Command</button></p><p>Seen In 3 Runs</p><p>passed 3. Same code: yes.</p><p>Review Status: Needs Review.</p></details></td></tr></tbody><tbody data-test="flaky-random.spec.ts::chromium::random coin flip after login" data-v="flaky" data-c="unknown" data-k="medium" data-f="3" data-n="6" data-r="3" data-rule="FLAKY"><tr><th scope="row"><b>random coin flip after login</b><small>flaky-random.spec.ts · chromium</small></th><td data-label="Verdict"><i class="b3">Flaky</i></td><td data-label="Cause">Unknown</td><td data-label="Confidence">Medium</td><td data-label="Attempts">3/6</td><td data-label="Runs Seen">3</td></tr><tr><td colspan="6"><details><summary>Details</summary><h3>Evidence</h3><pre>Expected: true
+Received: false</pre><h3>Signals</h3><p data-signal="same-code-flip">Same Code Flip: At least one pass and one fail share commit tonight.</p><h3>Causes</h3><p>Unknown (Low). UNK-NONE</p><h3>Suggested Fix</h3><p>The rules did not name a cause. Compare the quoted expected and received values with what the user sees. Do not loosen the assertion to make it pass.</p><h3>Next Step</h3><p>Review the suggested fix. To see the test again, run: </p><p><code>qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-random.spec.ts::chromium::random coin flip after login' --config '/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts'</code><button>Copy Command</button></p><p>Seen In 3 Runs</p><p>passed 3. Same code: yes.</p><p>Review Status: Needs Review.</p></details></td></tr></tbody><tbody data-test="flaky-slow-user.spec.ts::chromium::slow user reaches the inventory" data-v="flaky" data-c="selectors" data-k="high" data-f="3" data-n="6" data-r="3" data-rule="FLAKY"><tr><th scope="row"><b>slow user reaches the inventory</b><small>flaky-slow-user.spec.ts · chromium</small></th><td data-label="Verdict"><i class="b3">Flaky</i></td><td data-label="Cause">Selectors</td><td data-label="Confidence">High</td><td data-label="Attempts">3/6</td><td data-label="Runs Seen">3</td></tr><tr><td colspan="6"><details><summary>Details</summary><h3>Evidence</h3><pre>Error: element(s) not found</pre><h3>Signals</h3><p data-signal="same-code-flip">Same Code Flip: At least one pass and one fail share commit tonight.</p><h3>Causes</h3><p>Selectors (High). SEL-NOTFOUND, SEL-ZERO</p><h3>Suggested Fix</h3><p>Check whether the app changed or the locator is wrong. This is a candidate for qa-core-heal (PR 9).</p><h3>Next Step</h3><p>Review the suggested fix. To see the test again, run: </p><p><code>qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-slow-user.spec.ts::chromium::slow user reaches the inventory' --config '/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts'</code><button>Copy Command</button></p><p>Seen In 3 Runs</p><p>passed 3. Same code: yes.</p><p>Review Status: Needs Review.</p></details></td></tr></tbody><tbody data-test="flaky-timing.spec.ts::chromium::fixed wait longer than the test timeout" data-v="flaky" data-c="timing" data-k="high" data-f="3" data-n="6" data-r="3" data-rule="FLAKY"><tr><th scope="row"><b>fixed wait longer than the test timeout</b><small>flaky-timing.spec.ts · chromium</small></th><td data-label="Verdict"><i class="b3">Flaky</i></td><td data-label="Cause">Timing</td><td data-label="Confidence">High</td><td data-label="Attempts">3/6</td><td data-label="Runs Seen">3</td></tr><tr><td colspan="6"><details><summary>Details</summary><h3>Evidence</h3><pre>Test timeout of 8000ms exceeded.
+Error: page.waitForTimeout: Test timeout of 8000ms exceeded.</pre><h3>Signals</h3><p data-signal="same-code-flip">Same Code Flip: At least one pass and one fail share commit tonight.</p><h3>Causes</h3><p>Timing (High). TIM-TEST-TIMEOUT</p><h3>Suggested Fix</h3><p>The test hit its time limit while waiting. Wait for what the user sees with a web-first assertion, and check whether the app itself is slow.</p><h3>Next Step</h3><p>Review the suggested fix. To see the test again, run: </p><p><code>qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-timing.spec.ts::chromium::fixed wait longer than the test timeout' --config '/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts'</code><button>Copy Command</button></p><p>Seen In 3 Runs</p><p>passed 3. Same code: yes.</p><p>Review Status: Needs Review.</p></details></td></tr></tbody><tbody data-test="flaky-timing.spec.ts::chromium::product image visible within a too short timeout" data-v="flaky" data-c="timing" data-k="high" data-f="3" data-n="6" data-r="3" data-rule="FLAKY"><tr><th scope="row"><b>product image visible within a too short timeout</b><small>flaky-timing.spec.ts · chromium</small></th><td data-label="Verdict"><i class="b3">Flaky</i></td><td data-label="Cause">Timing</td><td data-label="Confidence">High</td><td data-label="Attempts">3/6</td><td data-label="Runs Seen">3</td></tr><tr><td colspan="6"><details><summary>Details</summary><h3>Evidence</h3><pre>       - unexpected value &quot;hidden&quot;</pre><h3>Signals</h3><p data-signal="same-code-flip">Same Code Flip: At least one pass and one fail share commit tonight.</p><h3>Causes</h3><p>Timing (High). TIM-EXPECT-TIMEOUT</p><h3>Suggested Fix</h3><p>Replace fixed waits with web-first assertions on what the user sees, and check whether the app itself is slow.</p><h3>Next Step</h3><p>Review the suggested fix. To see the test again, run: </p><p><code>qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-timing.spec.ts::chromium::product image visible within a too short timeout' --config '/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts'</code><button>Copy Command</button></p><p>Seen In 3 Runs</p><p>passed 3. Same code: yes.</p><p>Review Status: Needs Review.</p></details></td></tr></tbody></table></div><p id="filter-empty" class="filter-empty" hidden>No Matching Tests</p></section></main><footer class="footer"><p>Generated by qa-core-flaky 0.0.1. Built by SprintSynergy.</p></footer><script>(function () {
   var root = document.documentElement;
   root.classList.add('js');
+  var details = Array.prototype.slice.call(document.querySelectorAll('details'));
+  var openBefore = null;
+  window.addEventListener('beforeprint', function () {
+    if (openBefore) return;
+    openBefore = details.map(function (node) { return node.open; });
+    details.forEach(function (node) { node.open = true; });
+  });
+  window.addEventListener('afterprint', function () {
+    if (!openBefore) return;
+    details.forEach(function (node, index) { node.open = openBefore[index]; });
+    openBefore = null;
+  });
   var table = document.querySelector('[data-report-table]');
   if (!table) return;
   var bodies = Array.prototype.slice.call(table.querySelectorAll('tbody'));
+  var order = new Map();
+  bodies.forEach(function (body, index) { order.set(body, index); });
   var verdict = document.getElementById('filter-verdict');
   var cause = document.getElementById('filter-cause');
   var confidence = document.getElementById('filter-confidence');
   var search = document.getElementById('filter-search');
+  var sortBy = document.getElementById('sort-by');
   var status = document.getElementById('filter-status');
   var empty = document.getElementById('filter-empty');
   var headers = Array.prototype.slice.call(table.querySelectorAll('th[data-sort-key]'));
   var sortKey = '';
   var sortDir = 1;
+  var verdictRank = { 'likely-real-bug': 0, flaky: 1, 'broken-test': 2, 'environment-issue': 3, 'needs-more-runs': 4 };
+  var confidenceRank = { high: 0, medium: 1, low: 2 };
 
   function textCompare(left, right) {
     var a = String(left);
@@ -410,49 +57,54 @@ Error: page.waitForTimeout: Test timeout of 8000ms exceeded.</pre><h3>Signals</h
 
   function valueOf(body, key) {
     if (key === 'test') return body.getAttribute('data-test') || '';
-    if (key === 'verdict') return Number(body.getAttribute('data-verdict-rank') || '0');
-    if (key === 'cause') return body.getAttribute('data-cause') || '';
-    if (key === 'confidence') return Number(body.getAttribute('data-confidence-rank') || '0');
-    if (key === 'attempts') {
-      return [Number(body.getAttribute('data-failed') || '0'), Number(body.getAttribute('data-total') || '0')];
+    if (key === 'verdict') {
+      var verdictName = body.getAttribute('data-v') || '';
+      return Object.prototype.hasOwnProperty.call(verdictRank, verdictName) ? verdictRank[verdictName] : 5;
     }
-    if (key === 'runs') return Number(body.getAttribute('data-runs') || '0');
-    return Number(body.getAttribute('data-index') || '0');
+    if (key === 'cause') return body.getAttribute('data-c') || '';
+    if (key === 'confidence') {
+      var confidenceName = body.getAttribute('data-k') || '';
+      return Object.prototype.hasOwnProperty.call(confidenceRank, confidenceName) ? confidenceRank[confidenceName] : 3;
+    }
+    if (key === 'attempts') return [Number(body.getAttribute('data-f') || '0'), Number(body.getAttribute('data-n') || '0')];
+    if (key === 'runs') return Number(body.getAttribute('data-r') || '0');
+    return order.get(body) || 0;
   }
 
   function compare(left, right) {
     var a = valueOf(left, sortKey);
     var b = valueOf(right, sortKey);
-    var order = 0;
+    var delta = 0;
     if (Array.isArray(a) && Array.isArray(b)) {
-      order = a[0] - b[0];
-      if (order === 0) order = a[1] - b[1];
+      delta = a[0] - b[0];
+      if (delta === 0) delta = a[1] - b[1];
     } else if (typeof a === 'number' && typeof b === 'number') {
-      order = a - b;
+      delta = a - b;
     } else {
-      order = textCompare(a, b);
+      delta = textCompare(a, b);
     }
-    if (order === 0) {
-      order = Number(left.getAttribute('data-index') || '0') - Number(right.getAttribute('data-index') || '0');
-    }
-    return order * sortDir;
+    if (delta === 0) delta = (order.get(left) || 0) - (order.get(right) || 0);
+    return delta * sortDir;
+  }
+
+  function paint() {
+    bodies.forEach(function (body) { table.appendChild(body); });
   }
 
   function applySort() {
     if (!sortKey) return;
     bodies.sort(compare);
-    bodies.forEach(function (body) {
-      table.appendChild(body);
-    });
+    paint();
   }
 
   function matches(body) {
-    if (verdict && verdict.value && body.getAttribute('data-verdict') !== verdict.value) return false;
-    if (cause && cause.value && body.getAttribute('data-cause') !== cause.value) return false;
-    if (confidence && confidence.value && body.getAttribute('data-confidence') !== confidence.value) return false;
+    if (verdict && verdict.value && body.getAttribute('data-v') !== verdict.value) return false;
+    if (cause && cause.value && body.getAttribute('data-c') !== cause.value) return false;
+    if (confidence && confidence.value && body.getAttribute('data-k') !== confidence.value) return false;
     var query = search && search.value ? search.value.trim().toLowerCase() : '';
     if (!query) return true;
-    return (body.textContent || '').toLowerCase().indexOf(query) !== -1;
+    var hay = ((body.getAttribute('data-test') || '') + ' ' + (body.textContent || '')).toLowerCase();
+    return hay.indexOf(query) !== -1;
   }
 
   function applyFilter() {
@@ -466,6 +118,14 @@ Error: page.waitForTimeout: Test timeout of 8000ms exceeded.</pre><h3>Signals</h
     if (empty) empty.hidden = shown !== 0;
   }
 
+  function markHeaders(key, direction) {
+    headers.forEach(function (other) {
+      var next = 'none';
+      if (key && other.getAttribute('data-sort-key') === key) next = direction === 1 ? 'ascending' : 'descending';
+      other.setAttribute('aria-sort', next);
+    });
+  }
+
   headers.forEach(function (th) {
     var button = th.querySelector('button');
     if (!button) return;
@@ -476,15 +136,29 @@ Error: page.waitForTimeout: Test timeout of 8000ms exceeded.</pre><h3>Signals</h
         sortKey = key;
         sortDir = 1;
       }
-      headers.forEach(function (other) {
-        var next = 'none';
-        if (other === th) next = sortDir === 1 ? 'ascending' : 'descending';
-        other.setAttribute('aria-sort', next);
-      });
+      if (sortBy) sortBy.value = key;
+      markHeaders(sortKey, sortDir);
       applySort();
       applyFilter();
     });
   });
+
+  if (sortBy) {
+    sortBy.addEventListener('change', function () {
+      sortKey = sortBy.value;
+      sortDir = 1;
+      if (!sortKey) {
+        bodies.sort(function (left, right) { return (order.get(left) || 0) - (order.get(right) || 0); });
+        paint();
+        markHeaders('', 1);
+        applyFilter();
+        return;
+      }
+      markHeaders(sortKey, sortDir);
+      applySort();
+      applyFilter();
+    });
+  }
 
   [verdict, cause, confidence].forEach(function (node) {
     if (!node) return;
@@ -492,11 +166,12 @@ Error: page.waitForTimeout: Test timeout of 8000ms exceeded.</pre><h3>Signals</h
   });
   if (search) search.addEventListener('input', applyFilter);
 
-  Array.prototype.forEach.call(document.querySelectorAll('button.copy'), function (button) {
+  Array.prototype.forEach.call(document.querySelectorAll('button'), function (button) {
+    if ((button.textContent || '') !== 'Copy Command') return;
     button.addEventListener('click', function () {
       var holder = button.parentNode;
       var code = holder ? holder.querySelector('code') : null;
-      var text = code ? code.textContent || '' : button.getAttribute('data-copy') || '';
+      var text = code ? code.textContent || '' : '';
       var previous = button.textContent;
       function done() {
         button.textContent = 'Copied';

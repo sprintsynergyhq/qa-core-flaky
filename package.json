@@ -19,7 +19,8 @@
     "demo:record": "node scripts/record-demo.mjs",
     "demo:triage": "node dist/cli.js triage demo/saucedemo/reports/recorded-seed-443.json --fail-on never",
     "fixtures": "node scripts/make-fixtures.mjs",
-    "test:html": "npm run build && playwright test --config playwright.html.config.ts"
+    "test:html": "npm run build && playwright test --config playwright.html.config.ts",
+    "example:screenshots": "npm run build && node scripts/example-screenshots.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.60.0",

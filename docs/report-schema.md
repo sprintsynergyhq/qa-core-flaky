@@ -62,7 +62,7 @@ The review line is `Review status: Needs Review.`
 
 ## HTML
 
-`--html` writes `triage.html` in `--out-dir`, next to `triage.json` and `triage.md`. `rerun` accepts the same flag. The page is built from this schema. It does not add a verdict, a cause, or a count. Home usernames are hidden again with the same rules as `parse --redact`, unless `--html-no-redact` is set. The file inlines its CSS and its script. It does not load a network resource. A Content-Security-Policy meta tag allows those inline blocks by hash and blocks every other source. `--html` needs `--out-dir`. Without script, the table is still readable and the filters stay hidden.
+`--html` writes `triage.html` in `--out-dir`, next to `triage.json` and `triage.md`. `rerun` accepts the same flag. The page is built from this schema. It does not add a verdict, a cause, or a count. `attempts.total`, `attempts.failed`, `attempts.passed`, `history.runsSeen`, and each rerun `total`, `failed`, `passed`, and `notRun` must be finite numbers. Any other value throws before the page is written. Home usernames are hidden again with the same rules as `parse --redact`, unless `--html-no-redact` is set. The file inlines its CSS and its script. It does not load a network resource. A Content-Security-Policy meta tag allows those inline blocks by hash and blocks every other source. `--html` needs `--out-dir`. Without script, the table is still readable and the filters stay hidden. A commit is shown only when a signal names 7 to 40 hex characters, and then only the first 7. `generatedAt`, when it is a UTC timestamp, is shown as a calendar time. The footer names the tool version.
 
 ## Exit Codes
 
