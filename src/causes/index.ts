@@ -2,7 +2,7 @@ import type { Attempt, AttemptError, TestRecord } from '../model.js';
 import { stripAnsi } from '../report-path.js';
 import { environmentMatches } from './environment.js';
 import { hasSelectorEvidence, selectorMatches } from './selectors.js';
-import { alreadyExistsMatch, readReceived } from './test-data.js';
+import { alreadyExistsMatch, orderMatch, readReceived } from './test-data.js';
 import { isNearTimeout, timingMatches } from './timing.js';
 import type { Cause, CauseFinding, ClassifyOptions, RuleMatch } from './types.js';
 
@@ -119,7 +119,7 @@ export function classifyCauses(record: TestRecord, options: ClassifyOptions = {}
 
   hits.push(...valueDrift(samples));
 
-  const orderEvidence = hookEvidence(record, options);
+  const orderEvidence = [...builtinOrderEvidence(record), ...hookEvidence(record, options)];
   if (orderEvidence.length > 0) {
     hits.push({
       ruleId: 'DATA-ORDER',
@@ -228,6 +228,11 @@ function valueDrift(samples: { attemptIndex: number; key: string; receivedLine: 
   return hits;
 }
 
+/** Order evidence from rerun modes. These lines are produced by the signal, so they are not substrings of the error. */
+function builtinOrderEvidence(record: TestRecord): string[] {
+  return orderMatch(record)?.evidence ?? [];
+}
+
 function hookEvidence(record: TestRecord, options: ClassifyOptions): string[] {
   const hook = options.orderDependency;
   if (!hook) return [];
@@ -269,9 +274,13 @@ function unknownEvidence(attempts: readonly Attempt[]): string[] {
         const readable = filterCauseLines(text);
         const expected = lineOf(readable, /^[ \t]*Expected:[ \t]*.+$/);
         const received = lineOf(readable, /^[ \t]*Received:[ \t]*.+$/);
-        if (expected || received) {
+        const expectedSubstring = lineOf(readable, /^[ \t]*Expected substring:[ \t]*.+$/);
+        const receivedString = lineOf(readable, /^[ \t]*Received string:[ \t]*.+$/);
+        if (expected || received || expectedSubstring || receivedString) {
           pushEvidence(evidence, expected);
           pushEvidence(evidence, received);
+          pushEvidence(evidence, expectedSubstring);
+          pushEvidence(evidence, receivedString);
           continue;
         }
         const first = readable.split('\n').find((line) => line.trim().length > 0);

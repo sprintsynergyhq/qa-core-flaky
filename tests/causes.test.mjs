@@ -651,6 +651,18 @@ test('the outcomes fixture classifies value mismatch as unknown and the timeout 
   assert.equal(JSON.stringify(timeoutFindings), JSON.stringify(classifyCauses(timedOut)));
 });
 
+test('UNK-NONE quotes toContain expected substring and received string', () => {
+  const text = [
+    'Error: expect(received).toContain(expected) // indexOf',
+    'Expected substring: "sauce-backpack"',
+    'Received string: "/assets/sl-404.jpg"',
+  ].join('\n');
+  const findings = causesOf(text);
+  assert.equal(findings[0].ruleIds.includes('UNK-NONE'), true);
+  assert.ok(findings[0].evidence.some((line) => line.includes('Expected substring: "sauce-backpack"')));
+  assert.ok(findings[0].evidence.some((line) => line.includes('Received string: "/assets/sl-404.jpg"')));
+});
+
 test('a stack-frame-only error still quotes a line', () => {
   const text = ['at /home/alice:12:3', 'at Object.<anonymous> (/home/alice/a.ts:1:1)'].join('\n');
   const findings = causesOf(text);

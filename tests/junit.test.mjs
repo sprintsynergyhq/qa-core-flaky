@@ -9,6 +9,7 @@ import {
   redactHomeText,
   redactParseResult,
 } from '../dist/index.js';
+import { relativizeText, toPortablePath } from '../dist/report-path.js';
 
 const jsonPath = 'fixtures/reports/pw-1.60.0-outcomes.json';
 const junitPath = 'fixtures/reports/pw-1.60.0-outcomes.junit.xml';
@@ -598,6 +599,26 @@ test('a username stops at a newline, whitespace, or a colon', () => {
   );
 });
 
+test('an absolute Users Public, Shared, or Default path stays', () => {
+  const cases = [
+    String.raw`C:\Users\Public`,
+    String.raw`C:\Users\Public\Desktop\notes.txt`,
+    String.raw`C:\Users\Shared\x`,
+    String.raw`C:\Users\Default\NTUSER.DAT`,
+    'C:/Users/Public/a',
+    'c:\\users\\PUBLIC\\notes.txt',
+    '/Users/Public/a',
+    '/Users/Shared/x',
+    '/users/Default/NTUSER.DAT',
+    String.raw`\\?\C:\Users\Public\a.txt`,
+  ];
+  for (const input of cases) {
+    assert.equal(redactHomeText(input), input, input);
+  }
+  assert.equal(redactHomeText(String.raw`C:\Users\alice\a`), '<home>/a');
+  assert.equal(redactHomeText(String.raw`C:\home\Public\a`), '<home>/a');
+});
+
 test('a drive letter is only a drive in a real path position', () => {
   const cases = [
     ['open file:///C:/Users/alice/a.html', 'open file:///<home>/a.html'],
@@ -617,7 +638,7 @@ test('a bare home in Expected or Received is redacted, and a route parameter sta
   assert.equal(redactHomeText('Expected: "/Users/:id"'), 'Expected: "/Users/:id"');
   assert.equal(redactHomeText('Expected: "/home/feed"'), 'Expected: "<home>"');
   assert.equal(redactHomeText('Received: "/home/login"'), 'Received: "<home>"');
-  assert.equal(redactHomeText('/users/alice/feed'), '/users/alice/feed');
+  assert.equal(redactHomeText('/users/alice/feed'), '<home>/feed');
   assert.equal(
     redactHomeText('Expected: "/home/alice/notes.txt"'),
     'Expected: "<home>/notes.txt"',
@@ -706,7 +727,7 @@ test('two files that differ only by the home username stay distinct ids', () => 
   assert.equal(result.records.length, 2);
   assert.notEqual(result.records[0].id, result.records[1].id);
   assert.equal(result.records[0].file, '<home>/proj/a.spec.ts');
-  assert.equal(result.records[1].file, '<home~2>/proj/a.spec.ts');
+  assert.equal(result.records[1].file, '<file~2>/proj/a.spec.ts');
   assert.equal(result.records[0].id.includes('alice'), false);
   assert.equal(result.records[1].id.includes('bob'), false);
 });
@@ -744,4 +765,464 @@ test('redactParseResult hides a made-up home in source.reportPath', () => {
     assert.equal(result.records[0].source.reportPath, reportPath);
     assert.equal(hidden.records[0].attempts[0].errors[0].message, 'Error: gave up');
   }
+});
+
+test('home folders match in any case, and UNC and SMB keep the server', () => {
+  assert.equal(redactHomeText('/USERS/alice/x'), '<home>/x');
+  assert.equal(redactHomeText('/users/alice/x'), '<home>/x');
+  assert.equal(redactHomeText('/HOME/alice/x'), '<home>/x');
+  assert.equal(redactHomeText('\\\\?\\UNC\\server\\Users\\bob\\a'), '\\\\?\\UNC\\server<home>/a');
+  assert.equal(redactHomeText('smb://server/Users/bob/a'), 'smb://server<home>/a');
+  assert.equal(redactHomeText("locator('h1 ~p')"), "locator('h1 ~p')");
+  assert.equal(redactHomeText("locator('.a ~.b')"), "locator('.a ~.b')");
+  assert.equal(redactHomeText("locator('li ~li >> nth=1')"), "locator('li ~li >> nth=1')");
+  assert.equal(redactHomeText('C:\\Users\\Jo Smith Failed Again'), '<home> Failed Again');
+  assert.equal(redactHomeText('C:\\Users\\jo smith failed'), '<home> failed');
+  assert.equal(redactHomeText('C:\\Users\\Mary Ann Lee failed'), '<home> failed');
+  assert.equal(redactHomeText('C:\\Users\\Jo De La Cruz failed'), '<home> failed');
+  assert.equal(redactHomeText('//server/Users/bob/x'), '//server<home>/x');
+  assert.equal(redactHomeText('SMB://server/users/bob/a'), 'SMB://server<home>/a');
+});
+
+test('a quoted home mark does not collide with a generated mark', () => {
+  const text = 'Expected: "<home~2>"\nReceived: "/home/bob/a"';
+  const marks = homeMarks(['/home/alice/a', text]);
+  const out = redactHomeText(text, marks);
+  assert.equal(out.includes('<text:home~2>'), true);
+  assert.equal(out.includes('bob'), false);
+  assert.match(out, /<home~2>\/a/);
+});
+
+test('a file filter and a mixed separator hide the username', () => {
+  const cases = [
+    ['/^/home/bob/p/a.spec.ts$/:3', '/^<home>/p/a.spec.ts$/:3'],
+    ['/^/home/bob/p/a.spec.ts$/', '/^<home>/p/a.spec.ts$/'],
+    ['/^C:/Users/bob/p/a.spec.ts$/:3', '/^<home>/p/a.spec.ts$/:3'],
+    ['/^C:/Users/bob/p/a.spec.ts$/', '/^<home>/p/a.spec.ts$/'],
+    ['/home/bob/my project\\a.spec.ts', '<home>/my project/a.spec.ts'],
+    ['C:\\Users\\bob\\my project\\a.spec.ts', '<home>/my project/a.spec.ts'],
+    [String.raw`/^\/home\/bob\/p\/a\.spec\.ts$/:3`, String.raw`/^\/<home>\/p\/a\.spec\.ts$/:3`],
+    [String.raw`/^\/home\/bob\/p\/a\.spec\.ts$/`, String.raw`/^\/<home>\/p\/a\.spec\.ts$/`],
+    [String.raw`/^C:\/Users\/bob\/p\/a\.spec\.ts$/:3`, String.raw`/^<home>\/p\/a\.spec\.ts$/:3`],
+    [String.raw`/^C:\/Users\/bob\/p\/a\.spec\.ts$/`, String.raw`/^<home>\/p\/a\.spec\.ts$/`],
+  ];
+  for (const [input, expected] of cases) {
+    assert.equal(redactHomeText(input), expected, input);
+  }
+  const later = redactHomeText('/home/bob/file see /home/alice/x');
+  assert.equal(later.includes('bob'), false);
+  assert.equal(later.includes('alice'), false);
+  assert.equal(redactHomeText('C:\\Users\\bob\\a;C:\\\\Windows'), '<home>/a;C:\\\\Windows');
+});
+
+test('a later Windows or UNC home on the same line is redacted', () => {
+  const mixed = redactHomeText('ENOENT: open /home/bob/cfg.json then C:\\Users\\alice\\cfg.json');
+  assert.equal(mixed, 'ENOENT: open <home>/cfg.json then <home>/cfg.json');
+  const unc = redactHomeText(String.raw`/home/bob/a.txt and \\server\Users\carol\y`);
+  assert.equal(unc.includes('bob'), false);
+  assert.equal(unc.includes('carol'), false);
+  assert.equal(unc, String.raw`<home>/a.txt and \\server<home>/y`);
+  assert.equal(redactHomeText('toMatch(/a\\/b/)'), 'toMatch(/a\\/b/)');
+  assert.equal(redactHomeText('home/alice/proj/test-results/error-context.md'), 'home/alice/proj/test-results/error-context.md');
+  assert.equal(redactHomeText('users/carol/notes'), 'users/carol/notes');
+  for (const sample of [
+    'users/list.spec.ts',
+    'home/page.spec.ts',
+    'users/admin/edit.spec.ts',
+    'at users/list.spec.ts:3:5',
+    '"users/profile"',
+    'expected home/settings to be visible',
+    'Users/Shared/x',
+  ]) {
+    assert.equal(redactHomeText(sample), sample, sample);
+  }
+});
+
+test('a JUnit attachment home is redacted and a relative test path is not', () => {
+  const xml = `<testsuite hostname="chromium">
+    <testcase name="users/list" classname="users/list.spec.ts" file="users/list.spec.ts">
+      <failure message="missing users/list.spec.ts">missing users/list.spec.ts at users/list.spec.ts:3:5</failure>
+      <system-out><![CDATA[
+[[ATTACHMENT|home/alice/proj/test-results/missing-reads-the-seed-file-chromium/error-context.md]]
+[[ATTACHMENT|Users/alice/notes/a.txt]]
+[[ATTACHMENT|users/bob/proj/x.png]]
+[[ATTACHMENT|HOME/bob/a.png]]
+[[ATTACHMENT|users/list.spec.ts]]
+[[ATTACHMENT|home/page.spec.ts]]
+[[ATTACHMENT|Users/Shared]]
+[[ATTACHMENT|Users/Shared/x]]
+[[ATTACHMENT|users/Public/doc/a.txt]]
+[[ATTACHMENT|Users/Default/NTUSER.DAT]]
+]]></system-out>
+    </testcase>
+  </testsuite>`;
+  const result = parseJunit(xml, 'reports/users-home.xml');
+  const record = result.records[0];
+  assert.equal(record.file, 'users/list.spec.ts');
+  assert.equal(record.id, 'users/list.spec.ts::chromium::users/list');
+  assert.equal(record.attempts[0].errors[0].message.includes('users/list.spec.ts'), true);
+  const paths = record.attempts[0].attachments.map((item) => item.path);
+  assert.equal(paths[0], '<home>/proj/test-results/missing-reads-the-seed-file-chromium/error-context.md');
+  assert.equal(paths[1], '<home>/notes/a.txt');
+  assert.equal(paths[2], '<home>/proj/x.png');
+  assert.equal(paths[3], '<home>/a.png');
+  assert.equal(paths[4], 'users/list.spec.ts');
+  assert.equal(paths[5], 'home/page.spec.ts');
+  assert.equal(paths[6], 'Users/Shared');
+  assert.equal(paths[7], 'Users/Shared/x');
+  assert.equal(paths[8], 'users/Public/doc/a.txt');
+  assert.equal(paths[9], 'Users/Default/NTUSER.DAT');
+  assert.equal(JSON.stringify(result).includes('alice'), false);
+  assert.equal(JSON.stringify(result).includes('bob'), false);
+  assert.equal(record.id, 'users/list.spec.ts::chromium::users/list');
+  assert.equal(record.file, 'users/list.spec.ts');
+});
+
+test('an extended drive frame is relative inside the root and absolute outside it', () => {
+  const frame = String.raw`    at \\?\C:\Users\zbob\proj\tests\p.spec.ts:3:5`;
+  const relative = '    at tests/p.spec.ts:3:5';
+  const redacted = String.raw`    at \\?\<home>/proj/tests/p.spec.ts:3:5`;
+  const driveRoot = String.raw`C:\Users\zbob\proj`;
+  const extendedRoot = String.raw`\\?\C:\Users\zbob\proj`;
+  const outsideRoot = String.raw`D:\w`;
+  const slashForm = '    at //?/C:/Users/zbob/proj/tests/p.spec.ts:3:5';
+
+  function rewritten(text, root) {
+    const warnings = [];
+    const out = relativizeText(text, root, warnings);
+    assert.equal(warnings.some((warning) => warning.includes('zbob')), false, root ?? 'no-root');
+    return { out, warnings };
+  }
+
+  assert.equal(rewritten(frame, driveRoot).out, relative);
+  assert.equal(rewritten(frame, `${driveRoot}\\`).out, relative);
+  assert.equal(rewritten(frame, extendedRoot).out, relative);
+  assert.equal(rewritten(slashForm, 'C:/Users/zbob/proj').out, relative);
+  const outside = rewritten(frame, outsideRoot);
+  assert.equal(outside.out, frame);
+  assert.equal(outside.warnings.length, 0);
+  const noRoot = rewritten(frame, undefined);
+  assert.equal(noRoot.out, frame);
+  assert.equal(noRoot.warnings.length, 0);
+  const sibling = rewritten(frame, String.raw`C:\Users\zbob\other`);
+  assert.equal(sibling.out, frame);
+  assert.equal(redactHomeText(frame), redacted);
+  assert.equal(redacted.includes('zbob'), false);
+  assert.equal(redacted.includes('C:Users'), false);
+
+  function report(rootDir) {
+    return JSON.stringify({
+      config: rootDir === undefined ? {} : { rootDir },
+      suites: [
+        {
+          title: 'p.spec.ts',
+          file: 'p.spec.ts',
+          specs: [
+            {
+              title: 'reads',
+              file: 'p.spec.ts',
+              tests: [
+                {
+                  projectName: 'chromium',
+                  expectedStatus: 'passed',
+                  status: 'unexpected',
+                  results: [
+                    {
+                      retry: 0,
+                      status: 'failed',
+                      duration: 1,
+                      errors: [{ message: frame, stack: frame }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  function xml() {
+    return `<testsuite hostname="chromium">
+      <testcase name="reads" classname="p.spec.ts" file="p.spec.ts">
+        <failure message="${frame}"><![CDATA[${frame}]]></failure>
+      </testcase>
+    </testsuite>`;
+  }
+
+  function assertInside(result, label, expected) {
+    const error = result.records[0].attempts[0].errors[0];
+    assert.equal(error.message, expected, label);
+    assert.equal(error.stack ?? error.message, expected, label);
+    assert.equal(JSON.stringify(result).includes('zbob'), false, label);
+    assert.equal(result.warnings.some((warning) => warning.includes('zbob')), false, label);
+  }
+
+  function assertOutside(result, label, expected) {
+    const error = result.records[0].attempts[0].errors[0];
+    const stored = error.stack ?? error.message;
+    assert.equal(error.message, expected, label);
+    assert.equal(stored, expected, label);
+    assert.equal(stored.includes('C:Users'), false, label);
+    assert.equal(redactHomeText(stored), redactHomeText(expected), label);
+    assert.equal(redactHomeText(stored).includes('zbob'), false, label);
+    assert.equal(result.warnings.some((warning) => warning.includes('zbob')), false, label);
+  }
+
+  assertInside(parsePlaywrightJson(report(driveRoot), 'drive.json'), 'json-drive', relative);
+  assertInside(parsePlaywrightJson(report(extendedRoot), 'extended.json'), 'json-extended', relative);
+  assertOutside(parsePlaywrightJson(report(outsideRoot), 'outside.json'), 'json-outside', frame);
+  assertOutside(parsePlaywrightJson(report(undefined), 'none.json'), 'json-none', frame);
+  assertInside(parseJunit(xml(), 'drive.xml', { rootDir: driveRoot }), 'junit-drive', relative.trim());
+  assertInside(parseJunit(xml(), 'extended.xml', { rootDir: extendedRoot }), 'junit-extended', relative.trim());
+  assertOutside(parseJunit(xml(), 'outside.xml', { rootDir: outsideRoot }), 'junit-outside', frame.trim());
+  assertOutside(parseJunit(xml(), 'none.xml'), 'junit-none', frame.trim());
+});
+
+test('a UNC project root is relative in JSON and JUnit', () => {
+  const root = String.raw`\\srv\share\proj`;
+  const spec = String.raw`\\srv\share\proj\p.spec.ts`;
+  const stack = String.raw`Error at \\srv\share\proj\p.spec.ts:3:5`;
+  const attachment = String.raw`\\srv\share\proj\test-results\x\trace.zip`;
+  const deeper = String.raw`\\srv\share\proj\tests\a.spec.ts`;
+  const deeperText = String.raw`Error at \\srv\share\proj\tests\a.spec.ts:3:5`;
+  const warnings = [];
+  assert.equal(toPortablePath(deeper, root, warnings), 'tests/a.spec.ts');
+  assert.equal(relativizeText(deeperText, root, warnings), 'Error at tests/a.spec.ts:3:5');
+  assert.equal(warnings.length, 0);
+  const mixedCase = String.raw`\\SRV\Share\Proj`;
+  assert.equal(toPortablePath(spec, mixedCase, warnings), 'p.spec.ts');
+
+  const extendedRoot = String.raw`\\?\UNC\srv\share\proj`;
+  const extendedSpec = String.raw`\\?\UNC\srv\share\proj\p.spec.ts`;
+  const extendedStack = String.raw`Error at \\?\UNC\srv\share\proj\p.spec.ts:3:5`;
+  const extendedAttachment = String.raw`\\?\UNC\srv\share\proj\test-results\x\trace.zip`;
+  assert.equal(toPortablePath(extendedSpec, extendedRoot, warnings), 'p.spec.ts');
+  assert.equal(relativizeText(extendedStack, extendedRoot, warnings), 'Error at p.spec.ts:3:5');
+  const driveRoot = String.raw`\\?\C:\work\repo`;
+  const driveFile = String.raw`\\?\C:\work\repo\src\a.ts`;
+  assert.equal(toPortablePath(driveFile, driveRoot, warnings), 'src/a.ts');
+
+  function jsonReport(rootDir, filePath, message, attach) {
+    return JSON.stringify({
+      config: { rootDir },
+      suites: [
+        {
+          title: 'p.spec.ts',
+          file: filePath,
+          specs: [
+            {
+              title: 'reads',
+              file: filePath,
+              tests: [
+                {
+                  projectName: 'chromium',
+                  expectedStatus: 'passed',
+                  status: 'unexpected',
+                  results: [
+                    {
+                      retry: 0,
+                      status: 'failed',
+                      duration: 1,
+                      errors: [
+                        {
+                          message: 'boom',
+                          stack: message,
+                          location: { file: filePath, line: 3, column: 5 },
+                        },
+                      ],
+                      attachments: [{ name: 'trace', path: attach, contentType: 'application/zip' }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  function assertRelative(result, label, withLocation) {
+    const error = result.records[0].attempts[0].errors[0];
+    assert.equal(result.records[0].file, 'p.spec.ts', label);
+    if (withLocation) assert.equal(error.location.file, 'p.spec.ts', label);
+    assert.equal(error.stack, 'Error at p.spec.ts:3:5', label);
+    assert.equal(result.records[0].attempts[0].attachments[0].path, 'test-results/x/trace.zip', label);
+    assert.equal(JSON.stringify(result).includes('srv'), false, label);
+    assert.equal(JSON.stringify(result).includes('share'), false, label);
+  }
+
+  assertRelative(parsePlaywrightJson(jsonReport(root, spec, stack, attachment), 'unc-root.json'), 'json', true);
+  assertRelative(
+    parsePlaywrightJson(jsonReport(extendedRoot, extendedSpec, extendedStack, extendedAttachment), 'ext.json'),
+    'extended',
+    true,
+  );
+  assertRelative(
+    parsePlaywrightJson(jsonReport(mixedCase, spec, stack, attachment), 'case.json'),
+    'case',
+    true,
+  );
+
+  const xml = `<testsuite hostname="chromium">
+    <testcase name="reads" classname="p.spec.ts" file="${spec}">
+      <failure message="boom"><![CDATA[${stack}]]></failure>
+      <system-out><![CDATA[
+[[ATTACHMENT|${attachment}]]
+]]></system-out>
+    </testcase>
+  </testsuite>`;
+  assertRelative(parseJunit(xml, 'unc-root.xml', { rootDir: root }), 'junit', false);
+  const extendedXml = `<testsuite hostname="chromium">
+    <testcase name="reads" classname="p.spec.ts" file="${extendedSpec}">
+      <failure message="boom"><![CDATA[${extendedStack}]]></failure>
+      <system-out><![CDATA[
+[[ATTACHMENT|${extendedAttachment}]]
+]]></system-out>
+    </testcase>
+  </testsuite>`;
+  assertRelative(parseJunit(extendedXml, 'ext.xml', { rootDir: extendedRoot }), 'junit-extended', false);
+
+  const outsideHome = String.raw`\\srv\Users\bob\proj\a.ts`;
+  const outsideLine = String.raw`at \\srv\Users\bob\proj\a.ts:3:1`;
+  const outsidePlain = String.raw`\\other\share\notes.txt`;
+  const outsidePlainText = String.raw`Error at \\other\share\notes.txt`;
+  const outside = parsePlaywrightJson(
+    jsonReport('/workspace/app', outsideHome, outsideLine, outsideHome),
+    'outside-home.json',
+  );
+  const outsideError = outside.records[0].attempts[0].errors[0];
+  assert.equal(outsideError.stack, outsideLine);
+  assert.equal(outsideError.location.file.includes('bob'), false);
+  assert.match(outsideError.location.file, /\\\\srv<home>\/proj\/a\.ts/);
+  assert.equal(outside.records[0].attempts[0].attachments[0].path.includes('bob'), false);
+  assert.equal(outsideError.stack.includes('srv/Users'), false);
+  assert.equal(outsideError.stack.includes('../../srv'), false);
+  const plain = parsePlaywrightJson(
+    jsonReport('/workspace/app', outsidePlain, outsidePlainText, outsidePlain),
+    'outside-plain.json',
+  );
+  const plainError = plain.records[0].attempts[0].errors[0];
+  assert.equal(plainError.location.file, outsidePlain);
+  assert.equal(plainError.stack, outsidePlainText);
+  assert.equal(plain.records[0].attempts[0].attachments[0].path, outsidePlain);
+  assert.equal(JSON.stringify(plain).includes('other/share'), false);
+  assert.equal(JSON.stringify(plain).includes('../../other'), false);
+  const plainXml = `<testsuite hostname="chromium">
+    <testcase name="reads" classname="notes" file="${outsidePlain}">
+      <failure message="boom"><![CDATA[${outsidePlainText}]]></failure>
+      <system-out><![CDATA[
+[[ATTACHMENT|${outsidePlain}]]
+]]></system-out>
+    </testcase>
+  </testsuite>`;
+  const plainJunit = parseJunit(plainXml, 'outside-plain.xml', { rootDir: '/workspace/app' });
+  assert.equal(plainJunit.records[0].file, outsidePlain);
+  assert.equal(plainJunit.records[0].attempts[0].errors[0].stack, outsidePlainText);
+  assert.equal(plainJunit.records[0].attempts[0].attachments[0].path, outsidePlain);
+});
+
+test('a UNC line stays absolute so the username can be redacted later', () => {
+  const line = String.raw`at \\srv\Users\bob\proj\a.ts:3:1`;
+  const extended = String.raw`\\?\UNC\server\Users\carol\y`;
+  const smb = 'smb://server/Users/alice/z.ts';
+  const xml = `<testsuite hostname="chromium">
+    <testcase name="unc" classname="a.spec.ts" file="a.spec.ts">
+      <failure message="unc"><![CDATA[${line}]]></failure>
+    </testcase>
+  </testsuite>`;
+  const storedError = parseJunit(xml, 'reports/unc.xml').records[0].attempts[0].errors[0];
+  const stored = storedError.stack ?? storedError.message;
+  assert.equal(stored, line);
+  assert.equal(stored.includes('srv/Users'), false);
+  assert.equal(redactHomeText(stored).includes('bob'), false);
+  assert.match(redactHomeText(stored), /\\\\srv<home>\/proj\/a\.ts:3:1/);
+  const raw = JSON.stringify({
+    config: { rootDir: '/workspace/app' },
+    suites: [
+      {
+        title: 'a.spec.ts',
+        file: 'a.spec.ts',
+        specs: [
+          {
+            title: 'unc',
+            file: 'a.spec.ts',
+            tests: [
+              {
+                projectName: 'chromium',
+                expectedStatus: 'passed',
+                status: 'unexpected',
+                results: [
+                  {
+                    retry: 0,
+                    status: 'failed',
+                    duration: 1,
+                    errors: [
+                      {
+                        message: line,
+                        stack: extended,
+                        location: { file: String.raw`\\srv\Users\bob\proj\a.ts`, line: 3, column: 1 },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const json = parsePlaywrightJson(raw, 'unc.json');
+  const error = json.records[0].attempts[0].errors[0];
+  assert.equal(error.message, line);
+  assert.equal(error.stack, extended);
+  assert.equal(error.message.includes('../../srv'), false);
+  assert.equal(error.location.file.includes('bob'), false);
+  assert.match(error.location.file, /\\\\srv<home>\/proj\/a\.ts/);
+  assert.equal(json.warnings.some((warning) => warning.includes('bob') || warning.includes('carol')), false);
+  assert.equal(redactHomeText(smb).includes('alice'), false);
+});
+
+test('a long line after a home stays under the bound', () => {
+  const line = `/home/bob/a ${'word '.repeat(40000)}C:\\x`;
+  const started = Date.now();
+  const out = redactHomeText(line);
+  const elapsed = Date.now() - started;
+  assert.equal(elapsed < 2000, true, `elapsed ${elapsed}`);
+  assert.equal(out.includes('bob'), false);
+  assert.equal(out.startsWith('<home>/a '), true);
+});
+
+test('homeMarks stays linear for many usernames', () => {
+  const lines = Array.from({ length: 20000 }, (_item, index) => `/home/user${index}/a`);
+  const started = Date.now();
+  const marks = homeMarks(lines);
+  assert.equal(Date.now() - started < 2000, true);
+  assert.equal(marks.size, 20000);
+});
+
+test('homeMarks stays linear on one line of 20000 homes', () => {
+  const line = Array.from({ length: 20000 }, (_item, index) => `/home/user${index}/a`).join(' ');
+  const started = Date.now();
+  const marks = homeMarks([line]);
+  const elapsed = Date.now() - started;
+  assert.equal(elapsed < 2000, true, `elapsed ${elapsed}`);
+  assert.equal(marks.size, 20000);
+});
+
+test('the second home file uses a file mark, not a home mark', () => {
+  const xml = `<testsuites><testsuite hostname="chromium">
+    <testcase name="reads" classname="a.spec.ts" file="/home/alice/proj/a.spec.ts">
+      <failure message="Error: element(s) not found">Error: element(s) not found</failure>
+    </testcase>
+    <testcase name="reads" classname="a.spec.ts" file="/home/bob/proj/a.spec.ts">
+      <failure message="Error: element(s) not found">Error: element(s) not found</failure>
+    </testcase>
+  </testsuite></testsuites>`;
+  const result = parseJunit(xml, 'reports/two-homes.xml');
+  assert.equal(result.records[1].id.startsWith('<file~2>/'), true);
+  assert.equal(result.records[1].id.includes('<home~2>'), false);
 });

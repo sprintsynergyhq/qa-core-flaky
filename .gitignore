@@ -8,3 +8,4 @@ demo/saucedemo/reports/live.json
 demo/saucedemo/reports/live.junit.xml
 demo/saucedemo/test-results
 demo/saucedemo/playwright-report
+fixtures/pw-project/.order-marker

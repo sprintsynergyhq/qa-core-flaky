@@ -1,3 +1,5 @@
+import type { TestRecord } from '../model.js';
+import { orderDependencyEvidence } from '../signals/order.js';
 import type { RuleMatch } from './types.js';
 import { isQuotedContextLine, lineContaining } from './text.js';
 
@@ -20,6 +22,18 @@ export type ReceivedSample = {
   /** The `Received:` line, kept as written. */
   receivedLine: string;
 };
+
+/**
+ * DATA-ORDER when in-order and isolated disagree and each mode is consistent.
+ * The evidence names the modes and the counts. It is not a substring of the error.
+ */
+export function orderMatch(record: TestRecord): RuleMatch | undefined {
+  const evidence = orderDependencyEvidence(record)
+    .map((line) => (line.length > 300 ? line.slice(0, 300) : line))
+    .filter((line) => line.length > 0);
+  if (evidence.length === 0) return undefined;
+  return { ruleId: 'DATA-ORDER', evidence };
+}
 
 /**
  * Read the assertion identity and the received line.

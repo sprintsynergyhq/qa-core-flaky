@@ -1,0 +1,35 @@
+{
+  "config": { "rootDir": "." },
+  "suites": [
+    {
+      "title": "tests/order.spec.ts",
+      "file": "tests/order.spec.ts",
+      "specs": [
+        {
+          "title": "order writer sets the marker",
+          "ok": true,
+          "tests": [
+            {
+              "projectName": "chromium",
+              "expectedStatus": "passed",
+              "status": "expected",
+              "results": [{ "retry": 0, "status": "passed", "duration": 4, "errors": [] }]
+            }
+          ]
+        },
+        {
+          "title": "order reader expects the marker",
+          "ok": true,
+          "tests": [
+            {
+              "projectName": "chromium",
+              "expectedStatus": "passed",
+              "status": "expected",
+              "results": [{ "retry": 0, "status": "passed", "duration": 4, "errors": [] }]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

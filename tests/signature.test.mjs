@@ -37,24 +37,46 @@ test('a long token does not stall line and column normalization', () => {
   assert.equal(signature, text);
 });
 
-test('call-log repeat counts share a signature', () => {
-  const left = '9 × locator resolved to <button>Add</button>\n    - waiting for getByRole';
-  const right = '2 × locator resolved to <button>Add</button>\n    - waiting for getByRole';
+function callLog(body) {
+  return `Call log:\n${body}`;
+}
+
+test('call-log repeat counts share a signature inside the block only', () => {
+  const left = callLog('  9 × locator resolved to <button>Add</button>\n      - waiting for getByRole');
+  const right = callLog('  2 × locator resolved to <button>Add</button>\n      - waiting for getByRole');
   assert.equal(normalizeErrorSignature(left), normalizeErrorSignature(right));
   assert.match(normalizeErrorSignature(left), /N × locator/);
-  const letter = '9 x locator resolved to 1 element';
-  const other = '3 x locator resolved to 1 element';
+  const letter = callLog('  9 x locator resolved to 1 element');
+  const other = callLog('  3 x locator resolved to 1 element');
   assert.equal(normalizeErrorSignature(letter), normalizeErrorSignature(other));
   const received = 'Received: "9 x"';
   assert.equal(normalizeErrorSignature(received), received);
-  const dashed = '  - 9 x locator.click';
-  const dashedOther = '  - 2 × locator.click';
+  const dashed = callLog('    - 9 x locator.click');
+  const dashedOther = callLog('    - 2 × locator.click');
   assert.equal(normalizeErrorSignature(dashed), normalizeErrorSignature(dashedOther));
   assert.match(normalizeErrorSignature(dashed), /N × locator/);
-  assert.equal(normalizeErrorSignature('  - 9 × locator'), '- N × locator');
-  assert.equal(normalizeErrorSignature('    9 x locator'), 'N × locator');
-  assert.equal(normalizeErrorSignature('9× locator'), 'N × locator');
-  assert.equal(normalizeErrorSignature('-9 × locator'), '-N × locator');
+  assert.match(normalizeErrorSignature(callLog('  - 9 × locator')), /N × locator/);
+  assert.match(normalizeErrorSignature(callLog('    9 x locator')), /N × locator/);
+  assert.match(normalizeErrorSignature(callLog('  9× locator')), /N × locator/);
+  assert.match(normalizeErrorSignature(callLog('  -9 × locator')), /-N × locator/);
+  assert.equal(normalizeErrorSignature('  - 9 × locator'), '- 9 × locator');
+  assert.equal(normalizeErrorSignature('9 × locator resolved to 1 element'), '9 × locator resolved to 1 element');
+});
+
+test('a waiting line inside a call log shares a signature', () => {
+  const line = 'waiting for element to be visible, enabled and stable';
+  const left = callLog(`  - 2 × ${line}`);
+  const right = callLog(`  - 9 × ${line}`);
+  assert.equal(normalizeErrorSignature(left), normalizeErrorSignature(right));
+  assert.match(normalizeErrorSignature(left), /N × waiting for element/);
+});
+
+test('a long digit run stays linear', () => {
+  const text = `${'9'.repeat(80000)}ms`;
+  const started = Date.now();
+  const signature = normalizeErrorSignature(text);
+  assert.equal(Date.now() - started < 2000, true);
+  assert.equal(signature, 'Nms');
 });
 
 test('a long run of spaces does not stall call-log normalization', () => {

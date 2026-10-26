@@ -16,7 +16,8 @@ export default defineConfig({
   outputDir: 'test-results',
   // causes.spec.ts is a separate local run. Keeping it out of this config
   // leaves the committed outcomes report as the seven-test fixture.
-  testIgnore: '**/causes.spec.ts',
+  // order.spec.ts is the rerun order pair. It stays out of this report.
+  testIgnore: ['**/causes.spec.ts', '**/order.spec.ts'],
   // A failing toHaveText should be an assertion error, not the test timeout.
   expect: { timeout: 1000 },
   reporter: [

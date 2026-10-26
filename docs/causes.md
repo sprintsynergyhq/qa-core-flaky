@@ -164,9 +164,13 @@ Both lines are evidence. Captured in `fixtures/errors/data-value-1.txt` and `fix
 
 ### DATA-ORDER
 
-Order dependency is not detected in this version. `classifyCauses` calls `options.orderDependency` when the caller passes one. The hook returns evidence substrings. Strings that are not substrings of `message` or `stack`, and strings that are empty, are dropped. A kept line longer than 300 characters is clipped to 300. The rule id is `DATA-ORDER`.
+| | |
+| --- | --- |
+| Check | The record has `in-order` attempts and `isolated` attempts. One of those modes passed on every attempt, and the other failed on every attempt with one error signature. A mode that mixes a pass and a fail, or mixes signatures, does not match |
+| Example | `in-order passed 1, isolated failed 2` |
+| Confidence | Medium when it is the only test-data rule. The line is not a substring of the error |
 
-The default is no hook, which returns nothing. PR 6 is the version that fills the hook in. Passing a hook from outside is supported so that version can attach order evidence without changing the other rules. If the hook throws, classification continues. The error is one debug note, `debug: order dependency hook failed: ...`, appended to `options.debugNotes` when that array is present.
+The evidence names the modes and the counts. `repeat` attempts are not part of this check. `options.orderDependency` is still called. That hook must return substrings of `message` or `stack`. Empty strings are dropped. A kept line longer than 300 characters is clipped to 300. If the hook throws, classification continues. The error is one debug note, `debug: order dependency hook failed: ...`, appended to `options.debugNotes` when that array is present.
 
 ## Environment
 
@@ -204,7 +208,7 @@ A closed target that still has selector evidence stays a selector finding and is
 
 | Rule | When | Evidence | Confidence |
 | --- | --- | --- | --- |
-| UNK-NONE | Some failed attempt has error text, and no rule matched | The `Expected:` and `Received:` lines when those exist, otherwise the first non-empty line that is still evidence. If every line was removed as a stack frame, the first original line is quoted. Each line is clipped to 300 characters. Leading whitespace is allowed | low |
+| UNK-NONE | Some failed attempt has error text, and no rule matched | The `Expected:` and `Received:` lines when those exist. A `toContain` failure also quotes `Expected substring:` and `Received string:`. Otherwise the first non-empty line that is still evidence. If every line was removed as a stack frame, the first original line is quoted. Each line is clipped to 300 characters. Leading whitespace is allowed | low |
 | UNK-EMPTY | Every failed attempt has no error text, or the record is failed or flaky and has no failed attempt | Empty | low |
 
 A value mismatch on a resolved locator, such as `toHaveText` with `Received: "1"`, is `UNK-NONE` when the received value does not change across attempts. It is not selectors and it is not timing. The captured example is `fixtures/errors/data-value-1.txt`.
@@ -219,7 +223,7 @@ A value mismatch on a resolved locator, such as `toHaveText` with `Received: "1"
 4. A port on `localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`, or an `http(s)` URL becomes `:PORT`.
 5. Digits inside a `/tmp/`, `/private/tmp/`, or `/var/folders/` path become `N`.
 6. A UUID becomes `ID`. Digits after `id=` or `id:` become `N`.
-7. A count is rewritten only when it starts a call-log line. Optional spaces come first, then an optional `-` and the spaces after it, then the count, then `×` or `x`, then `locator`. That count becomes `N ×`. `9 × locator` and `9 x locator` become `N × locator`. A count on an Expected or Received line stays. A quoted value which runs onto a line starting with a count followed by `locator` can still be rewritten.
+7. Inside a `Call log:` block only, a leading count becomes `N ×`. The block starts at a line that is only `Call log:` and continues while the next lines are indented further. A blank line or a less-indented line ends it. Optional spaces come first, then an optional `-` and the spaces after it, then the count, then `×` or `x`, then the rest of the line. `2 × locator` and `2 × waiting for element to be visible, enabled and stable` both match. A count outside that block stays, including a `Received:` line and a continuation that starts with `2 x locator`.
 8. Runs of spaces or tabs become one space, then the ends are trimmed.
 
 Numbers in assertion values are kept, including `Expected: "1 × 4"`, `Received: "2×"`, and `Received: "2 × Backpack"`. `Received: "1"` and `Received: "9 x"` stay as written. Two errors that differ only by a call-log repeat count share a signature.
@@ -233,5 +237,5 @@ Numbers in assertion values are kept, including `Expected: "1 × 4"`, `Received:
 - `TIM-NEAR-TIMEOUT` runs only when the caller passes the test timeout. The normalized record does not store Playwright's per-test timeout, and `causes` does not read it out of the raw report.
 - JUnit attachment paths stay relative to the report file. JSON attachment paths stay relative to `config.rootDir`. The two bases are documented in [model.md](model.md). Cause rules do not quote attachment paths.
 - A Windows path that does not share a drive with the report root is stored as `C:/...` with the drive kept and the separators collapsed. It is not rewritten to a POSIX relative path.
-- Order dependency is the `orderDependency` hook only. Nothing in this version decides that a test failed because of order.
-- A stack-frame-only error, such as `at /home/alice:12:3`, is Unknown and quotes that first frame. The frame is not a cause by itself.
+- `DATA-ORDER` compares `in-order` and `isolated` attempts on the record. It does not read `repeat` attempts. The optional `orderDependency` hook can still add a substring of the error.
+- A stack-frame-only error, such as `at /home/alice:12:3`, is Unknown and quotes that first frame. The frame is not a cause by itself. A UNC path, an extended `\\?\` path, and an SMB path inside the report root are made relative with that root. Error text strips `\\?\` and `//?/` before the drive and root checks, so `    at \\?\C:\Users\zbob\proj\tests\p.spec.ts:3:5` with root `C:\Users\zbob\proj` or `\\?\C:\Users\zbob\proj` is quoted as `tests/p.spec.ts:3:5`. Outside that root, or when the report has no root, the frame stays the original absolute text. It is not rewritten to `\\?\C:Users/zbob/...`. The quote then hides the username, as `\\?\<home>/proj/tests/p.spec.ts:3:5`. A warning does not contain the username. `at \\srv\Users\bob\proj\a.ts:3:1` is not rewritten to `srv/Users/bob/...` or `../../srv/Users/bob/...` before the username is hidden. The quoted frame shows `<home>` and keeps the server name.

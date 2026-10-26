@@ -25,14 +25,35 @@ export type VerdictSignal = {
   detail: string;
 };
 
+/** Pass and fail counts for one rerun mode. */
+export type RerunCounts = {
+  /** Attempts in this mode that Playwright actually ran. Unselectable commands are not included. */
+  total: number;
+  /** Failed, timed out, or interrupted attempts in this mode. */
+  failed: number;
+  /** Passed attempts in this mode. */
+  passed: number;
+  /** Commands that could not select this test. Omitted when there are none. Not part of `total`. */
+  notRun?: number;
+};
+
 /** Pass and fail counts for one test id across every report given to triage. */
 export type TriageAttempts = {
-  /** Every attempt, including skipped attempts. */
+  /** Every attempt that ran, including skipped attempts. An unselectable rerun command is not included. */
   total: number;
   /** Attempts whose status is failed, timedOut, or interrupted. */
   failed: number;
   /** Attempts whose status is passed. */
   passed: number;
+  /**
+   * Present when `qa-core-flaky rerun` added attempts.
+   * Only modes that ran are included.
+   */
+  reruns?: {
+    repeat?: RerunCounts;
+    isolated?: RerunCounts;
+    'in-order'?: RerunCounts;
+  };
   /**
    * True when a pass and a fail share the same code.
    * The same commit SHA matches across reports. A missing SHA matches only
@@ -84,8 +105,15 @@ export type TriageEntry = {
   suggestedFix: string;
   /** Reserved for a later heal diff. Always null in this version. */
   healProposal: null;
-  /** A sentence that contains the exact rerun command. */
+  /** A sentence that contains `qa-core-flaky rerun --from <report> --only <id>`, plus `--config` when the report recorded one. */
   nextStep: string;
+  /**
+   * Set when every rerun attempt that ran passed.
+   * The text is `no flake observed in N runs`. N does not include an unselectable command.
+   * Absent when there were no ran reruns or a ran rerun did not pass.
+   * The report does not call that result steady.
+   */
+  observation?: string;
   /** Set for an unexpected `test.fail()` pass, or when the failures have no error text. Otherwise null. */
   note: string | null;
   /** Reserved for a later explanation. Always null in this version. */

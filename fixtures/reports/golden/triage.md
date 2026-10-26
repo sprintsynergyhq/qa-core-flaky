@@ -36,7 +36,7 @@ The rules did not name a cause. Compare the quoted expected and received values 
 
 ### Next Step
 
-Review the suggested fix. To see the test again, run: qa-core-flaky rerun "tests/outcomes.spec.ts" -g "always fails" --times 10
+Review the suggested fix. To see the test again, run: `qa-core-flaky rerun --from 'fixtures/reports/pw-1.60.0-outcomes.json' --only 'tests/outcomes.spec.ts::chromium::always fails' --config 'playwright.config.ts'`
 
 Review status: Needs Review.
 
@@ -69,7 +69,7 @@ The rules did not name a cause. Compare the quoted expected and received values 
 
 ### Next Step
 
-Review the suggested fix. To see the test again, run: qa-core-flaky rerun "tests/outcomes.spec.ts" -g "flaky by retry" --times 10
+Review the suggested fix. To see the test again, run: `qa-core-flaky rerun --from 'fixtures/reports/pw-1.60.0-outcomes.json' --only 'tests/outcomes.spec.ts::chromium::flaky by retry' --config 'playwright.config.ts'`
 
 Review status: Needs Review.
 
@@ -103,6 +103,6 @@ The locator never resolved. Check whether the element is missing or the locator 
 
 ### Next Step
 
-Review the suggested fix. To see the test again, run: qa-core-flaky rerun "tests/outcomes.spec.ts" -g "times out" --times 10
+Review the suggested fix. To see the test again, run: `qa-core-flaky rerun --from 'fixtures/reports/pw-1.60.0-outcomes.json' --only 'tests/outcomes.spec.ts::chromium::times out' --config 'playwright.config.ts'`
 
 Review status: Needs Review.

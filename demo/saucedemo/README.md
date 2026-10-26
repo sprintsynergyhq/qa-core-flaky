@@ -64,13 +64,13 @@ A separate run with `FLAKE_RATE=0` and `--retries 0`, still using `-g "B expects
 
 Observed on 25 Oct 2026 (UTC) against https://www.saucedemo.com. This is what those runs did. It is not a guarantee about a later visit.
 
-`standard_user` reached the inventory in 308 ms, 245 ms, and 255 ms. Six products were listed. The backpack image src was `/assets/sauce-backpack-1200x1500-CjRW-Djj.jpg`. The remove control's accessible name was `Remove`.
+These timing figures are manual observations from 25 Oct 2026 (UTC), not a committed measurement log. `standard_user` reached the inventory in 308 ms, 245 ms, and 255 ms. Six products were listed. The backpack image src was `/assets/sauce-backpack-1200x1500-CjRW-Djj.jpg`. The remove control's accessible name was `Remove`.
 
 `locked_out_user`, one login, stayed on `/` and showed `Epic sadface: Sorry, this user has been locked out.`
 
 `problem_user`: on 25 Oct 2026 UTC, three separate logins each showed every product image src as `/assets/sl-404-Cq1a9k9X.jpg`. The recorded suite is one later run. All three of its attempts failed with that same src. No flake was observed in those checks. One extra check selected name Z to A. The control stayed on `az`, and the names stayed in the same order. The image mismatch is the assertion this suite keeps.
 
-`performance_glitch_user` reached the inventory in 5319 ms, 5324 ms, and 5318 ms. The delay was present on all three logins, so it cannot fail one attempt and pass the next. It is not in the suite.
+`performance_glitch_user` reached the inventory in 5319 ms, 5324 ms, and 5318 ms. Those three figures are the same manual observations from 25 Oct 2026 (UTC). The delay was present on all three logins, so it cannot fail one attempt and pass the next. It is not in the suite.
 
 `error_user`, one login, set the cart badge to `1` after Add. A Remove click left the badge at `1`. The checkout fields on that page used `data-test` values `firstName`, `lastName`, and `postalCode`. That was one login, not a repeated check.
 

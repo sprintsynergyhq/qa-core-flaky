@@ -13,6 +13,7 @@ import {
   parseJunit,
   parsePlaywrightJson,
   redactHomeText,
+  redactParseResult,
   renderTriageJson,
   renderTriageMarkdown,
 } from '../dist/index.js';
@@ -149,7 +150,8 @@ test('a triage entry keeps the review status and a command', (t) => {
   const report = buildTriageReport(fixtureRecords());
   for (const entry of report.entries) {
     assert.equal(entry.review.status, 'Needs Review');
-    assert.match(entry.nextStep, /qa-core-flaky rerun "tests\/outcomes\.spec\.ts"/);
+    assert.match(entry.nextStep, /qa-core-flaky rerun --from 'fixtures\/reports\/pw-1\.60\.0-outcomes\.json' --only '/);
+    assert.equal(entry.nextStep.includes('-g '), false);
     assert.equal(entry.suggestedFix.length > 0, true);
   }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-'));
@@ -357,6 +359,36 @@ test('markdown evidence escapes html from an overlay error', () => {
   assert.equal(report.entries[0].evidence.some((line) => line.includes('<div id="cover">')), true);
 });
 
+test('a newline or a pipe in a title stays inside one summary row', () => {
+  const message = 'Error: element(s) not found';
+  const item = oneRecord('left | right\nnext', [
+    attempt('failed', message, 0),
+    attempt('failed', message, 1),
+    attempt('failed', message, 2),
+  ]);
+  const markdown = renderTriageMarkdown(buildTriageReport([item]));
+  const table = markdown.split('\n').filter((line) => line.startsWith('|'));
+  assert.equal(table.length, 3);
+  assert.match(table[2], /left \\| right\\nnext/);
+  const heading = markdown.split('\n').find((line) => line.startsWith('## ') && line.includes('left'));
+  assert.match(heading, /left \\| right\\nnext/);
+  assert.equal(heading.includes('\n'), false);
+});
+
+test('a newline in the rerun command stays inside one code span', () => {
+  const message = 'Error: element(s) not found';
+  const item = oneRecord('line\nbreak', [
+    attempt('failed', message, 0),
+    attempt('failed', message, 1),
+    attempt('failed', message, 2),
+  ]);
+  const markdown = renderTriageMarkdown(buildTriageReport([item]));
+  const next = markdown.split('\n').find((line) => line.includes('qa-core-flaky rerun'));
+  assert.ok(next);
+  assert.match(next, /line\\nbreak/);
+  assert.equal(next.includes('`qa-core-flaky rerun'), true);
+});
+
 test('markdown escapes home and title brackets in the table, heading, and next step', () => {
   const message = 'Error: element(s) not found';
   const item = oneRecord('renders <Cart> & qty', [
@@ -369,11 +401,13 @@ test('markdown escapes home and title brackets in the table, heading, and next s
   const report = buildTriageReport([item]);
   const markdown = renderTriageMarkdown(report);
   const json = renderTriageJson(report);
-  assert.equal(markdown.includes('<Cart>'), false);
-  assert.equal(markdown.includes('<home>'), false);
   assert.match(markdown, /\| &lt;home&gt;\/proj\/a\.spec\.ts::chromium::renders &lt;Cart&gt; &amp; qty \|/);
   assert.match(markdown, /^## &lt;home&gt;\/proj\/a\.spec\.ts::chromium::renders &lt;Cart&gt; &amp; qty$/m);
-  assert.match(markdown, /qa-core-flaky rerun "&lt;home&gt;\/proj\/a\.spec\.ts" -g "renders &lt;Cart&gt; &amp; qty"/);
+  assert.match(
+    markdown,
+    /`qa-core-flaky rerun --from 'fixture\.json' --only '<home>\/proj\/a\.spec\.ts::chromium::renders <Cart> & qty'`/,
+  );
+  assert.equal(markdown.includes('\\'), false);
   assert.equal(markdown.includes('&amp;amp;'), false);
   assert.equal(json.includes('renders <Cart> & qty'), true);
   assert.equal(json.includes('<home>/proj/a.spec.ts'), true);
@@ -675,4 +709,31 @@ test('markdown escapes stars, underscores, and backticks in a title', () => {
   assert.match(markdown, /\\*bold\\*/);
   assert.match(markdown, /\\_em\\_/);
   assert.match(markdown, /\\`code\\`/);
+});
+
+test('corpus triage text hides the known home usernames', () => {
+  const corpora = [
+    'fixtures/reports/pw-1.60.0-outcomes.json',
+    'fixtures/reports/pw-1.60.0-outcomes.junit.xml',
+    'fixtures/reports/junit-generic.xml',
+    'fixtures/reports/junit-no-root-home.xml',
+    'demo/saucedemo/reports/recorded-seed-443.json',
+    'demo/saucedemo/reports/recorded-seed-443.junit.xml',
+  ];
+  const names = ['alice', 'bob', 'carol'];
+  for (const reportPath of corpora) {
+    const source = fs.readFileSync(reportPath, 'utf8');
+    const parsed = reportPath.endsWith('.json') ? parsePlaywrightJson(source, reportPath) : parseJunit(source, reportPath);
+    const report = buildTriageReport(parsed.records);
+    const outputs = {
+      'triage.json': renderTriageJson(report),
+      'triage.md': renderTriageMarkdown(report),
+      'parse --redact': JSON.stringify(redactParseResult(parsed)),
+    };
+    for (const [label, text] of Object.entries(outputs)) {
+      for (const name of names) {
+        assert.equal(text.includes(name), false, `${reportPath} ${label} contains ${name}`);
+      }
+    }
+  }
 });
