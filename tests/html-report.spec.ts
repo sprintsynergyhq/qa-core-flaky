@@ -41,7 +41,11 @@ function pdfToText(pdf: Buffer): string {
     const content = streamText(body);
     if (!content.includes('Tj')) continue;
     let font: Map<number, string> | undefined;
-    for (const match of content.matchAll(/\/(F\d+)\s+[\d.]+\s+Tf|<([0-9A-Fa-f]+)>\s*Tj/g)) {
+    for (const match of content.matchAll(/\/(F\d+)\s+[\d.]+\s+Tf|<([0-9A-Fa-f]+)>\s*Tj|\bBT\b/g)) {
+      if (match[0] === 'BT') {
+        if (text && !/\s$/.test(text)) text += ' ';
+        continue;
+      }
       if (match[1]) {
         font = fonts.get(match[1]);
         continue;
@@ -102,7 +106,9 @@ function utf16Hex(hex: string): string {
 
 test('the report works offline in a browser', async ({ page, browserName }) => {
   const urls = track(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(reportUrl);
+  await expect(page.getByLabel('Sort By')).toBeHidden();
   await expect(page.getByRole('heading', { name: 'Triage Report', level: 1 })).toBeVisible();
   await expect(page.locator('[data-summary="tests"]')).toHaveText('6');
   await expect(page.locator('[data-summary="flaky"]')).toHaveText('6');
@@ -140,7 +146,7 @@ test('the report works offline in a browser', async ({ page, browserName }) => {
   await row.locator('summary').click();
   await expect(row.getByText('net::ERR_INTERNET_DISCONNECTED')).toBeVisible();
   await expect(row.getByText('Needs Review')).toBeVisible();
-  const command = await row.locator('code').innerText();
+  const command = await row.locator('pre').last().evaluate((node) => node.textContent ?? '');
   expect(command).toContain('qa-core-flaky rerun ');
   await page.evaluate(() => {
     document.addEventListener('copy', (event) => {
@@ -219,6 +225,8 @@ test('print lists every evidence heading', async ({ page, browserName }) => {
   const text = pdfToText(Buffer.from(pdf));
   expect(text.split('Evidence').length - 1).toBe(6);
   expect(text.split('Next Step').length - 1).toBe(6);
+  expect(text.includes('Verdict')).toBe(true);
+  expect(text.includes('Runs Seen')).toBe(true);
   expect(httpUrls(urls)).toEqual([]);
 });
 
@@ -325,7 +333,7 @@ test('escaped titles do not run', async ({ page }, testInfo) => {
   });
   await page.goto(pathToFileURL(file).href);
   await page.locator('summary').click();
-  await expect(page.locator('pre')).toContainText('back`tick');
+  await expect(page.locator('pre').first()).toContainText('back`tick');
   expect(await page.locator('img').count()).toBe(0);
   expect(await page.locator('script').count()).toBe(1);
   expect(dialog).toBe(false);

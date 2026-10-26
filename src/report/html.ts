@@ -96,17 +96,19 @@ export function renderTriageHtml(report: TriageReport, options: HtmlRenderOption
     "form-action 'none'",
   ].join('; ');
 
-  const body = [
-    '<a class="skip" href="#tests">Skip To Tests</a>',
-    renderHeader(source),
-    '<main>',
-    renderSummary(source),
-    renderCauses(source),
-    renderTests(source, counts),
-    '</main>',
-    `<footer class="footer"><p>${footerLine(version)}</p></footer>`,
-    `<script>${REPORT_SCRIPT}</script>`,
-  ].join('');
+  const body = omitOptionalEndTags(
+    [
+      '<a class="skip" href="#tests">Skip To Tests</a>',
+      renderHeader(source),
+      '<main>',
+      renderSummary(source),
+      renderCauses(source),
+      renderTests(source, counts),
+      '</main>',
+      `<footer class="footer"><p>${footerLine(version)}</p></footer>`,
+      `<script>${REPORT_SCRIPT}</script>`,
+    ].join(''),
+  );
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -191,6 +193,19 @@ function requireCount(value: unknown, field: string): number {
     throw new Error(`${field} must be a finite number`);
   }
   return value;
+}
+
+/**
+ * Drop end tags the HTML parser restores on its own.
+ * A 200 entry report stays under 300 KB, and the DOM is unchanged.
+ */
+function omitOptionalEndTags(html: string): string {
+  return html
+    .replaceAll('</td>', '')
+    .replaceAll('</th>', '')
+    .replaceAll('</tr>', '')
+    .replaceAll('</tbody>', '')
+    .replace(/<\/p>(?=<h[1-6]|<p|<pre)/g, '');
 }
 
 function footerLine(version: string): string {
@@ -343,8 +358,11 @@ function renderDetail(entry: TriageEntry, counts: CheckedCounts): string {
   if (reruns) parts.push(reruns);
   if (entry.observation) parts.push(`<p>${escapeHtml(entry.observation)}</p>`);
   if (entry.note) parts.push(`<h3>Note</h3><p>${escapeHtml(entry.note)}</p>`);
+  const sameCode = entry.attempts.sameCommit ? 'yes' : 'no';
+  parts.push(
+    `<h3>Attempts</h3><p>Total ${counts.total}, failed ${counts.failed}, passed ${counts.passed}. Same code for a pass and a fail: ${sameCode}.</p>`,
+  );
   if (counts.runsSeen > 1) parts.push(`<p>Seen In ${counts.runsSeen} Runs</p>`);
-  parts.push(`<p>passed ${counts.passed}. Same code: ${entry.attempts.sameCommit ? 'yes' : 'no'}.</p>`);
   parts.push(`<p>Review Status: ${escapeHtml(entry.review.status)}.</p>`);
   return parts.join('');
 }
@@ -354,7 +372,7 @@ function renderNextStep(nextStep: string): string {
   const at = nextStep.indexOf(marker);
   const lead = at === -1 ? nextStep : nextStep.slice(0, at);
   const command = at === -1 ? nextStep : nextStep.slice(at);
-  return `<p>${escapeHtml(lead)}</p><p><code>${escapeHtml(command)}</code><button>Copy Command</button></p>`;
+  return `<p>${escapeHtml(lead)}</p><pre>${escapeHtml(command)}</pre><button type="button" class="copy">Copy Command</button>`;
 }
 
 function renderReruns(counts: CheckedCounts): string {

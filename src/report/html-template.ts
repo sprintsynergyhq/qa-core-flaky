@@ -125,7 +125,7 @@ h3 { margin: 0.7rem 0 0.25rem; font-size: 0.92rem; font-weight: 650; }
 }
 .toolbar { display: none; flex-wrap: wrap; gap: 0.75rem; align-items: end; margin: 0 0 0.85rem; }
 .js .toolbar { display: flex; }
-.sort { display: none; }
+.toolbar .sort { display: none; }
 .field { display: flex; flex-direction: column; gap: 0.25rem; color: var(--muted); font-size: 0.82rem; }
 .toolbar select, .toolbar input[type="search"] {
   font: inherit;
@@ -196,6 +196,7 @@ pre {
   font-size: 0.88rem;
 }
 code { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 0.88rem; overflow-wrap: anywhere; }
+.copy { display: block; width: fit-content; margin: 0.45rem 0 0; }
 button {
   font: inherit;
   color: var(--ink);
@@ -216,7 +217,7 @@ ${WIDTHS}
   h1 { font-size: 1.6rem; }
   .top-inner, main, .footer { padding-left: 1rem; padding-right: 1rem; }
   .cards { grid-template-columns: 1fr 1fr; }
-  .js .sort { display: flex; }
+  .js .toolbar .sort { display: flex; }
   .toolbar { align-items: stretch; }
   .field, .toolbar select, .toolbar input[type="search"] { width: 100%; min-width: 0; }
   .table-wrap { overflow: visible; border: 0; background: transparent; }
@@ -255,7 +256,7 @@ ${WIDTHS}
     --bar-track: #e4e4e7;
     --zero: #71717a;
   }
-  .skip, .toolbar, button { display: none !important; }
+  .skip, .toolbar, .copy { display: none !important; }
   thead { display: table-header-group; position: static; }
   table { display: table; width: 100%; }
   tbody { display: table-row-group; margin: 0; border: 0; background: transparent; overflow: visible; }
@@ -426,11 +427,9 @@ export const REPORT_SCRIPT = `
   });
   if (search) search.addEventListener('input', applyFilter);
 
-  Array.prototype.forEach.call(document.querySelectorAll('button'), function (button) {
-    if ((button.textContent || '') !== 'Copy Command') return;
+  Array.prototype.forEach.call(document.querySelectorAll('button.copy'), function (button) {
     button.addEventListener('click', function () {
-      var holder = button.parentNode;
-      var code = holder ? holder.querySelector('code') : null;
+      var code = button.previousElementSibling;
       var text = code ? code.textContent || '' : '';
       var previous = button.textContent;
       function done() {
