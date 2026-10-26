@@ -288,7 +288,7 @@ async function runRerun(extra: readonly string[], values: FlagValues): Promise<v
       times: readOptionalPositive(values.times, 'times'),
       retries: readOptionalCount(values.retries, 'retries', 10),
       modes: readModesFlag(values.modes),
-      config: values.config ? runnableConfigPath(values.config, process.cwd()) : undefined,
+      config: values.config,
     });
   } catch (error) {
     if (error instanceof ExitRequest) throw error;

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,6 +9,7 @@ import {
   buildPlaywrightArgs,
   buildTriageReport,
   classifyCauses,
+  formatPrintedCommand,
   parseJunit,
   parsePlaywrightJson,
   redactHomeText,
@@ -46,6 +47,37 @@ function record(message) {
       },
     ],
     source: { format: 'playwright-json', reportPath: 'fixture.json' },
+  };
+}
+
+function withPass(item) {
+  return {
+    ...item,
+    outcome: 'flaky',
+    attempts: [
+      ...item.attempts,
+      {
+        retry: item.attempts.length,
+        status: 'passed',
+        durationMs: 10,
+        errors: [],
+        attachments: [],
+      },
+    ],
+  };
+}
+
+function repeated(message, count, source = {}) {
+  return {
+    ...record(message),
+    attempts: Array.from({ length: count }, (_, index) => ({
+      retry: index,
+      status: 'failed',
+      durationMs: 10,
+      errors: [{ message }],
+      attachments: [],
+    })),
+    source: { format: 'playwright-json', reportPath: 'fixture.json', ...source },
   };
 }
 
@@ -264,7 +296,10 @@ test('a slow page load is a timing cause and a short selector miss stays selecto
     'Error: element(s) not found',
     '  - waiting for getByTestId(\'inventory-list\')',
   ].join('\n');
-  const findings = classifyCauses(record(slow));
+  const missed = classifyCauses(record(slow));
+  assert.equal(missed.some((finding) => finding.ruleIds.includes('TIM-SLOW-LOAD')), false);
+  assert.equal(missed[0].cause, 'selectors');
+  const findings = classifyCauses(withPass(record(slow)));
   assert.equal(findings[0].cause, 'timing');
   assert.equal(findings[0].ruleIds.includes('TIM-SLOW-LOAD'), true);
   const selectors = findings.find((finding) => finding.cause === 'selectors');
@@ -334,19 +369,74 @@ test('a SauceDemo slow-user session is timing and the next step config is runnab
   assert.equal(random.nextStep.includes('playwright.config.ts'), true);
 });
 
-test('the next step config path is project-relative', () => {
+test('the next step config path can be pasted from the project folder', () => {
   assert.equal(
     runnableConfigPath('/home/synthetic/kit/playwright.config.ts', '/home/synthetic/kit'),
     'playwright.config.ts',
   );
   assert.equal(
     runnableConfigPath('/home/synthetic/kit/playwright.config.ts', '/home/synthetic/kit/tests'),
-    '../playwright.config.ts',
+    'playwright.config.ts',
+  );
+  assert.equal(
+    runnableConfigPath('/home/synthetic/kit/e2e/playwright.config.ts', '/home/synthetic/kit'),
+    'e2e/playwright.config.ts',
   );
   const base = runnableConfigPath('/home/synthetic/other/playwright.config.ts', '/tmp/project');
   assert.equal(base.includes('<home>'), false);
   assert.equal(base.includes('synthetic'), false);
   assert.equal(base, 'playwright.config.ts');
+  const raw = '/home/synthetic/kit/playwright.config.ts';
+  const args = buildPlaywrightArgs({
+    file: 'outcomes.spec.ts',
+    mode: 'isolated',
+    times: 1,
+    project: 'chromium',
+    config: raw,
+  });
+  assert.equal(args[args.indexOf('--config') + 1], raw);
+  const printed = formatPrintedCommand(args);
+  assert.equal(printed.includes('synthetic'), false);
+  assert.equal(printed.includes('<home>'), true);
+  const reportText = JSON.stringify({
+    config: {
+      rootDir: '/home/synthetic/kit/tests',
+      configFile: '/home/synthetic/kit/playwright.config.ts',
+    },
+    suites: [
+      {
+        title: 'tests/a.spec.ts',
+        file: 'tests/a.spec.ts',
+        specs: [
+          {
+            title: 'typo',
+            file: 'tests/a.spec.ts',
+            tests: [
+              {
+                projectName: 'chromium',
+                expectedStatus: 'passed',
+                status: 'unexpected',
+                results: [
+                  {
+                    retry: 0,
+                    status: 'failed',
+                    duration: 5000,
+                    errors: [{ message: 'Error: element(s) not found\nTimeout: 5000ms' }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const parsed = parsePlaywrightJson(reportText, 'reports/out.json');
+  assert.equal(parsed.records[0].source.configFile, 'playwright.config.ts');
+  const entry = buildTriageReport(parsed.records).entries[0];
+  assert.equal(entry.nextStep.includes('../playwright.config.ts'), false);
+  assert.match(entry.nextStep, /--config 'playwright\.config\.ts'/);
+  assert.equal(entry.nextStep.includes('synthetic'), false);
 });
 
 test('rerun passes --retries and the default is 0', (t) => {
@@ -401,4 +491,310 @@ test('rerun passes --retries and the default is 0', (t) => {
   const rejected = run(['parse', report, '--retries', '1']);
   assert.equal(rejected.status, 1);
   assert.match(rejected.stderr, /only valid for rerun/);
+});
+
+test('a typo at the default timeout stays a broken test, and a pass makes it a slow load', () => {
+  const visible = [
+    'Error: expect(locator).toBeVisible() failed',
+    'Timeout: 5000ms',
+    'Error: element(s) not found',
+    "Call log:",
+    '  - Expect "toBeVisible" with timeout 5000ms',
+    "  - waiting for getByRole('button', { name: 'Missing' })",
+  ].join('\n');
+  const counted = [
+    'Error: expect(locator).toHaveCount(expected) failed',
+    'Expected: 1',
+    'Received: 0',
+    'Timeout: 5000ms',
+    'Error: element(s) not found',
+    'Call log:',
+    '  - Expect "toHaveCount" with timeout 5000ms',
+    "  - waiting for locator('#missing')",
+    '    8 × locator resolved to 0 elements',
+  ].join('\n');
+  const timed = [
+    'Test timeout of 30000ms exceeded.',
+    'Error: element(s) not found',
+    "  - waiting for getByRole('button', { name: 'Missing' })",
+  ].join('\n');
+  for (const message of [visible, counted, timed]) {
+    const entry = buildTriageReport([repeated(message, 2)]).entries[0];
+    assert.equal(entry.verdict, 'broken-test', message);
+    assert.equal(entry.causes[0].cause, 'selectors', message);
+    assert.equal(entry.causes[0].confidence, 'high', message);
+    assert.equal(entry.causes[0].ruleIds.includes('SEL-NOTFOUND'), true, message);
+    assert.equal(JSON.stringify(entry.causes).includes('TIM-SLOW-LOAD'), false, message);
+  }
+  const zeros = [
+    'Error: expect(locator).toHaveCount(expected) failed',
+    'Expected: 1',
+    'Received: 0',
+    'Timeout: 5000ms',
+    'Call log:',
+    '  - Expect "toHaveCount" with timeout 5000ms',
+    "  - waiting for locator('#missing')",
+    '    8 × locator resolved to 0 elements',
+  ].join('\n');
+  const zeroEntry = buildTriageReport([repeated(zeros, 2)]).entries[0];
+  assert.equal(zeroEntry.causes[0].cause, 'selectors');
+  assert.equal(zeroEntry.causes[0].confidence, 'high');
+  assert.equal(JSON.stringify(zeroEntry.causes).includes('TIM-SLOW-LOAD'), false);
+  const shortZeros = zeros.replace('Timeout: 5000ms', 'Timeout: 400ms');
+  const shortEntry = buildTriageReport([repeated(shortZeros, 2)]).entries[0];
+  assert.equal(zeroEntry.verdict, shortEntry.verdict);
+  assert.deepEqual(zeroEntry.causes[0].ruleIds, shortEntry.causes[0].ruleIds);
+
+  const navs = [
+    'page.goto: Timeout 15000ms exceeded.',
+    'page.waitForURL: Timeout 5000ms exceeded.',
+    'page.waitForLoadState: Timeout 5000ms exceeded.',
+    'Navigation timeout of 30000ms exceeded.',
+  ];
+  for (const message of navs) {
+    const findings = classifyCauses(record(`${message}\nnavigating to "https://example.test/", waiting until "load"`));
+    assert.equal(findings[0].ruleIds.includes('TIM-SLOW-LOAD'), true, message);
+    assert.equal(findings.some((finding) => finding.cause === 'timing'), true, message);
+  }
+  const callLog = 'Call log:\n  - navigating to "https://example.test/", waiting until "load"';
+  const onlyLog = classifyCauses(record(callLog));
+  assert.equal(onlyLog.some((finding) => finding.ruleIds.includes('TIM-SLOW-LOAD')), false);
+
+  const net = [
+    'Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:9/',
+    'Call log:',
+    '  - navigating to "http://127.0.0.1:9/", waiting until "load"',
+  ].join('\n');
+  const netFindings = classifyCauses(repeated(net, 2));
+  assert.deepEqual(netFindings.map((finding) => finding.cause), ['environment']);
+  assert.deepEqual(netFindings[0].ruleIds, ['ENV-NET']);
+  const netTimeout = [
+    'Error: page.goto: Timeout 30000ms exceeded.',
+    'Call log:',
+    '  - navigating to "https://example.test/", waiting until "load"',
+    'net::ERR_CONNECTION_TIMED_OUT',
+  ].join('\n');
+  const netTimeoutFindings = classifyCauses(record(netTimeout));
+  assert.equal(netTimeoutFindings.some((finding) => finding.cause === 'timing'), false);
+  assert.equal(netTimeoutFindings[0].ruleIds.includes('ENV-NET'), true);
+
+  const flaky = buildTriageReport([withPass(repeated(visible, 1))]).entries[0];
+  assert.equal(flaky.verdict, 'flaky');
+  assert.equal(flaky.causes[0].ruleIds.includes('TIM-SLOW-LOAD'), true);
+
+  const sameCommitFail = repeated(visible, 2, { commitSha: 'abc1234', reportPath: 'run-a.json' });
+  const sameCommitPass = {
+    ...sameCommitFail,
+    outcome: 'passed',
+    source: { ...sameCommitFail.source, reportPath: 'run-b.json', commitSha: 'abc1234' },
+    attempts: [{ retry: 0, status: 'passed', durationMs: 10, errors: [], attachments: [] }],
+  };
+  const same = buildTriageReport([sameCommitFail, sameCommitPass]).entries[0];
+  assert.equal(same.verdict, 'flaky');
+  assert.equal(same.causes[0].ruleIds.includes('TIM-SLOW-LOAD'), true);
+
+  const otherCommitPass = {
+    ...sameCommitPass,
+    source: { ...sameCommitPass.source, reportPath: 'run-c.json', commitSha: 'def5678' },
+  };
+  const other = buildTriageReport([sameCommitFail, otherCommitPass]).entries[0];
+  assert.equal(JSON.stringify(other.causes).includes('TIM-SLOW-LOAD'), false);
+  assert.equal(other.causes[0].cause, 'selectors');
+  assert.equal(other.causes[0].confidence, 'high');
+});
+
+test('rerun passes the typed config path to Playwright', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-config-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const report = path.join(dir, 'report.json');
+  fs.writeFileSync(
+    report,
+    JSON.stringify({
+      suites: [
+        {
+          title: 'outcomes.spec.ts',
+          file: 'outcomes.spec.ts',
+          specs: [
+            {
+              title: 'sample',
+              file: 'outcomes.spec.ts',
+              tests: [
+                {
+                  projectName: 'chromium',
+                  expectedStatus: 'passed',
+                  status: 'unexpected',
+                  results: [
+                    {
+                      retry: 0,
+                      status: 'failed',
+                      duration: 1,
+                      errors: [{ message: 'Error: element(s) not found' }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const config = path.resolve('fixtures/pw-project/playwright.root.config.ts');
+  const child = spawn(
+    process.execPath,
+    [
+      path.resolve(cli),
+      'rerun',
+      '--from',
+      report,
+      '--config',
+      config,
+      '--modes',
+      'isolated',
+      '--times',
+      '1',
+      '--fail-on',
+      'never',
+    ],
+    { cwd: process.cwd(), detached: true, stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  let stderr = '';
+  const stop = () => {
+    if (!child.pid) return;
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {
+      child.kill('SIGKILL');
+    }
+  };
+  t.after(stop);
+  await new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      stop();
+      resolve();
+    }, 20000);
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+      if (stderr.includes(config) || stderr.includes('Cannot find test file')) {
+        clearTimeout(timer);
+        stop();
+      }
+    });
+    child.on('close', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+  assert.equal(stderr.includes('Cannot find test file'), false, stderr);
+  assert.equal(stderr.includes(config), true, stderr);
+});
+
+test('an extended UNC home is redacted anywhere in a line', (t) => {
+  const lines = [
+    '    at //?/UNC/srv/Users/norah/a.ts:3:5',
+    'Error: see "//?/UNC/srv/Users/norah/b.ts" now',
+    'Error: see [//?/UNC/srv/Users/norah/c.ts] now',
+    String.raw`    at \\?\UNC\srv/Users/norah/d.ts:1:2`,
+    '    at //./UNC/srv/Users/norah/e.ts:4:5',
+    String.raw`    at \\.\UNC\srv/Users/norah/f.ts:6:7`,
+    '    at Context.<anonymous> (//?/UNC/srv/Users/norah/proj/g.spec.ts:9:5)',
+  ];
+  assert.equal(redactHomeText(lines[0]), '    at //?/UNC/srv<home>/a.ts:3:5');
+  assert.equal(redactHomeText(lines[1]), 'Error: see "//?/UNC/srv<home>/b.ts" now');
+  assert.equal(redactHomeText(lines[2]), 'Error: see [//?/UNC/srv<home>/c.ts] now');
+  assert.equal(redactHomeText(lines[3]), String.raw`    at \\?\UNC\srv<home>/d.ts:1:2`);
+  assert.equal(redactHomeText(lines[4]), '    at //./UNC/srv<home>/e.ts:4:5');
+  assert.equal(redactHomeText(lines[5]), String.raw`    at \\.\UNC\srv<home>/f.ts:6:7`);
+  assert.equal(
+    redactHomeText(lines[6]),
+    '    at Context.<anonymous> (//?/UNC/srv<home>/proj/g.spec.ts:9:5)',
+  );
+  for (const line of lines) assert.equal(redactHomeText(line).includes('norah'), false, line);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-unc-line-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const report = path.join(dir, 'unc.json');
+  fs.writeFileSync(
+    report,
+    JSON.stringify({
+      suites: [
+        {
+          title: 'a.spec.ts',
+          file: 'a.spec.ts',
+          specs: [
+            {
+              title: 'frame',
+              file: 'a.spec.ts',
+              tests: [
+                {
+                  projectName: 'chromium',
+                  expectedStatus: 'passed',
+                  status: 'unexpected',
+                  results: [
+                    {
+                      retry: 0,
+                      status: 'failed',
+                      duration: 1,
+                      errors: lines.map((message) => ({ message, stack: message })),
+                    },
+                    {
+                      retry: 1,
+                      status: 'failed',
+                      duration: 1,
+                      errors: lines.map((message) => ({ message, stack: message })),
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const parsed = run(['parse', report, '--redact']);
+  assert.equal(parsed.status, 0, parsed.stderr);
+  assert.equal(parsed.stdout.includes('norah'), false, parsed.stdout);
+  assert.equal(parsed.stdout.includes('//?/UNC/srv<home>/'), true);
+  const causes = run(['causes', report]);
+  assert.equal(causes.status, 0, causes.stderr);
+  assert.equal(causes.stdout.includes('norah'), false, causes.stdout);
+  assert.equal(causes.stdout.includes('<home>'), true, causes.stdout);
+  const triage = run(['triage', report, '--fail-on', 'never', '--json']);
+  assert.equal(triage.status, 0, triage.stderr);
+  assert.equal(triage.stdout.includes('norah'), false, triage.stdout);
+  assert.equal(triage.stdout.includes('<home>'), true, triage.stdout);
+});
+
+test('a dotdot climb into another home hides that user', () => {
+  const root = String.raw`C:\Users\zbob\proj`;
+  for (const file of [
+    String.raw`C:\Users\zbob\proj\..\..\zeve\x.ts`,
+    String.raw`C:\Users\Public\..\zeve\x.ts`,
+  ]) {
+    const warnings = [];
+    const stored = toPortablePath(file, root, warnings);
+    assert.equal(stored.includes('zeve'), false, `${file} -> ${stored}`);
+    assert.equal(warnings.join('\n').includes('zeve'), false, warnings.join('\n'));
+    const rawWarnings = [];
+    const raw = toPortablePath(file, root, rawWarnings, false);
+    assert.equal(raw.includes('..'), false, raw);
+    assert.equal(redactHomeText(raw).includes('zeve'), false, raw);
+    assert.equal(rawWarnings.join('\n').includes('zeve'), false, rawWarnings.join('\n'));
+  }
+  const warnings = [];
+  const posix = toPortablePath('/home/zbob/proj/../../zeve/x.ts', '/home/zbob/proj', warnings);
+  assert.equal(posix.includes('zeve'), false, posix);
+  assert.equal(warnings.join('\n').includes('zeve'), false, warnings.join('\n'));
+  const textWarnings = [];
+  const text = relativizeText(String.raw`at C:\Users\zbob\proj\..\..\zeve\x.ts:1:1`, root, textWarnings);
+  assert.equal(text.includes('../../zeve'), false, text);
+  assert.equal(text.includes('../zeve'), false, text);
+  assert.equal(redactHomeText(text).includes('zeve'), false, text);
+  assert.equal(textWarnings.join('\n').includes('zeve'), false, textWarnings.join('\n'));
+  const publicText = relativizeText(String.raw`at C:\Users\Public\..\zeve\x.ts:2:2`, root, []);
+  assert.equal(publicText.includes('zeve') && redactHomeText(publicText).includes('zeve'), false, publicText);
+  const posixText = relativizeText('at /home/zbob/proj/../../zeve/x.ts:3:3', '/home/zbob/proj', []);
+  assert.equal(posixText.includes('../../zeve'), false, posixText);
+  assert.equal(redactHomeText(posixText).includes('zeve'), false, posixText);
 });

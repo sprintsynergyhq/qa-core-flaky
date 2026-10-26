@@ -14,7 +14,7 @@ const STATE_MATCHER =
  * known test timeout. It adds `TIM-NEAR-TIMEOUT` with no evidence line,
  * because the duration is not always present in the error text.
  */
-export function timingMatches(text: string, nearTimeout: boolean): RuleMatch[] {
+export function timingMatches(text: string, nearTimeout: boolean, recovered = false): RuleMatch[] {
   const hits: RuleMatch[] = [];
   if (expectTimedOut(text)) {
     const evidence =
@@ -28,7 +28,7 @@ export function timingMatches(text: string, nearTimeout: boolean): RuleMatch[] {
   const testTimeout = lineContaining(text, TEST_TIMEOUT);
   if (testTimeout) hits.push({ ruleId: 'TIM-TEST-TIMEOUT', evidence: [testTimeout] });
 
-  const slow = slowLoadMatch(text);
+  const slow = slowLoadMatch(text, recovered);
   if (slow) hits.push(slow);
 
   const intercept = interceptEvidence(text);
@@ -46,35 +46,44 @@ export function timingMatches(text: string, nearTimeout: boolean): RuleMatch[] {
  * is not this rule.
  */
 const NAV_SLOW =
-  /page\.goto:\s*Timeout\s+\d+ms exceeded|Navigation timeout of \d+ms exceeded|navigating to .+waiting until "(?:load|domcontentloaded|networkidle)"|page was still loading|page never loaded/i;
+  /page\.goto:\s*Timeout\s+\d+ms exceeded|(?:page\.)?waitForURL:\s*Timeout\s+\d+ms exceeded|(?:page\.)?waitForLoadState:\s*Timeout\s+\d+ms exceeded|Navigation timeout of \d+ms exceeded/i;
 
 /**
- * The page had not finished loading.
- * A navigation or load timeout is enough. `element(s) not found` after a
- * wait longer than 1000ms is the same signal when the locator never resolved
- * to a real element: the page was still loading, as with a slow first paint.
- * A miss of 1000ms or less stays a selector finding. That includes a 400ms
- * miss and the recorded typo locator, which uses `Timeout: 1000ms`.
+ * A page load did not finish.
+ * The signal is a `page.goto`, `waitForURL`, or `waitForLoadState` timeout,
+ * or `Navigation timeout of <digits>ms exceeded`.
+ * The call log line `navigating to "...", waiting until "load"` is not a
+ * signal. Every `page.goto` error prints it, including `net::ERR_*`.
  */
 export function pageStillLoading(text: string): boolean {
-  if (NAV_SLOW.test(text)) return true;
-  if (/locator resolved to </.test(text)) return false;
-  if (!/element\(s\) not found|locator resolved to 0 elements/.test(text)) return false;
-  const timeout = /(?:Timeout:\s*|Timeout\s+|with timeout\s+|Test timeout of\s+)(\d+)ms/.exec(text);
-  const ms = timeout?.[1];
-  if (ms === undefined) return false;
-  return Number(ms) > 1000;
+  return NAV_SLOW.test(text);
 }
 
-function slowLoadMatch(text: string): RuleMatch | undefined {
-  if (!pageStillLoading(text)) return undefined;
+/**
+ * `element(s) not found` is a slow load only when this test also passed.
+ * `recovered` is true when a retry passed, or another run with the same
+ * commit passed. A miss on every attempt stays a selector finding, including
+ * the default 5000ms expect timeout and a 30000ms test timeout.
+ * A locator that resolved to a real element is not this rule.
+ */
+function slowLoadMatch(text: string, recovered: boolean): RuleMatch | undefined {
+  const navigation = pageStillLoading(text);
+  const missed = !navigation && recovered && elementNeverFound(text);
+  if (!navigation && !missed) return undefined;
   const evidence =
-    lineContaining(text, /page\.goto:\s*Timeout|Navigation timeout|navigating to /) ??
+    lineContaining(
+      text,
+      /page\.goto:\s*Timeout|(?:page\.)?waitForURL:\s*Timeout|(?:page\.)?waitForLoadState:\s*Timeout|Navigation timeout/i,
+    ) ??
     lineContaining(text, /Timeout:\s*\d+ms|Timeout \d+ms exceeded|Test timeout of \d+ms exceeded/) ??
-    lineContaining(text, /element\(s\) not found/) ??
-    lineContaining(text, /locator resolved to 0 elements/);
+    lineContaining(text, /element\(s\) not found/);
   if (!evidence) return undefined;
   return { ruleId: 'TIM-SLOW-LOAD', evidence: [evidence] };
+}
+
+function elementNeverFound(text: string): boolean {
+  if (/locator resolved to </.test(text)) return false;
+  return /element\(s\) not found/.test(text);
 }
 
 function expectTimedOut(text: string): boolean {

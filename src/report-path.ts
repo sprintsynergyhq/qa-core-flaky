@@ -159,6 +159,12 @@ export function toPortablePath(
   if (isNetworkAbsolute(file)) return redactUser ? redactHomeText(file) : file;
   let normalized = stripTrailingSlash(normalizeSlashes(file));
   if (normalized === '') return '';
+  // Resolve `..` before the home check and the outside-root rewrite.
+  // `C:/Users/zbob/proj/../../zeve/x.ts` is `C:/Users/zeve/x.ts`, so the
+  // other-home rule can see `zeve`. The unresolved form starts with the
+  // root and would be stored as `../../zeve/x.ts`.
+  const collapsed = collapseDotSegments(normalized);
+  if (collapsed) normalized = stripTrailingSlash(collapsed);
   // Structured file paths can hide a home directory here. Error text does not:
   // cause rules read the original message, and the report redacts at output.
   if (!root && redactUser) normalized = redactHomeText(normalized);
@@ -887,9 +893,13 @@ function stripExtendedDrivePrefix(token: string): string {
   return token.slice(match[0].length);
 }
 
-/** `//?/UNC/srv` and `\\?\UNC\srv`, including mixed separators. */
+/**
+ * `//?/UNC/srv`, `\\?\UNC\srv`, `//./UNC/srv`, and `\\.\UNC\srv`.
+ * The prefix may sit after `at `, a quote, or a bracket. It only has to
+ * end at the slash before `Users` or `home`.
+ */
 function isExtendedUncServer(before: string): boolean {
-  return /^(?:\\\\|\/\/)[.?][\\/]unc[\\/][^\\/]+$/i.test(before);
+  return /(?:\\\\|\/\/)[.?][\\/]unc[\\/][^\\/]+$/i.test(before);
 }
 
 function extendedDriveInsideRoot(token: string, root: string): boolean {
@@ -985,6 +995,23 @@ function isKeyPrefix(rootKey: readonly string[], fileKey: readonly string[]): bo
   return true;
 }
 
+/**
+ * `..` and `.` are removed before a home or root comparison.
+ * The location suffix, such as `:12:3`, stays on the result.
+ * Drive and POSIX paths only. UNC climbs stay on the earlier path rules.
+ */
+function collapseDotSegments(normalized: string): string | undefined {
+  if (!hasDotDotSegment(normalized)) return undefined;
+  const stripped = stripLocationSuffix(normalized);
+  const classified = classifyPath(stripped);
+  if (!classified || (classified.family !== 'drive' && classified.family !== 'posix')) return undefined;
+  const segments = resolveDotSegments(classified.segments);
+  if (!segments) return undefined;
+  if (classified.family === 'drive' && !/^[A-Za-z]$/.test(segments[0] ?? '')) return undefined;
+  const suffix = normalized.slice(stripped.length);
+  return `${joinClassified(classified.family, segments)}${suffix}`;
+}
+
 function relativeSegments(from: readonly string[], to: readonly string[]): string {
   const fromKey = from.map((segment) => segment.toLowerCase());
   const toKey = to.map((segment) => segment.toLowerCase());
@@ -1021,25 +1048,27 @@ function outsideOwnHome(root: string, target: string): boolean {
 }
 
 /**
- * Config path for a command a person can run.
- * Absolute paths become relative to `rootDir` when that stays free of a
- * username. Otherwise the file name is used. The result is never `<home>`.
+ * Config path for a command a person can paste.
+ * When `baseDir` contains the config file, the result is relative to that
+ * directory. That is the triage cwd, or the folder that holds the config.
+ * A path that would climb with `..` is the file name instead, so a rootDir
+ * that is the test directory does not print `../playwright.config.ts`.
+ * The result never contains a username and is never `<home>`.
+ * Playwright still receives the path the user passed. This function is only
+ * for text that is printed or stored.
  */
-export function runnableConfigPath(configFile: string, rootDir?: string): string {
+export function runnableConfigPath(configFile: string, baseDir?: string): string {
   const normalized = stripTrailingSlash(normalizeSlashes(configFile));
-  const base = normalized.split('/').filter((part) => part.length > 0).pop() ?? normalized;
+  const baseName = normalized.split('/').filter((part) => part.length > 0).pop() ?? normalized;
   if (!isAbsolutePath(normalized)) {
-    return redactHomeText(normalized) === normalized ? normalized : base;
+    return redactHomeText(normalized) === normalized ? normalized : baseName;
   }
-  const root = rootDir ? stripTrailingSlash(normalizeSlashes(rootDir)) : undefined;
-  let relative: string | undefined;
-  if (root && (normalized === root || normalized.startsWith(`${root}/`))) {
-    relative = normalized === root ? '.' : normalized.slice(root.length + 1);
-  } else if (root && isAbsolutePath(root)) {
-    relative = relativeFrom(root, normalized);
+  const base = baseDir ? stripTrailingSlash(normalizeSlashes(baseDir)) : undefined;
+  if (base && isAbsolutePath(base) && normalized.startsWith(`${base}/`)) {
+    const relative = normalized.slice(base.length + 1);
+    if (relative.length > 0 && safeConfigRelative(normalized, relative)) return relative;
   }
-  if (relative && safeConfigRelative(normalized, relative)) return relative;
-  return base;
+  return baseName;
 }
 
 function safeConfigRelative(absolute: string, relative: string): boolean {
