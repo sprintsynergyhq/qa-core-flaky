@@ -320,6 +320,9 @@ async function prepareArgs(
   const at = copy.lastIndexOf('--');
   if (at === -1 || copy[at + 1] === undefined) return copy;
   const config = flagValue(copy, '--config');
+  // A spec under testDir is not in the working directory. Check the local
+  // binary before that lookup, so a missing install is reported as itself.
+  if (requireFile && !config) playwrightBin(cwd);
   const absolute = await resolveProjectFile(run.file, cwd, config, path.join(rerunDir, 'tmp'));
   if (!absolute) {
     if (requireFile) {

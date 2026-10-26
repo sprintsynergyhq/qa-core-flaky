@@ -14,7 +14,7 @@ Defaults are `--times 5`, `--retries 0`, `--modes repeat,isolated`, and `--max-t
 
 `--from` is a Playwright JSON report, a JUnit report, or the JSON from `parse` (a document with `records`). A triage report is not enough, because it does not keep the file and the title.
 
-The cap line and each Playwright command go to stderr. The triage report goes to stdout. `--json` prints JSON on stdout. `--out-dir` writes `triage.json` and `triage.md` with the same pair rule as `triage`. Exit codes match `triage`.
+The cap line and each Playwright command go to stderr. The triage report goes to stdout. `--json` prints JSON on stdout. `--out-dir` writes `triage.json` and `triage.md` with the same pair rule as `triage`. Exit codes match `triage`. A rerun exits 2 even when every rerun passes, because the original failed attempt is kept and the test stays listed.
 
 The flags were checked against `npx playwright test --help` for Playwright 1.60.0: `--repeat-each`, `--retries`, `--workers`, `--reporter`, `-g`, `--project`, `--output`, and `--config`. `--project` is passed as one `--project=<name>` argument, including a project named `default`. In 1.60.0 that option takes one or more names, so a following file filter would be read as another project name. The file filter is placed after `--`, so a file name that starts with `-` is not read as an option. A project name that contains `*` or `?` is refused. Playwright treats `*` as a wildcard and compares project names without case, so this tool passes the exact name and then checks the rerun report.
 

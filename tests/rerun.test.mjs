@@ -867,6 +867,34 @@ test('a missing Playwright beside the config is not a missing test file', async 
   }
 });
 
+test('a nested spec with no config and no Playwright names the missing binary', async () => {
+  const kit = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-nopw-nested-'));
+  fs.mkdirSync(path.join(kit, 'tests'), { recursive: true });
+  fs.writeFileSync(path.join(kit, 'tests', 'flaky-slow-user.spec.ts'), 'test\n');
+  const item = record('slow user reaches the inventory', [attempt('failed', VALUE)]);
+  item.file = 'flaky-slow-user.spec.ts';
+  item.id = 'flaky-slow-user.spec.ts::chromium::slow user reaches the inventory';
+  const plan = planReruns([item], { times: 1, modes: ['repeat'] });
+  try {
+    await assert.rejects(
+      executePlan({
+        records: [item],
+        plan,
+        cwd: kit,
+        print: () => {},
+      }),
+      (error) => {
+        assert.match(error.message, /Local Playwright was not found/);
+        assert.match(error.message, /node_modules[/\\]\.bin[/\\]playwright/);
+        assert.equal(error.message.includes('Cannot find test file'), false);
+        return true;
+      },
+    );
+  } finally {
+    fs.rmSync(kit, { recursive: true, force: true });
+  }
+});
+
 test('a missing local Playwright is reported as itself', async () => {
   const item = record('same value', [attempt('failed', VALUE)]);
   const plan = planReruns([item], { times: 1, modes: ['repeat'] });
