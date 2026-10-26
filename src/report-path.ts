@@ -174,6 +174,21 @@ export function toPortablePath(
     if (normalized.startsWith(`${root}/`)) return normalized.slice(root.length + 1);
   }
   if (!isAbsolutePath(normalized)) return normalized;
+  // `\\?\C:\` normalizes to `/?/C:/`, so it is not a `C:/` prefix and
+  // `sameDrive` is false. Another home on that same drive still has to be
+  // redacted here. Otherwise the Windows warning and the stored path keep
+  // the username, including a `..` climb that resolved to that home.
+  if (
+    root &&
+    isWindowsDrivePath(normalized) &&
+    !sameDrive(root, normalized) &&
+    sameDriveLetter(root, normalized) &&
+    outsideOwnHome(root, normalized)
+  ) {
+    const shown = redactHomeText(normalized);
+    pushWarning(warnings, `${OUTSIDE_HOME_WARNING}${shown}`);
+    return redactUser ? shown : normalized;
+  }
   if (isWindowsDrivePath(normalized) && !sameDrive(root, normalized)) {
     pushWarning(warnings, `${WINDOWS_WARNING}${normalized}`);
     return normalized;
@@ -298,7 +313,10 @@ export type HomeMarks = ReadonlyMap<string, string>;
  * `C:\Users\Shared`, `C:\Users\Default`, `C:\Users\Default User`,
  * `C:\Users\All Users`, and `/Users/Public`.
  * `C:\Users\Public\..\zbob\x.ts` climbs out of the exempt folder, so `zbob`
- * is still hidden. `C:\Users\Public C:\Users\zbob\x` does not join `Public`
+ * is still hidden. A `..` climb in an absolute home is collapsed first, so
+ * `/home/zbob/proj/../../zeve/data.json` hides `zeve` instead of leaving
+ * `<home>/proj/../../zeve/data.json`. A shallow climb out of `Public` or
+ * `Default` is not collapsed, so the exempt folder stays. `C:\Users\Public C:\Users\zbob\x` does not join `Public`
  * to the next drive letter.
  *
  * A letter before `:` is a drive letter only at the start of the text or
@@ -340,7 +358,7 @@ export type HomeMarks = ReadonlyMap<string, string>;
  */
 export function redactHomeText(value: string, marks?: HomeMarks): string {
   const masked = maskUrls(value);
-  const text = tagLiteralMarks(masked.text);
+  const text = tagLiteralMarks(collapseHomeClimbs(masked.text));
   let out = '';
   let cursor = 0;
   while (cursor < text.length) {
@@ -384,7 +402,7 @@ export function homeMarks(texts: readonly string[]): HomeMarks {
 }
 
 function homeUsernames(value: string): string[] {
-  const text = maskUrls(value).text;
+  const text = collapseHomeClimbs(maskUrls(value).text);
   const users: string[] = [];
   let cursor = 0;
   while (cursor < text.length) {
@@ -1031,13 +1049,181 @@ function joinClassified(family: PathFamily, segments: readonly string[]): string
   return `/${segments.join('/')}`;
 }
 
+/**
+ * Resolve `..` inside an absolute home path before the username match.
+ * `/home/zbob/proj/../../zeve/data.json` is `/home/zeve/data.json`, so the
+ * home match hides `zeve`. A shallow climb out of `Public` or `Default`
+ * stays as written, and `matchClimbOut` hides the sibling name while
+ * keeping the exempt folder. A climb that leaves that folder and lands in
+ * another home is collapsed, so the other username does not remain.
+ */
+function collapseHomeClimbs(text: string): string {
+  if (!hasDotDotSegment(text)) return text;
+  let out = '';
+  let cursor = 0;
+  let index = 0;
+  while (index < text.length) {
+    const found = findAbsoluteHomePath(text, index);
+    if (!found) break;
+    const scanned = readClimbSegments(text, found.segmentAt);
+    const collapsed = collapsedHomePath(found, scanned.segments);
+    if (!collapsed) {
+      index = found.start + 1;
+      continue;
+    }
+    out += text.slice(cursor, found.start);
+    out += collapsed;
+    cursor = scanned.end;
+    index = scanned.end;
+  }
+  return out + text.slice(cursor);
+}
+
+function findAbsoluteHomePath(
+  text: string,
+  from: number,
+): { start: number; prefix: string; drive: string; segmentAt: number } | undefined {
+  for (let index = from; index < text.length; index += 1) {
+    if (!pathBoundary(text, index) && !isDriveLetter(text, index)) continue;
+    const extended = matchExtendedDrive(text, index);
+    if (extended && pathBoundary(text, index)) return { start: index, ...extended };
+    if (isDriveLetter(text, index)) {
+      const sep = readSeparator(text, index + 2);
+      if (sep === undefined) continue;
+      if (!readHomeFolder(text, sep)) continue;
+      return { start: index, prefix: '', drive: text[index] ?? '', segmentAt: index + 2 };
+    }
+    if (text[index] !== '/' || text[index + 1] === '/') continue;
+    if (!pathBoundary(text, index)) continue;
+    if (!readHomeFolder(text, index + 1)) continue;
+    return { start: index, prefix: '', drive: '', segmentAt: index };
+  }
+  return undefined;
+}
+
+function pathBoundary(text: string, index: number): boolean {
+  if (index === 0) return true;
+  return /[\s"'=(`\[{:,;<>^|]/.test(text[index - 1] ?? '');
+}
+
+function matchExtendedDrive(
+  text: string,
+  index: number,
+): { prefix: string; drive: string; segmentAt: number } | undefined {
+  const match = /^(?:\\\\[.?]\\|\/\/[.?]\/|\/[.?]\/)([A-Za-z]):[\\/]/.exec(text.slice(index));
+  if (!match?.[1]) return undefined;
+  const prefixLen = match[0].length - 3;
+  return {
+    prefix: text.slice(index, index + prefixLen),
+    drive: match[1],
+    segmentAt: index + match[0].length - 1,
+  };
+}
+
+function readClimbSegments(text: string, index: number): { segments: string[]; end: number } {
+  const segments: string[] = [];
+  let cursor = index;
+  while (cursor < text.length) {
+    const sep = readSeparator(text, cursor);
+    if (sep === undefined) break;
+    if (text.startsWith('..', sep) && isDotSegmentEnd(text, sep + 2)) {
+      segments.push('..');
+      cursor = sep + 2;
+      continue;
+    }
+    if (text[sep] === '.' && isDotSegmentEnd(text, sep + 1)) {
+      segments.push('.');
+      cursor = sep + 1;
+      continue;
+    }
+    let end = sep;
+    while (end < text.length && !isClimbStop(text, sep, end)) end += 1;
+    if (end === sep) break;
+    segments.push(text.slice(sep, end));
+    cursor = end;
+  }
+  return { segments, end: cursor };
+}
+
+function isClimbStop(text: string, segmentStart: number, index: number): boolean {
+  const ch = text[index] ?? '';
+  if (ch === '/' || ch === '\\' || ch === '\n' || ch === '\r') return true;
+  if (ch === ':' && /\d/.test(text[index + 1] ?? '')) return true;
+  if (ch === ' ' || ch === '\t') {
+    const soFar = text.slice(segmentStart, index);
+    const word = /^[ \t]+\S+/.exec(text.slice(index));
+    const combined = `${soFar}${word?.[0] ?? ''}`.trim();
+    return !(word && reservedUsersSegment(combined));
+  }
+  return /["'`<>()[\]{}|;,^]/.test(ch);
+}
+
+/**
+ * A shallow climb out of Public or Default stays, so the exempt folder
+ * remains visible. Any climb that goes above the home directory is collapsed.
+ */
+function keepExemptClimb(segments: readonly string[]): boolean {
+  const lower = segments.map((segment) => segment.toLowerCase());
+  const homeAt = lower.findIndex((segment) => segment === 'users' || segment === 'home');
+  if (homeAt === -1) return false;
+  const user = segments[homeAt + 1];
+  if (!user || !reservedUsersSegment(user)) return false;
+  let depth = 1;
+  for (let index = homeAt + 2; index < segments.length; index += 1) {
+    const part = segments[index] ?? '';
+    if (part === '.') continue;
+    if (part === '..') {
+      depth -= 1;
+      if (depth < 0) return false;
+      continue;
+    }
+    depth += 1;
+  }
+  return true;
+}
+
+function collapsedHomePath(
+  found: { prefix: string; drive: string },
+  segments: readonly string[],
+): string | undefined {
+  if (!segments.includes('..')) return undefined;
+  if (keepExemptClimb(segments)) return undefined;
+  const resolved = resolveDotSegments(segments);
+  if (!resolved) return undefined;
+  const lower = resolved.map((segment) => segment.toLowerCase());
+  const homeAt = lower.findIndex((segment) => segment === 'users' || segment === 'home');
+  const owner = homeAt === -1 ? undefined : resolved[homeAt + 1];
+  if (!owner || reservedUsersSegment(owner)) return undefined;
+  const body = resolved.join('/');
+  if (found.drive) return `${found.prefix}${found.drive}:/${body}`;
+  return `/${body}`;
+}
+
 /** Username of a `home/<name>` or `Users/<name>` path. Reserved folders have none. */
 function homeOwner(value: string): string | undefined {
   const normalized = stripLocationSuffix(stripTrailingSlash(normalizeSlashes(value)));
-  const match = /^(?:[A-Za-z]:\/)?\/?(?:home|users)\/([^/]+)/i.exec(normalized);
+  // `\\?\C:\Users\zbob` normalizes to `/?/C:/Users/zbob`. Drop that prefix
+  // before the home match, or the other-home check cannot see `zbob`.
+  const body = normalized.replace(/^(?:\/\/[.?]\/|\/[.?]\/)/, '');
+  const match = /^(?:[A-Za-z]:\/)?\/?(?:home|users)\/([^/]+)/i.exec(body);
   const owner = match?.[1];
   if (!owner || reservedUsersSegment(owner)) return undefined;
   return owner.toLowerCase();
+}
+
+/** True when both paths use the same Windows drive, including a `\\?\C:\` root. */
+function sameDriveLetter(root: string, value: string): boolean {
+  const left = driveLetterOf(root);
+  const right = driveLetterOf(value);
+  return left !== undefined && left === right;
+}
+
+function driveLetterOf(value: string): string | undefined {
+  const normalized = stripLocationSuffix(stripTrailingSlash(normalizeSlashes(value)));
+  const extended = /^(?:\/\/[.?]\/|\/[.?]\/)([A-Za-z]):\//.exec(normalized);
+  if (extended?.[1]) return extended[1].toLowerCase();
+  const drive = /^([A-Za-z]):\//.exec(normalized);
+  return drive?.[1]?.toLowerCase();
 }
 
 function outsideOwnHome(root: string, target: string): boolean {
@@ -1048,12 +1234,11 @@ function outsideOwnHome(root: string, target: string): boolean {
 }
 
 /**
- * Config path for a command a person can paste.
- * When `baseDir` contains the config file, the result is relative to that
- * directory. That is the triage cwd, or the folder that holds the config.
- * A path that would climb with `..` is the file name instead, so a rootDir
- * that is the test directory does not print `../playwright.config.ts`.
- * The result never contains a username and is never `<home>`.
+ * Config path for a command a person can paste from `baseDir`.
+ * `baseDir` is the triage working directory. The result is relative to that
+ * folder when the config file is inside it.
+ * A path that would climb with `..`, or that contains a username, is the
+ * file name instead. The result is never `<home>`.
  * Playwright still receives the path the user passed. This function is only
  * for text that is printed or stored.
  */
@@ -1061,12 +1246,19 @@ export function runnableConfigPath(configFile: string, baseDir?: string): string
   const normalized = stripTrailingSlash(normalizeSlashes(configFile));
   const baseName = normalized.split('/').filter((part) => part.length > 0).pop() ?? normalized;
   if (!isAbsolutePath(normalized)) {
+    if (normalized.split('/').includes('..')) return baseName;
     return redactHomeText(normalized) === normalized ? normalized : baseName;
   }
   const base = baseDir ? stripTrailingSlash(normalizeSlashes(baseDir)) : undefined;
   if (base && isAbsolutePath(base) && normalized.startsWith(`${base}/`)) {
     const relative = normalized.slice(base.length + 1);
-    if (relative.length > 0 && safeConfigRelative(normalized, relative)) return relative;
+    if (
+      relative.length > 0 &&
+      !relative.split('/').includes('..') &&
+      safeConfigRelative(normalized, relative)
+    ) {
+      return relative;
+    }
   }
   return baseName;
 }

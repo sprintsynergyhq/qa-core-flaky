@@ -211,7 +211,9 @@ function run(args: readonly string[]): void | Promise<void> {
   try {
     const selected = format ?? detectFormat(text, reportPath);
     const parsed =
-      selected === 'json' ? parsePlaywrightJson(text, reportPath, meta) : parseJunit(text, reportPath, junitMeta(values, meta));
+      selected === 'json'
+        ? parsePlaywrightJson(text, reportPath, meta, process.cwd())
+        : parseJunit(text, reportPath, junitMeta(values, meta));
     const result = command === 'parse' && values.redact === true ? redactParseResult(parsed) : parsed;
     body =
       command === 'parse'
@@ -241,7 +243,7 @@ function runTriage(reportPaths: readonly string[], values: FlagValues): void {
       const selected = format ?? detectFormat(loaded.text, loaded.reportPath);
       const result =
         selected === 'json'
-          ? parsePlaywrightJson(loaded.text, loaded.reportPath, meta)
+          ? parsePlaywrightJson(loaded.text, loaded.reportPath, meta, process.cwd())
           : parseJunit(loaded.text, loaded.reportPath, junitMeta(values, meta));
       records.push(...result.records);
     } catch (error) {
@@ -376,7 +378,9 @@ function loadRerunSource(reportPath: string, values: FlagValues): TestRecord[] {
   const format = readFormat(values.format);
   const selected = format ?? detectFormat(text, reportPath);
   const parsed =
-    selected === 'json' ? parsePlaywrightJson(text, reportPath, meta) : parseJunit(text, reportPath, junitMeta(values, meta));
+    selected === 'json'
+      ? parsePlaywrightJson(text, reportPath, meta, process.cwd())
+      : parseJunit(text, reportPath, junitMeta(values, meta));
   return parsed.records;
 }
 

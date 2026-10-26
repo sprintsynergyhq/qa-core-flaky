@@ -48,7 +48,7 @@ Passing tests are skipped. `--only` may name a passing test, and that test is sk
 
 A stored file that is already a `<home>` or `<file~N>` mark cannot be rerun. The original path is gone.
 
-The next step in the triage report includes `--config` when the source report recorded a Playwright config. Paste that command from the folder that holds the config. The printed path is the file name in that folder, or a path relative to the triage working directory when the config file is inside it and the relative path has no username. It stays a file name when the only other spelling would climb with `..`, which is what `config.rootDir` does when that root is the test directory. It is never `<home>`. The Playwright process receives the `--config` path you typed. Redaction applies to the printed command and to the path stored on the report. The report path in `--from` is still redacted.
+The next step in the triage report includes `--config` when the source report recorded a Playwright config. Paste that command from the folder where triage ran. The printed path is relative to that folder when the config file is inside it and the relative path has no username. It is the file name when the relative path would climb with `..` or contain a username. It is never `<home>`. The Playwright process receives the `--config` path you typed. Redaction applies to the printed command and to the path stored on the report. The report path in `--from` is still redacted, and a relative report path stays relative to that same folder.
 
 ## Merge
 

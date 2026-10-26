@@ -640,6 +640,8 @@ test('rerun passes the typed config path to Playwright', async (t) => {
     }),
   );
   const config = path.resolve('fixtures/pw-project/playwright.root.config.ts');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-config-paste-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const child = spawn(
     process.execPath,
     [
@@ -656,28 +658,51 @@ test('rerun passes the typed config path to Playwright', async (t) => {
       '--fail-on',
       'never',
     ],
-    { cwd: process.cwd(), detached: true, stdio: ['ignore', 'pipe', 'pipe'] },
+    {
+      cwd: process.cwd(),
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp },
+    },
   );
   let stderr = '';
+  let stopping;
   const stop = () => {
-    if (!child.pid) return;
-    try {
-      process.kill(-child.pid, 'SIGKILL');
-    } catch {
-      child.kill('SIGKILL');
-    }
+    if (stopping) return stopping;
+    stopping = new Promise((resolve) => {
+      if (!child.pid || child.exitCode !== null) {
+        resolve();
+        return;
+      }
+      const kill = setTimeout(() => {
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          child.kill('SIGKILL');
+        }
+      }, 3000);
+      child.once('close', () => {
+        clearTimeout(kill);
+        resolve();
+      });
+      try {
+        process.kill(-child.pid, 'SIGTERM');
+      } catch {
+        child.kill('SIGTERM');
+      }
+    });
+    return stopping;
   };
-  t.after(stop);
+  t.after(() => stop());
   await new Promise((resolve) => {
     const timer = setTimeout(() => {
-      stop();
-      resolve();
+      void stop().then(resolve);
     }, 20000);
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString();
       if (stderr.includes('playwright.root.config.ts') || stderr.includes('Cannot find test file')) {
         clearTimeout(timer);
-        stop();
+        void stop().then(resolve);
       }
     });
     child.on('close', () => {
@@ -807,4 +832,264 @@ test('a dotdot climb into another home hides that user', () => {
   const posixText = relativizeText('at /home/zbob/proj/../../zeve/x.ts:3:3', '/home/zbob/proj', []);
   assert.equal(posixText.includes('../../zeve'), false, posixText);
   assert.equal(redactHomeText(posixText).includes('zeve'), false, posixText);
+});
+
+test('an extended root and a bare climb hide the other user', (t) => {
+  const root = String.raw`\\?\C:\Users\zbob\proj`;
+  const files = [
+    String.raw`C:\Users\zbob\proj\..\..\zeve\x.ts`,
+    String.raw`C:\Users\Public\..\..\Users\zeve\x.ts`,
+    'C:/Users\\zbob/proj\\..\\..\\zeve/x.ts',
+    String.raw`C:\Users\Public\..\zeve\x.ts`,
+    String.raw`C:\Users\Default\..\zeve\x.ts`,
+  ];
+  for (const file of files) {
+    const warnings = [];
+    const stored = toPortablePath(file, root, warnings);
+    assert.equal(stored.includes('zeve'), false, `${file} -> ${stored}`);
+    assert.equal(stored.includes('../../zeve'), false, stored);
+    assert.equal(warnings.join('\n').includes('zeve'), false, `${file}\n${warnings.join('\n')}`);
+    const rawWarnings = [];
+    const raw = toPortablePath(file, root, rawWarnings, false);
+    assert.equal(raw.includes('..'), false, raw);
+    assert.equal(redactHomeText(raw).includes('zeve'), false, raw);
+    assert.equal(rawWarnings.join('\n').includes('zeve'), false, rawWarnings.join('\n'));
+  }
+  const posixWarnings = [];
+  const mixedPosix = toPortablePath('/home/zbob/proj\\..\\..\\zeve/x.ts', '/home/zbob/proj', posixWarnings);
+  assert.equal(mixedPosix.includes('zeve'), false, mixedPosix);
+  assert.equal(posixWarnings.join('\n').includes('zeve'), false, posixWarnings.join('\n'));
+
+  assert.equal(redactHomeText(String.raw`C:\Users\Public\x`).includes('Public'), true);
+  assert.equal(redactHomeText(String.raw`C:\Users\Default\x`).includes('Default'), true);
+  assert.equal(redactHomeText('/Users/Public/../zbob/x'), '/Users/Public/../<home>/x');
+  const shallowDefault = redactHomeText('/Users/Default/../nora/x');
+  assert.equal(shallowDefault.includes('nora'), false, shallowDefault);
+  assert.match(shallowDefault, /Default/);
+  const bare = redactHomeText('/home/zbob/proj/../../zeve/data.json');
+  assert.equal(bare.includes('zeve'), false, bare);
+  assert.equal(bare.includes('<home>/proj/../../zeve'), false, bare);
+  const mixedBare = redactHomeText('/home/zbob/proj\\..\\..\\zeve/data.json');
+  assert.equal(mixedBare.includes('zeve'), false, mixedBare);
+  for (const climbed of [
+    String.raw`C:\Users\Public\..\..\Users\zeve\x.ts`,
+    String.raw`C:\Users\Default\..\..\Users\zeve\x.ts`,
+    String.raw`\\?\C:\Users\zbob\proj\..\..\zeve\x.ts`,
+    'C:/Users\\Public/../../Users/zeve/x.ts',
+  ]) {
+    assert.equal(redactHomeText(climbed).includes('zeve'), false, climbed);
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-dotdot-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const report = path.join(dir, 'climb.json');
+  const climbs = [
+    String.raw`C:\Users\zbob\proj\..\..\zeve\x.ts`,
+    String.raw`C:\Users\Public\..\..\Users\zeve\x.ts`,
+  ];
+  fs.writeFileSync(
+    report,
+    JSON.stringify({
+      config: { rootDir: root, configFile: 'playwright.config.ts' },
+      suites: climbs.map((file, index) => ({
+        title: `t${index}.spec.ts`,
+        file,
+        specs: [
+          {
+            title: `climb ${index}`,
+            file,
+            tests: [
+              {
+                projectName: 'chromium',
+                expectedStatus: 'passed',
+                status: 'unexpected',
+                results: [
+                  {
+                    retry: 0,
+                    status: 'failed',
+                    duration: 1,
+                    errors: [{ message: `Error: open ${file}`, stack: `at read (${file}:1:1)` }],
+                  },
+                  {
+                    retry: 1,
+                    status: 'failed',
+                    duration: 1,
+                    errors: [{ message: `Error: open ${file}` }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      })),
+    }),
+  );
+  const parsed = run(['parse', report, '--redact']);
+  assert.equal(parsed.status, 0, parsed.stderr);
+  assert.equal(parsed.stdout.includes('zeve'), false, parsed.stdout);
+  const causes = run(['causes', report]);
+  assert.equal(causes.status, 0, causes.stderr);
+  assert.equal(causes.stdout.includes('zeve'), false, causes.stdout);
+  const triage = run(['triage', report, '--fail-on', 'never', '--json']);
+  assert.equal(triage.status, 0, triage.stderr);
+  assert.equal(triage.stdout.includes('zeve'), false, triage.stdout);
+  const markdown = run(['triage', report, '--fail-on', 'never']);
+  assert.equal(markdown.status, 0, markdown.stderr);
+  assert.equal(markdown.stdout.includes('zeve'), false, markdown.stdout);
+
+  const junit = path.join(dir, 'climb.xml');
+  fs.writeFileSync(
+    junit,
+    `<testsuite hostname="chromium">
+      <testcase name="reads" classname="t">
+        <failure message="/home/zbob/proj/../../zeve/data.json">/home/zbob/proj/../../zeve/data.json</failure>
+      </testcase>
+    </testsuite>`,
+  );
+  const junitParsed = run(['parse', junit, '--format', 'junit', '--redact']);
+  assert.equal(junitParsed.status, 0, junitParsed.stderr);
+  assert.equal(junitParsed.stdout.includes('zeve'), false, junitParsed.stdout);
+  assert.equal(junitParsed.stdout.includes('<home>/proj/../../zeve'), false, junitParsed.stdout);
+  const junitCauses = run(['causes', junit, '--format', 'junit']);
+  assert.equal(junitCauses.status, 0, junitCauses.stderr);
+  assert.equal(junitCauses.stdout.includes('zeve'), false, junitCauses.stdout);
+  const junitTriage = run(['triage', junit, '--format', 'junit', '--fail-on', 'never', '--json']);
+  assert.equal(junitTriage.status, 0, junitTriage.stderr);
+  assert.equal(junitTriage.stdout.includes('zeve'), false, junitTriage.stdout);
+});
+
+test('the printed config path runs from the folder where triage ran', { timeout: 240000 }, () => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-paste-'));
+  const kit = path.join(parent, 'saucedemo-flaky-kit');
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-e2e-'));
+  const linkModules = (dir) => {
+    fs.symlinkSync(path.resolve('node_modules'), path.join(dir, 'node_modules'), 'dir');
+  };
+  const spec = [
+    "import { test, expect } from '@playwright/test';",
+    "test('sample', () => {",
+    '  expect(1).toBe(1);',
+    '});',
+    '',
+  ].join('\n');
+  const config = [
+    "import { defineConfig } from '@playwright/test';",
+    'export default defineConfig({',
+    "  testDir: './tests',",
+    '  retries: 0,',
+    '  workers: 1,',
+    "  projects: [{ name: 'chromium' }],",
+    '});',
+    '',
+  ].join('\n');
+  const writeProject = (dir) => {
+    fs.mkdirSync(path.join(dir, 'tests'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'reports'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tests', 'slow.spec.ts'), spec);
+    fs.writeFileSync(path.join(dir, 'playwright.config.ts'), config);
+  };
+  const writeReport = (dir) => {
+    const reportPath = path.join(dir, 'reports', 'session.json');
+    fs.writeFileSync(
+      reportPath,
+      JSON.stringify({
+        config: {
+          rootDir: path.join(dir, 'tests'),
+          configFile: path.join(dir, 'playwright.config.ts'),
+          metadata: { gitCommit: 'abc1234' },
+        },
+        suites: [
+          {
+            title: 'slow.spec.ts',
+            file: 'slow.spec.ts',
+            specs: [
+              {
+                title: 'sample',
+                file: 'slow.spec.ts',
+                tests: [
+                  {
+                    projectName: 'chromium',
+                    expectedStatus: 'passed',
+                    status: 'unexpected',
+                    results: [
+                      {
+                        retry: 0,
+                        status: 'failed',
+                        duration: 10,
+                        errors: [{ message: 'Error: element(s) not found' }],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    return reportPath;
+  };
+  const runIn = (cwd, args) =>
+    spawnSync(process.execPath, [path.resolve(cli), ...args], { encoding: 'utf8', cwd });
+  const paste = (nextStep, cwd) => {
+    const marker = 'qa-core-flaky rerun ';
+    const at = nextStep.indexOf(marker);
+    assert.ok(at >= 0, nextStep);
+    const command = nextStep
+      .slice(at)
+      .replace(/^qa-core-flaky\b/, `${process.execPath} ${path.resolve(cli)}`);
+    return spawnSync('sh', ['-c', command], { encoding: 'utf8', cwd, timeout: 180000 });
+  };
+  const assertRan = (result, label) => {
+    const output = `${result.stdout}\n${result.stderr}`;
+    assert.equal(result.error, undefined, output);
+    assert.notEqual(result.status, 1, `${label}\n${output}`);
+    assert.equal(output.includes('Cannot find test file'), false, output);
+    assert.equal(output.includes('Local Playwright was not found'), false, output);
+    assert.match(output, /Commands \d+/, output);
+    assert.equal(result.stdout.includes('sample'), true, output);
+  };
+
+  try {
+    fs.mkdirSync(parent, { recursive: true });
+    writeProject(kit);
+    linkModules(parent);
+    linkModules(kit);
+    writeReport(kit);
+
+    const fromKit = runIn(kit, ['triage', 'reports/session.json', '--fail-on', 'never', '--json']);
+    assert.equal(fromKit.status, 0, fromKit.stderr);
+    const kitStep = JSON.parse(fromKit.stdout).entries[0].nextStep;
+    assert.match(kitStep, /--config 'playwright\.config\.ts'/);
+    assert.equal(kitStep.includes('../playwright.config.ts'), false, kitStep);
+    assert.match(kitStep, /--from 'reports\/session\.json'/);
+    assertRan(paste(kitStep, kit), 'kit');
+
+    const fromParent = runIn(parent, [
+      'triage',
+      'saucedemo-flaky-kit/reports/session.json',
+      '--fail-on',
+      'never',
+      '--json',
+    ]);
+    assert.equal(fromParent.status, 0, fromParent.stderr);
+    const parentStep = JSON.parse(fromParent.stdout).entries[0].nextStep;
+    assert.match(parentStep, /--config 'saucedemo-flaky-kit\/playwright\.config\.ts'/);
+    assert.match(parentStep, /--from 'saucedemo-flaky-kit\/reports\/session\.json'/);
+    assertRan(paste(parentStep, parent), 'parent');
+
+    const e2e = path.join(project, 'e2e');
+    writeProject(e2e);
+    linkModules(project);
+    writeReport(e2e);
+    const fromProject = runIn(project, ['triage', 'e2e/reports/session.json', '--fail-on', 'never', '--json']);
+    assert.equal(fromProject.status, 0, fromProject.stderr);
+    const projectStep = JSON.parse(fromProject.stdout).entries[0].nextStep;
+    assert.match(projectStep, /--config 'e2e\/playwright\.config\.ts'/);
+    assert.match(projectStep, /--from 'e2e\/reports\/session\.json'/);
+    assertRan(paste(projectStep, project), 'e2e');
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+  }
 });
