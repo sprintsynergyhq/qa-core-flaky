@@ -108,8 +108,9 @@ test('contract mode proposes the SauceDemo typo and refuses the strict Remove te
     assert.equal(validateProposal(entry.healProposal), true, JSON.stringify(validateProposal.errors));
   }
   const html = fs.readFileSync(path.join(dir, 'triage.html'), 'utf8');
-  assert.match(html, /data-heal-status="proposed"/);
-  assert.match(html, /data-heal-refusal="strict-needs-human"/);
+  assert.match(html, /class=hp/);
+  assert.match(html, /class=hr/);
+  assert.equal(html.includes('data-heal-refusal'), false);
   assert.match(html, /Needs Review/);
   assert.equal(html.includes('<script>alert'), false);
   const patches = fs.readdirSync(path.join(dir, 'h')).map((name) => fs.readFileSync(path.join(dir, 'h', name), 'utf8'));
@@ -120,7 +121,7 @@ test('contract mode proposes the SauceDemo typo and refuses the strict Remove te
   assert.match(markdown, /Review status: Needs Review\./);
 });
 
-test('compat mode joins on the spec path and the test title', (t) => {
+test('compat mode joins on the test title', (t) => {
   const dir = keepTemp(t, 'heal-compat-');
   const result = run(
     ['triage', recorded, '--out-dir', dir, '--heal', '--fail-on', 'never'],
@@ -143,6 +144,115 @@ test('compat mode joins on the spec path and the test title', (t) => {
   assert.match(remove.healProposal.refusal.message, /choose the element/);
   assert.equal(validateProposal(typo.healProposal), true, JSON.stringify(validateProposal.errors));
   assert.equal(validateProposal(remove.healProposal), true, JSON.stringify(validateProposal.errors));
+});
+
+test('a page object verdict joins on the title and keeps the page object path', (t) => {
+  const dir = keepTemp(t, 'heal-page-');
+  const report = JSON.parse(fs.readFileSync(recorded, 'utf8'));
+  let found = false;
+  const visit = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.title === 'typo locator never finds the backpack button') {
+      node.title = 'subscribes with an email and the weekly digest';
+      found = true;
+    }
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach(visit);
+      else if (value && typeof value === 'object') visit(value);
+    }
+  };
+  visit(report);
+  assert.equal(found, true);
+  const reportPath = path.join(dir, 'report.json');
+  fs.writeFileSync(reportPath, JSON.stringify(report));
+  const fixture = path.resolve('fixtures/heal/real-heal-0.3.4-page-object.json');
+  const result = run(
+    ['triage', reportPath, '--out-dir', dir, '--heal', '--fail-on', 'never'],
+    healEnv(dir, 'compat', { FAKE_HEAL_STDOUT: fixture }),
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const lines = argvLog(dir);
+  assert.ok(lines.some((args) => String(args[0]).endsWith('broken.spec.ts') && args.includes('--dry-run')));
+  assert.equal(lines.some((args) => String(args[0]).includes('newsletter-page.ts')), false);
+  const triage = JSON.parse(fs.readFileSync(path.join(dir, 'triage.json'), 'utf8'));
+  const entry = triage.entries.find((item) => item.id.includes('subscribes with an email'));
+  assert.ok(entry);
+  assert.equal(entry.id.includes('broken.spec.ts'), true);
+  assert.equal(entry.id.includes('newsletter-page.ts'), false);
+  assert.equal(entry.healProposal.status, 'proposed');
+  assert.equal(entry.healProposal.changes[0].file, 'pages/newsletter-page.ts');
+  assert.equal(entry.healProposal.changes[0].startLine, 20);
+  assert.match(entry.healProposal.changes[0].after, /input\[type/);
+  assert.equal(entry.healProposal.verification.performed, false);
+  assert.equal(entry.healProposal.label, 'Heal 0.3.x dry run, not re-run verified');
+  assert.equal(validateProposal(entry.healProposal), true, JSON.stringify(validateProposal.errors));
+
+  const doubled = JSON.parse(fs.readFileSync(fixture, 'utf8'));
+  doubled.verdicts.push({ ...doubled.verdicts[0], after: 'this.page.locator("#other")' });
+  const doubledPath = path.join(dir, 'doubled.json');
+  fs.writeFileSync(doubledPath, JSON.stringify(doubled));
+  const ambiguous = run(
+    ['triage', reportPath, '--out-dir', dir, '--heal', '--fail-on', 'never'],
+    healEnv(dir, 'compat', { FAKE_HEAL_STDOUT: doubledPath }),
+  );
+  assert.equal(ambiguous.status, 0, ambiguous.stderr);
+  const again = JSON.parse(fs.readFileSync(path.join(dir, 'triage.json'), 'utf8'));
+  const missed = again.entries.find((item) => item.id.includes('subscribes with an email'));
+  assert.equal(missed.healProposal.status, 'error');
+  assert.match(missed.healProposal.explanation, /more than one/);
+});
+
+test('a user folder named h is not deleted', (t) => {
+  const dir = keepTemp(t, 'heal-keep-h-');
+  const folder = path.join(dir, 'h');
+  fs.mkdirSync(folder);
+  fs.writeFileSync(path.join(folder, 'mine.txt'), 'keep\n');
+  fs.writeFileSync(path.join(folder, 'abcdef012345.diff'), 'user\n');
+  const plain = run(['triage', recorded, '--out-dir', dir, '--fail-on', 'never']);
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.equal(fs.readFileSync(path.join(folder, 'mine.txt'), 'utf8'), 'keep\n');
+  assert.equal(fs.readFileSync(path.join(folder, 'abcdef012345.diff'), 'utf8'), 'user\n');
+  assert.equal(fs.existsSync(path.join(folder, '.qa-core-flaky')), false);
+
+  const findings = path.join(folder, 'x.diff');
+  const healed = run(
+    ['triage', recorded, '--out-dir', dir, '--html', '--heal', '--heal-findings', findings, '--fail-on', 'never'],
+    healEnv(dir, 'contract'),
+  );
+  assert.equal(healed.status, 0, healed.stderr);
+  assert.equal(fs.readFileSync(path.join(folder, 'mine.txt'), 'utf8'), 'keep\n');
+  assert.equal(fs.readFileSync(path.join(folder, 'abcdef012345.diff'), 'utf8'), 'user\n');
+  assert.match(fs.readFileSync(findings, 'utf8'), /qa-core\.heal-findings/);
+  const marker = fs.readFileSync(path.join(folder, '.qa-core-flaky'), 'utf8');
+  assert.match(marker, /^qa-core-flaky\n/);
+  const owned = marker.split('\n').filter((name) => /^[0-9a-f]{12}\.diff$/.test(name));
+  assert.ok(owned.length > 0);
+  for (const name of owned) assert.equal(fs.existsSync(path.join(folder, name)), true);
+
+  const cleared = run(
+    ['triage', recorded, '--out-dir', dir, '--heal', '--fail-on', 'never'],
+    healEnv(dir, 'contract', { QA_CORE_HEAL_BIN: path.join(dir, 'missing-heal') }),
+  );
+  assert.equal(cleared.status, 0, cleared.stderr);
+  assert.equal(fs.readFileSync(path.join(folder, 'mine.txt'), 'utf8'), 'keep\n');
+  assert.equal(fs.readFileSync(path.join(folder, 'abcdef012345.diff'), 'utf8'), 'user\n');
+  assert.equal(fs.existsSync(findings), true);
+  for (const name of owned) assert.equal(fs.existsSync(path.join(folder, name)), false, name);
+  assert.equal(fs.existsSync(path.join(folder, '.qa-core-flaky')), false);
+  assert.equal(fs.statSync(folder).isDirectory(), true);
+
+  const fileDir = keepTemp(t, 'heal-h-file-');
+  fs.writeFileSync(path.join(fileDir, 'h'), 'keep-file\n');
+  const untouched = run(['triage', recorded, '--out-dir', fileDir, '--fail-on', 'never']);
+  assert.equal(untouched.status, 0, untouched.stderr);
+  assert.equal(fs.readFileSync(path.join(fileDir, 'h'), 'utf8'), 'keep-file\n');
+  const blocked = run(
+    ['triage', recorded, '--out-dir', fileDir, '--heal', '--fail-on', 'never'],
+    healEnv(fileDir, 'contract'),
+  );
+  assert.equal(blocked.status, 1);
+  assert.match(blocked.stderr, /not a directory/);
+  assert.equal(fs.readFileSync(path.join(fileDir, 'h'), 'utf8'), 'keep-file\n');
 });
 
 test('a refused result, an error, and a timeout stay in the proposal', (t) => {

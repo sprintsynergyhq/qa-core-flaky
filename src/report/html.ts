@@ -80,7 +80,8 @@ export function renderTriageHtml(report: TriageReport, options: HtmlRenderOption
   if (options.redact !== false) redactStrings(source);
   const counts = source.entries.map((entry) => checkedCounts(entry));
   const version = options.version ?? readPackageVersion();
-  const styleHash = sourceHash(REPORT_STYLE);
+  const style = `${REPORT_STYLE}${causeBarCss(causeBarWidths(source))}`;
+  const styleHash = sourceHash(style);
   const scriptHash = sourceHash(REPORT_SCRIPT);
   const policy = [
     "default-src 'none'",
@@ -121,7 +122,7 @@ export function renderTriageHtml(report: TriageReport, options: HtmlRenderOption
 <meta http-equiv="Content-Security-Policy" content="${policy}">
 <title>Triage Report</title>
 <link rel="icon" href="data:,">
-<style>${REPORT_STYLE}</style>
+<style>${style}</style>
 </head>
 <body>
 ${body}
@@ -274,15 +275,15 @@ function renderCauses(report: TriageReport): string {
   if (report.entries.length === 0) {
     return `<section aria-labelledby="cause-heading"><h2 id="cause-heading">Cause Breakdown</h2><div class="empty"><p class="empty-title">No Causes</p><p>The report has no entries.</p></div></section>`;
   }
+  const widths = causeBarWidths(report);
   const rows = [...counts.entries()];
-  const max = Math.max(1, ...rows.map((row) => row[1] ?? 0));
   const bars = rows
-    .map((row) => {
+    .map((row, index) => {
       const cause = row[0] ?? 'unknown';
       const count = row[1] ?? 0;
-      const width = Math.round((count / max) * 100);
+      const width = widths[index] ?? 0;
       const zero = count === 0 ? ' z' : '';
-      return `<li class="${zero.trim()}"><span class="bl">${escapeHtml(causeLabel(cause))}</span><span class="bt" aria-hidden="true"><span class="bb" style="width:${width}%"></span></span><span class="bc" data-cause-count="${escapeHtml(cause)}">${count}</span></li>`;
+      return `<li class="${zero.trim()}"><span class="bl">${escapeHtml(causeLabel(cause))}</span><span class="bt" aria-hidden="true"><span class="bb w${width}"></span></span><span class="bc" data-cause-count="${escapeHtml(cause)}">${count}</span></li>`;
     })
     .join('');
   return `<section aria-labelledby="cause-heading"><h2 id="cause-heading">Cause Breakdown</h2><ul class="bars">${bars}</ul></section>`;
@@ -368,17 +369,28 @@ function renderDetail(entry: TriageEntry, counts: CheckedCounts): string {
   return parts.join('');
 }
 
+/**
+ * One class per status. The word is painted from the stylesheet, so a page
+ * of 200 rows does not repeat it, and the refusal code stays in the patch file.
+ */
+const PROPOSAL_CLASS: Record<string, string> = {
+  proposed: 'hp',
+  applied: 'ha',
+  refused: 'hr',
+  'not-locator': 'hl',
+  'nothing-to-heal': 'hn',
+  error: 'he',
+  unavailable: 'hu',
+  'skipped-by-gate': 'hs',
+};
+
 /** A short status, plus a link when the patch file holds the diff and the explanation. */
 function renderProposal(entry: TriageEntry): string {
   const proposal = entry.healProposal;
   if (!proposal) return '';
-  const status = escapeHtml(proposal.status);
-  const refusal = proposal.refusal ? ` data-heal-refusal="${escapeHtml(proposal.refusal.code)}"` : '';
-  if (proposalPatchBody(proposal).length === 0) {
-    return ` <i data-heal-status="${status}"${refusal}>${status}</i>`;
-  }
-  const href = escapeHtml(healPatchName(entry.id));
-  return ` <a data-heal-status="${status}"${refusal} href="${href}">${status}</a>`;
+  const mark = PROPOSAL_CLASS[proposal.status] ?? 'he';
+  if (proposalPatchBody(proposal).length === 0) return `<i class=${mark}></i>`;
+  return `<a class=${mark} href=${healPatchName(entry.id)}></a>`;
 }
 
 function renderNextStep(nextStep: string): string {
@@ -406,6 +418,21 @@ function renderReruns(counts: CheckedCounts): string {
   }
   if (items.length === 0) return '';
   return `<b>Reruns</b>${items.join('')}`;
+}
+
+/** Percent widths for the cause bars. The same report always returns the same list. */
+function causeBarWidths(report: TriageReport): number[] {
+  const counts = causeCounts(report);
+  if (report.entries.length === 0) return [];
+  const rows = [...counts.values()];
+  const max = Math.max(1, ...rows);
+  return rows.map((count) => Math.round((count / max) * 100));
+}
+
+/** Width classes for this page. A style attribute would be blocked by the page policy. */
+function causeBarCss(widths: readonly number[]): string {
+  const unique = [...new Set(widths)].sort((left, right) => left - right);
+  return unique.map((width) => `.w${width}{width:${width}%}`).join('');
 }
 
 function causeCounts(report: TriageReport): Map<string, number> {

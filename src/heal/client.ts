@@ -159,7 +159,7 @@ async function runCompat(
     for (const finding of group) {
       const full = finding.titlePath.join(' > ');
       const last = finding.titlePath[finding.titlePath.length - 1] ?? full;
-      const hits = rows.filter((row) => titlesMatch(row, full, last, file));
+      const hits = rows.filter((row) => titlesMatch(row, full, last));
       if (hits.length !== 1) {
         const explanation =
           hits.length === 0
@@ -288,6 +288,7 @@ function rowsFromVerdicts(data: Record<string, unknown>): HealResultRow[] {
     const locator = locators.find((row) => samePath(firstText(row.file), spec) && row.old === before);
     if (classification === 'locator' && after.length > 0) {
       const line = (locator ? integerAtLeast1(locator.line) : null) ?? 1;
+      const changeFile = spec || (locator ? firstText(locator.file) : '');
       rows.push({
         file: spec,
         title,
@@ -296,7 +297,7 @@ function rowsFromVerdicts(data: Record<string, unknown>): HealResultRow[] {
         explanation: message,
         changes: [
           {
-            file: locator ? firstText(locator.file) || spec : spec,
+            file: changeFile,
             startLine: line,
             endLine: line,
             before,
@@ -328,11 +329,15 @@ function integerAtLeast1(value: unknown): number | null {
   return value;
 }
 
-function titlesMatch(row: HealResultRow, full: string, last: string, file: string): boolean {
+/**
+ * Join one compat row to a finding inside a single spec run.
+ * `spec` on the verdict is the file that holds the locator. A page object
+ * lives in a different file from the spec that was run, so the path is not
+ * a join key. Two rows with the same title are left unmatched by the caller.
+ */
+function titlesMatch(row: HealResultRow, full: string, last: string): boolean {
   const title = row.title ?? '';
-  if (title !== full && title !== last) return false;
-  if (typeof row.file === 'string' && row.file.trim().length > 0 && !samePath(row.file, file)) return false;
-  return true;
+  return title === full || title === last;
 }
 
 function samePath(left: string, right: string): boolean {

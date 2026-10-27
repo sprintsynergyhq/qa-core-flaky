@@ -9,7 +9,7 @@ import type { CauseFinding } from './causes/types.js';
 import { collectHealProposals, specRootsFromReport } from './heal/client.js';
 import { buildHealFindings, mergeProjectFacts, readReportProjectFacts, renderHealFindings } from './heal/findings.js';
 import type { HealFinding } from './heal/findings.js';
-import { HEAL_PATCH_DIR, healPatchName, proposalPatchBody } from './heal/patch.js';
+import { HEAL_PATCH_DIR, HEAL_PATCH_MARKER, healPatchName, ownedPatchNames, patchMarkerText, proposalPatchBody } from './heal/patch.js';
 import type { ParseResult, RerunMode, TestRecord } from './model.js';
 import { detectFormat } from './parsers/detect.js';
 import { parseJunit } from './parsers/junit.js';
@@ -423,7 +423,7 @@ function publishTriage(
     writeHealFindingsFile(findingsPath, findings);
   }
   if (values['out-dir'] !== undefined) {
-    writeHealPatches(values['out-dir'], report);
+    if (values.heal === true) writeHealPatches(values['out-dir'], report);
     writeTriagePair(values['out-dir'], json, markdown);
     if (values.html === true) {
       try {
@@ -474,22 +474,54 @@ function canonicalPath(file: string): string {
 }
 
 function writeHealPatches(dir: string, report: ReturnType<typeof buildTriageReport>): void {
-  const folder = path.join(path.resolve(dir), HEAL_PATCH_DIR);
-  fs.rmSync(folder, { recursive: true, force: true });
+  const planned: { name: string; body: string }[] = [];
   for (const entry of report.entries) {
     const proposal = entry.healProposal;
     if (!proposal) continue;
     const body = proposalPatchBody(proposal);
     if (body.length === 0) continue;
     const relative = healPatchName(entry.id);
+    const name = path.posix.basename(relative);
+    planned.push({ name, body });
+  }
+  const folder = path.join(path.resolve(dir), HEAL_PATCH_DIR);
+  let info: fs.Stats | undefined;
+  try {
+    info = fs.lstatSync(folder);
+  } catch {
+    info = undefined;
+  }
+  if (info && (info.isSymbolicLink() || !info.isDirectory())) {
+    if (planned.length === 0) return;
+    fail(`Cannot write heal patches: ${HEAL_PATCH_DIR} exists and is not a directory.`);
+  }
+  const marker = path.join(folder, HEAL_PATCH_MARKER);
+  if (info?.isDirectory()) {
+    let owned: string[] = [];
     try {
-      const dest = path.join(path.resolve(dir), relative);
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.writeFileSync(dest, body);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : 'unknown error';
-      fail(redactHomeText(`Cannot write ${relative}: ${oneLine(detail)}`));
+      owned = ownedPatchNames(fs.readFileSync(marker, 'utf8'));
+    } catch {
+      owned = [];
     }
+    for (const name of owned) {
+      try {
+        fs.unlinkSync(path.join(folder, name));
+      } catch {
+        // The diff from the earlier run is already gone.
+      }
+    }
+  }
+  if (planned.length === 0) {
+    if (info?.isDirectory()) fs.rmSync(marker, { force: true });
+    return;
+  }
+  try {
+    fs.mkdirSync(folder, { recursive: true });
+    for (const item of planned) fs.writeFileSync(path.join(folder, item.name), item.body);
+    fs.writeFileSync(marker, patchMarkerText(planned.map((item) => item.name)));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'unknown error';
+    fail(redactHomeText(`Cannot write ${HEAL_PATCH_DIR}: ${oneLine(detail)}`));
   }
 }
 

@@ -7,6 +7,14 @@ import type { HealChange, HealProposal } from '../report/schema.js';
  */
 export const HEAL_PATCH_DIR = 'h';
 
+/**
+ * Marker written inside the patch folder after this tool creates diff files.
+ * A later `--heal` run deletes only the names listed under it.
+ */
+export const HEAL_PATCH_MARKER = '.qa-core-flaky';
+
+const OWNED_PATCH = /^[0-9a-f]{12}\.diff$/;
+
 /** Diffs longer than this are written to a patch file and linked from Markdown. */
 export const PATCH_INLINE_LINE_LIMIT = 12;
 
@@ -58,4 +66,16 @@ export function proposalPatchBody(proposal: HealProposal): string {
 export function healPatchName(entryId: string): string {
   const hash = createHash('sha256').update(entryId, 'utf8').digest('hex').slice(0, 12);
   return `${HEAL_PATCH_DIR}/${hash}.diff`;
+}
+
+/** Diff names this tool recorded in a marker file. Anything else is left alone. */
+export function ownedPatchNames(markerText: string): string[] {
+  const lines = markerText.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+  if (lines[0] !== 'qa-core-flaky') return [];
+  return lines.slice(1).filter((name) => OWNED_PATCH.test(name));
+}
+
+/** Marker body listing the diff files this run wrote. */
+export function patchMarkerText(names: readonly string[]): string {
+  return ['qa-core-flaky', ...names, ''].join('\n');
 }

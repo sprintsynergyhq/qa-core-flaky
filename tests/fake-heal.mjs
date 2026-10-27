@@ -172,6 +172,13 @@ function row(finding, status, strategy, fixRuleId, changes, refusal) {
 }
 
 function writeCompatResults() {
+  const recorded = process.env.FAKE_HEAL_STDOUT;
+  if (recorded) {
+    const body = fs.readFileSync(recorded);
+    process.stdout.write(body);
+    if (!body.toString('utf8').endsWith('\n')) process.stdout.write('\n');
+    process.exit(0);
+  }
   const spec = args.find((arg) => arg !== '--' && !arg.startsWith('-')) ?? '';
   const base = spec.split(/[/\\]/).pop();
   const locators = [];

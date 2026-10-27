@@ -37,7 +37,7 @@ export {
 } from './heal/findings.js';
 export type { BuildHealFindingsOptions, HealFinding, HealFindingsDocument, HealProjectFacts } from './heal/findings.js';
 export { collectHealProposals, healSpecPath, readFindingsContract, rowsFromCompatStdout, specRootsFromReport } from './heal/client.js';
-export { HEAL_PATCH_DIR, healPatchName, PATCH_INLINE_BYTE_LIMIT, PATCH_INLINE_LINE_LIMIT, patchIsExternal, proposalDiff, proposalPatchBody } from './heal/patch.js';
+export { HEAL_PATCH_DIR, HEAL_PATCH_MARKER, healPatchName, ownedPatchNames, PATCH_INLINE_BYTE_LIMIT, PATCH_INLINE_LINE_LIMIT, patchIsExternal, patchMarkerText, proposalDiff, proposalPatchBody } from './heal/patch.js';
 export {
   COMPAT_LABEL,
   CONTRACT_LABEL,

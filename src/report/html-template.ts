@@ -107,7 +107,9 @@ details b { display: block; margin: 0.7rem 0 0.25rem; font-size: 0.92rem; font-w
 .bars li { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr) 2rem; align-items: center; column-gap: 0.75rem; height: 24px; }
 .bl { font-size: 0.875rem; line-height: 1; white-space: nowrap; }
 .bt { display: block; height: 8px; background: var(--bar-track); border-radius: 999px; overflow: hidden; }
-.bb { display: block; height: 8px; background: var(--bar); border-radius: 999px; }
+.bb { display: block; height: 8px; width: 0%; background: var(--bar); border-radius: 999px; }
+.hp:after{content:"proposed"}.ha:after{content:"applied"}.hr:after{content:"refused"}.hl:after{content:"not-locator"}.hn:after{content:"nothing-to-heal"}.he:after{content:"error"}.hu:after{content:"unavailable"}.hs:after{content:"skipped-by-gate"}
+.hp,.ha,.hr,.hl,.hn,.he,.hu,.hs{margin-left:.35rem}
 .bars .z .bb { background: transparent; }
 .bc { font-size: 0.875rem; font-variant-numeric: tabular-nums; text-align: right; }
 .sr-only {

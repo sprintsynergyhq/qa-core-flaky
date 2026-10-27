@@ -198,6 +198,27 @@ test('the table is readable without script', async ({ browser }) => {
   await context.close();
 });
 
+test('cause bars use the stylesheet width', async ({ page }) => {
+  const blocked: string[] = [];
+  page.on('console', (message) => {
+    if (/content security policy|style-src/i.test(message.text())) blocked.push(message.text());
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(reportUrl);
+  expect(blocked).toEqual([]);
+  expect(await page.locator('.bb[style]').count()).toBe(0);
+  const measures = await page.locator('.bb').evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const bar = node.getBoundingClientRect().width;
+      const track = node.parentElement ? node.parentElement.getBoundingClientRect().width : 0;
+      return { bar, track };
+    }),
+  );
+  expect(measures.length).toBeGreaterThan(0);
+  expect(measures.some((item) => item.bar === 0)).toBe(true);
+  expect(measures.some((item) => item.track > 40 && Math.abs(item.bar - item.track) < 1)).toBe(true);
+});
+
 test('the page fits a phone width', async ({ page }) => {
   const urls = track(page);
   await page.setViewportSize({ width: 375, height: 812 });
@@ -366,8 +387,9 @@ test('a heal diff that contains a script tag stays text', async ({ page }, testI
   await page.goto(pathToFileURL(path.join(dir, 'triage.html')).href);
   const typo = page.locator('tbody', { hasText: 'typo locator' });
   await typo.locator('summary').click();
-  const typoLink = typo.locator('[data-heal-status="proposed"]');
+  const typoLink = typo.locator('a.hp');
   await expect(typoLink).toBeVisible();
+  expect(await typoLink.evaluate((node) => getComputedStyle(node, '::after').content)).toContain('proposed');
   const typoPatch = fs.readFileSync(path.join(dir, await typoLink.getAttribute('href')), 'utf8');
   expect(typoPatch).toContain('Proposal from qa-core-heal (dry run, not applied)');
   expect(typoPatch).toContain('<script>alert(1)</script>');
@@ -375,9 +397,10 @@ test('a heal diff that contains a script tag stays text', async ({ page }, testI
   await expect(typo.getByText('Needs Review')).toBeVisible();
   const remove = page.locator('tbody', { hasText: 'unscoped Remove' });
   await remove.locator('summary').click();
-  const refusal = remove.locator('[data-heal-refusal="strict-needs-human"]');
+  const refusal = remove.locator('a.hr');
   await expect(refusal).toBeVisible();
   const removePatch = fs.readFileSync(path.join(dir, await refusal.getAttribute('href')), 'utf8');
+  expect(removePatch).toContain('strict-needs-human');
   expect(removePatch).toContain('choose the element');
   await expect(remove.getByText('Needs Review')).toBeVisible();
   expect(await page.locator('script').count()).toBe(1);
