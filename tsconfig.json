@@ -16,6 +16,6 @@
     "forceConsistentCasingInFileNames": true,
     "rootDir": "."
   },
-  "include": ["src/**/*.ts", "demo/saucedemo/**/*.ts"],
+  "include": ["src/**/*.ts", "demo/saucedemo/**/*.ts", "playwright.html.config.ts"],
   "exclude": ["node_modules", "dist", "fixtures"]
 }
