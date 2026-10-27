@@ -1,5 +1,8 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { rerunChildEnv, stopChildTree } from '../rerun/run.js';
 
 /** Flags this tool must never put on a heal command line. */
 export const FORBIDDEN_HEAL_ARGS = ['--apply', '--yes', '--no-verify'] as const;
@@ -70,19 +73,24 @@ const healStop = {
   tempDir: null as string | null,
 };
 let healStopHandlersOn = false;
+let healStopInProgress = false;
 
 function onHealStop(signal: NodeJS.Signals): void {
+  if (healStopInProgress) return;
+  healStopInProgress = true;
   const child = healStop.child;
   const dir = healStop.tempDir;
-  if (child) killHealTree(child);
-  if (dir) {
-    try {
-      fs.rmSync(dir, { recursive: true, force: true });
-    } catch {
-      // The folder is already gone.
+  void (async () => {
+    if (child) {
+      try {
+        await stopChildTree(child);
+      } catch {
+        // The folder is still removed.
+      }
     }
-  }
-  process.exit(signal === 'SIGTERM' ? 143 : 130);
+    removeHealTemp(dir);
+    process.exit(signal === 'SIGTERM' ? 143 : 130);
+  })();
 }
 
 /** Remember the heal child so a later interrupt can kill its process group. */
@@ -111,6 +119,7 @@ export function removeHealStopHandlers(): void {
   healStopHandlersOn = false;
   healStop.child = null;
   healStop.tempDir = null;
+  healStopInProgress = false;
 }
 
 /** Run heal without a shell. The child is killed when the timeout fires. */
@@ -126,21 +135,33 @@ export function runHealCommand(args: readonly string[], timeoutMs: number = heal
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    const ownedTemp = healStop.tempDir ? null : fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-heal-'));
+    if (ownedTemp) bindHealTempDir(ownedTemp);
+    const tempRoot = healStop.tempDir ?? os.tmpdir();
     const child = spawn(command, argv, {
       shell: false,
       windowsHide: true,
+      env: rerunChildEnv(tempRoot),
       // A new process group so the timeout can kill grandchildren.
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     bindHealChild(child);
+    const releaseOwned = () => {
+      if (!ownedTemp) return;
+      if (healStop.tempDir === ownedTemp) bindHealTempDir(null);
+      removeHealTemp(ownedTemp);
+    };
     const timer = setTimeout(() => {
       timedOut = true;
-      killHealTree(child);
-      child.stdout?.destroy();
-      child.stderr?.destroy();
-      child.unref();
-      finish({ args, argv, command, exitCode: null, stdout, stderr, timedOut: true });
+      void (async () => {
+        await stopChildTree(child);
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        child.unref();
+        releaseOwned();
+        finish({ args, argv, command, exitCode: null, stdout, stderr, timedOut: true });
+      })();
     }, timeoutMs);
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');
@@ -155,6 +176,7 @@ export function runHealCommand(args: readonly string[], timeoutMs: number = heal
     child.on('error', (error: NodeJS.ErrnoException) => {
       clearTimeout(timer);
       if (healStop.child === child) bindHealChild(null);
+      releaseOwned();
       finish({
         args,
         argv,
@@ -168,27 +190,22 @@ export function runHealCommand(args: readonly string[], timeoutMs: number = heal
     });
     child.on('close', (exitCode) => {
       clearTimeout(timer);
+      // A timeout or a stop signal owns the kill and the folder removal.
+      // Walking after a clean exit would miss a descendant that was already reparented.
+      if (timedOut || healStopInProgress) return;
       if (healStop.child === child) bindHealChild(null);
+      releaseOwned();
       finish({ args, argv, command, exitCode, stdout, stderr, timedOut });
     });
   });
 }
 
-function killHealTree(child: ChildProcess): void {
-  const pid = child.pid;
-  if (pid === undefined || pid <= 1) return;
-  if (process.platform === 'win32') {
-    spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
-    return;
-  }
+function removeHealTemp(dir: string | null): void {
+  if (!dir) return;
   try {
-    process.kill(-pid, 'SIGKILL');
+    fs.rmSync(dir, { recursive: true, force: true });
   } catch {
-    try {
-      child.kill('SIGKILL');
-    } catch {
-      // The child has already exited.
-    }
+    // The folder is already gone.
   }
 }
 

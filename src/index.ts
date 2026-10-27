@@ -88,6 +88,8 @@ export {
   isStoppedRun,
   killProcessGroup,
   launchRerunChild,
+  signalTree,
+  stopChildTree,
   onStopSignal,
   releaseRun,
   rerunChildEnv,

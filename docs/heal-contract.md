@@ -18,7 +18,7 @@ The user's `--heal-findings` file is written before `triage.json` and `triage.md
 
 `--heal` is valid for `triage` only. It asks qa-core-heal for a dry run and stores one `healProposal` on every triage entry. The command never passes `--apply`, `--yes`, or `--no-verify`. A person can still read `applyCommand` and run that later. This tool does not run it.
 
-The program is `npx --no-install qa-core-heal`. A missing local install is status `unavailable`. The registry copy is not fetched. `QA_CORE_HEAL_BIN` selects another program. A path that ends in `.js` or `.mjs` is run with `node`. The default wait is 60 seconds. `QA_CORE_HEAL_TIMEOUT_MS` can set another wait. A value above 120 seconds is clamped to 120 seconds. The wait kills the heal process group, so a grandchild that still holds a pipe does not keep the run open. `SIGINT` and `SIGTERM` do the same, and they remove the temporary findings folder. Those handlers are removed when the heal run ends.
+The program is `npx --no-install qa-core-heal`. A missing local install is status `unavailable`. The registry copy is not fetched. `QA_CORE_HEAL_BIN` selects another program. A path that ends in `.js` or `.mjs` is run with `node`. The default wait is 60 seconds. `QA_CORE_HEAL_TIMEOUT_MS` can set another wait. A value above 120 seconds is clamped to 120 seconds. The wait stops the heal process and its descendants, including a descendant that is in another process group. A grandchild that still holds a pipe does not keep the run open. `SIGINT` and `SIGTERM` do the same. Heal is started with `TMPDIR`, `TMP`, and `TEMP` set to a folder inside the temporary findings folder, so heal's own output is removed with that folder after those processes are gone. Those handlers are removed when the heal run ends.
 
 The capabilities check, the version check, and every spec command share that one wait. A later command gets only the time that is left. When no time is left, the remaining rows are `error` with refusal code `timeout`, and heal is not started for them.
 
@@ -117,7 +117,7 @@ When more than one report is passed, the first report that has a project fact fi
 | Field | Meaning |
 | --- | --- |
 | findingId | 12 hex characters. See Finding Id below. |
-| testId | Flaky's test id, `file::project::title path`, after redaction. |
+| testId | `file::project::title path`, after redaction. The file part is the spec path from the working folder, the same path stored in `file`. |
 | file | Spec path. Relative, forward slashes. |
 | line | Spec line from the report, or null when the report has no spec line. |
 | project | Playwright project name. `default` when the report has none. |

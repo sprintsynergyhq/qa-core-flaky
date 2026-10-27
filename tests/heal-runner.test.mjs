@@ -627,11 +627,15 @@ test('the default heal command does not install from the registry', () => {
   }
 });
 
-test('a grandchild holding the pipe does not extend the timeout', async () => {
+test('a grandchild holding the pipe does not extend the timeout', async (t) => {
+  const dir = keepTemp(t, 'heal-timeout-pipe-');
+  const note = path.join(dir, 'note');
   const savedBin = process.env.QA_CORE_HEAL_BIN;
   const savedMode = process.env.FAKE_HEAL_MODE;
+  const savedNote = process.env.FAKE_HEAL_TEMP_NOTE;
   process.env.QA_CORE_HEAL_BIN = fake;
   process.env.FAKE_HEAL_MODE = 'grandchild';
+  process.env.FAKE_HEAL_TEMP_NOTE = note;
   const started = Date.now();
   try {
     const result = await runHealCommand(['--version'], 400);
@@ -639,13 +643,16 @@ test('a grandchild holding the pipe does not extend the timeout', async () => {
     assert.equal(result.timedOut, true);
     assert.ok(elapsed >= 300, String(elapsed));
     assert.ok(elapsed < 2000, String(elapsed));
-    const live = spawnSync('pgrep', ['-f', 'sleep 25'], { encoding: 'utf8' });
-    assert.equal(live.stdout.includes('sleep 25'), false, live.stdout);
+    assertNoHealLeak(note);
+    const sameGroup = spawnSync('pgrep', ['-f', 'sleep 25'], { encoding: 'utf8' });
+    assert.equal(sameGroup.stdout.includes('sleep 25'), false, sameGroup.stdout);
   } finally {
     if (savedBin === undefined) delete process.env.QA_CORE_HEAL_BIN;
     else process.env.QA_CORE_HEAL_BIN = savedBin;
     if (savedMode === undefined) delete process.env.FAKE_HEAL_MODE;
     else process.env.FAKE_HEAL_MODE = savedMode;
+    if (savedNote === undefined) delete process.env.FAKE_HEAL_TEMP_NOTE;
+    else process.env.FAKE_HEAL_TEMP_NOTE = savedNote;
   }
 });
 
@@ -766,38 +773,104 @@ test('a testDir relative spec is resolved before heal sees it', (t) => {
   assert.ok(specs.some((args) => args[0] === 'tests/a.spec.ts'), JSON.stringify(specs));
 });
 
-test('SIGINT kills the heal process group and removes the temporary folder', async (t) => {
-  const dir = keepTemp(t, 'heal-int-');
+test('SIGINT kills detached heal descendants and removes both temp folders', async (t) => {
+  const stopped = await stopTriageHeal(t, 'SIGINT');
+  assert.equal(stopped.code, 130);
+});
+
+test('SIGTERM kills detached heal descendants and removes both temp folders', async (t) => {
+  const stopped = await stopTriageHeal(t, 'SIGTERM');
+  assert.equal(stopped.code, 143);
+});
+
+test('a heal timeout kills detached descendants and removes both temp folders', async (t) => {
+  const dir = keepTemp(t, 'heal-timeout-tree-');
+  const note = path.join(dir, 'note');
+  const child = spawn(process.execPath, [cli, 'triage', recorded, '--out-dir', dir, '--heal', '--fail-on', 'never'], {
+    env: { ...process.env, ...healEnv(dir, 'orphan', { FAKE_HEAL_TEMP_NOTE: note, QA_CORE_HEAL_TIMEOUT_MS: '8000' }) },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stderr = '';
+  child.stderr?.setEncoding('utf8');
+  child.stderr?.on('data', (chunk) => {
+    stderr += chunk;
+  });
+  t.after(() => killTree(child.pid, note));
+  const code = await new Promise((resolve) => child.once('close', resolve));
+  assert.equal(code, 0, stderr);
+  assert.match(stderr, /timed out/);
+  assertNoHealLeak(note);
+  const triage = JSON.parse(fs.readFileSync(path.join(dir, 'triage.json'), 'utf8'));
+  assert.ok(triage.entries.some((entry) => entry.healProposal?.refusal?.code === 'timeout'));
+});
+
+async function stopTriageHeal(t, signal) {
+  const dir = keepTemp(t, `heal-${signal.toLowerCase()}-`);
   const note = path.join(dir, 'note');
   const child = spawn(process.execPath, [cli, 'triage', recorded, '--out-dir', dir, '--heal', '--fail-on', 'never'], {
     env: { ...process.env, ...healEnv(dir, 'orphan', { FAKE_HEAL_TEMP_NOTE: note, QA_CORE_HEAL_TIMEOUT_MS: '30000' }) },
     detached: true,
     stdio: 'ignore',
   });
-  t.after(() => {
-    if (child.pid) {
-      try {
-        process.kill(-child.pid, 'SIGKILL');
-      } catch {
-        // The process has already exited.
-      }
-    }
-  });
+  t.after(() => killTree(child.pid, note));
   const deadline = Date.now() + 8_000;
-  while (!fs.existsSync(note) && Date.now() < deadline) {
+  let flakyDir = '';
+  let outDir = '';
+  while (Date.now() < deadline) {
+    if (fs.existsSync(note)) {
+      const lines = fs.readFileSync(note, 'utf8').split('\n');
+      flakyDir = lines[0] ?? '';
+      outDir = lines[1] ?? '';
+      if (flakyDir && outDir) break;
+    }
     await new Promise((resolve) => setTimeout(resolve, 30));
   }
-  assert.equal(fs.existsSync(note), true, 'the stand-in did not reach the findings command');
-  const [temp, pidText] = fs.readFileSync(note, 'utf8').trim().split('\n');
-  const sleepPid = Number(pidText);
-  assert.equal(fs.existsSync(temp), true);
+  assert.equal(fs.existsSync(flakyDir), true, flakyDir || 'the stand-in did not reach the findings command');
+  assert.equal(outDir.startsWith(`${flakyDir}${path.sep}`), true, outDir);
+  assert.equal(fs.existsSync(outDir), true, outDir);
   assert.ok(child.pid);
-  process.kill(-child.pid, 'SIGINT');
+  if (signal === 'SIGINT') process.kill(-child.pid, 'SIGINT');
+  else process.kill(child.pid, signal);
   const code = await new Promise((resolve) => child.once('exit', resolve));
-  assert.equal(code, 130);
-  assert.equal(fs.existsSync(temp), false);
+  assertNoHealLeak(note);
+  return { code };
+}
+
+function assertNoHealLeak(note) {
+  assert.equal(fs.existsSync(note), true, note);
+  const [flakyDir, outDir, pidText] = fs.readFileSync(note, 'utf8').split('\n');
+  const sleepPid = Number(pidText);
+  if (flakyDir) assert.equal(fs.existsSync(flakyDir), false, flakyDir);
+  assert.match(outDir, /qa-core-flaky-heal-[^/\\]+[/\\]tmp[/\\]qa-core-heal-out-/);
+  assert.equal(fs.existsSync(outDir), false, outDir);
+  assert.equal(path.basename(outDir).startsWith('qa-core-heal-out-'), true, outDir);
   assert.throws(() => process.kill(sleepPid, 0));
-});
+  const leaked = path.join(os.tmpdir(), path.basename(outDir));
+  assert.equal(fs.existsSync(leaked), false, leaked);
+}
+
+function killTree(pid, note) {
+  if (pid) {
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      // The process has already exited.
+    }
+  }
+  if (!fs.existsSync(note)) return;
+  const pidText = fs.readFileSync(note, 'utf8').split('\n')[2];
+  const sleepPid = Number(pidText);
+  if (!sleepPid) return;
+  try {
+    process.kill(-sleepPid, 'SIGKILL');
+  } catch {
+    try {
+      process.kill(sleepPid, 'SIGKILL');
+    } catch {
+      // The sleep has already exited.
+    }
+  }
+}
 
 test('heal stop handlers are removed after they are installed', () => {
   const sigint = process.listenerCount('SIGINT');

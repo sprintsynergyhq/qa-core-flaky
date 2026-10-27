@@ -13,6 +13,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -32,15 +33,13 @@ for (const arg of args) {
 
 let holding = false;
 if (mode === 'grandchild') {
+  // Same process group, and it keeps the stdout pipe open.
   spawn('sleep', ['25'], { stdio: 'inherit' });
-  setInterval(() => {}, 1000);
+  // Own process group, and it writes where TMPDIR points.
+  startDetachedLeak('26');
   holding = true;
 } else if (mode === 'orphan' && args.includes('--findings')) {
-  const findingsPath = valueAfter('--findings');
-  const child = spawn('sleep', ['47'], { stdio: 'ignore' });
-  const note = process.env.FAKE_HEAL_TEMP_NOTE;
-  if (note) fs.writeFileSync(note, `${path.dirname(findingsPath)}\n${child.pid ?? ''}\n`);
-  setInterval(() => {}, 1000);
+  startDetachedLeak('47');
   holding = true;
 } else if (args[0] === 'capabilities') {
   if (mode === 'compat' || mode === 'compat-hang') {
@@ -62,7 +61,8 @@ if (!holding && args.includes('--version')) {
 }
 
 if (holding) {
-  // The process stays up until the parent kills it.
+  // The detached child is unref'd, so this timer is what keeps the process up.
+  setInterval(() => {}, 1000);
 } else if (mode === 'compat-hang') {
   setInterval(() => {}, 1000);
 } else if (mode === 'timeout') {
@@ -267,6 +267,20 @@ function writeCompatResults() {
     })}\n`,
   );
   process.exit(0);
+}
+
+/** A detached child in its own process group, plus a folder under os.tmpdir(). */
+function startDetachedLeak(seconds) {
+  const child = spawn('sleep', [seconds], { detached: true, stdio: 'ignore' });
+  child.unref();
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-heal-out-'));
+  fs.writeFileSync(path.join(out, 'live'), `${child.pid ?? ''}\n`);
+  const note = process.env.FAKE_HEAL_TEMP_NOTE;
+  if (note) {
+    const findingsPath = args.includes('--findings') ? valueAfter('--findings') : '';
+    const flakyDir = findingsPath ? path.dirname(findingsPath) : '';
+    fs.writeFileSync(note, `${flakyDir}\n${out}\n${child.pid ?? ''}\n`);
+  }
 }
 
 function valueAfter(flag) {
