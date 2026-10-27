@@ -87,9 +87,7 @@ function renderProposal(entry: TriageEntry, externalPatches: boolean): string[] 
     if (externalPatches && patchIsExternal(diff)) {
       lines.push('', `Patch file: ${healPatchName(entry.id)}`);
     } else {
-      lines.push('', '```');
-      for (const line of diff.split('\n')) lines.push(escapeHtml(line));
-      lines.push('```');
+      lines.push('', ...fenced(diff));
     }
   }
   if (proposal.applyCommand) lines.push('', `Apply by hand: \`${proposal.applyCommand.replaceAll('`', "'")}\``);
@@ -126,6 +124,14 @@ function renderNextStep(nextStep: string): string {
     .replaceAll('\n', '\\n')
     .replaceAll('\r', '\\n');
   return `${escapeHtml(nextStep.slice(0, at))}\`${command}\``;
+}
+
+/** A fence long enough that backticks inside the diff stay literal. */
+function fenced(diff: string): string[] {
+  let ticks = 3;
+  for (const run of diff.match(/`+/g) ?? []) ticks = Math.max(ticks, run.length + 1);
+  const mark = '`'.repeat(ticks);
+  return [mark, ...diff.split('\n'), mark];
 }
 
 function cell(value: string): string {

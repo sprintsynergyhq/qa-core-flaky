@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { healPatchName, patchIsExternal, proposalDiff } from '../heal/patch.js';
+import { healPatchName, proposalPatchBody } from '../heal/patch.js';
 import { redactHomeText } from '../report-path.js';
 import { VERDICT_ORDER } from '../verdict.js';
 import { REPORT_SCRIPT, REPORT_STYLE } from './html-template.js';
@@ -282,7 +282,7 @@ function renderCauses(report: TriageReport): string {
       const count = row[1] ?? 0;
       const width = Math.round((count / max) * 100);
       const zero = count === 0 ? ' z' : '';
-      return `<li class="${zero.trim()}"><span class="bl">${escapeHtml(causeLabel(cause))}</span><span class="bt" aria-hidden="true"><span class="bb w${width}"></span></span><span class="bc" data-cause-count="${escapeHtml(cause)}">${count}</span></li>`;
+      return `<li class="${zero.trim()}"><span class="bl">${escapeHtml(causeLabel(cause))}</span><span class="bt" aria-hidden="true"><span class="bb" style="width:${width}%"></span></span><span class="bc" data-cause-count="${escapeHtml(cause)}">${count}</span></li>`;
     })
     .join('');
   return `<section aria-labelledby="cause-heading"><h2 id="cause-heading">Cause Breakdown</h2><ul class="bars">${bars}</ul></section>`;
@@ -292,7 +292,7 @@ function renderTests(report: TriageReport, counts: readonly CheckedCounts[]): st
   if (report.entries.length === 0) {
     return `<section id="tests" aria-labelledby="tests-heading"><h2 id="tests-heading">Tests</h2><div class="empty"><p class="empty-title">No Entries</p><p>Every test passed or was skipped. There is nothing to review.</p></div></section>`;
   }
-  const head = `<thead><tr><th scope="col" data-sort-key="test" aria-sort="none"><button type="button">Test</button></th><th scope="col" data-sort-key="verdict" aria-sort="none"><button type="button">Verdict</button></th><th scope="col" data-sort-key="cause" aria-sort="none"><button type="button">Cause</button></th><th scope="col" data-sort-key="confidence" aria-sort="none"><button type="button">Confidence</button></th><th scope="col" data-sort-key="attempts" aria-sort="none"><button type="button">Attempts</button></th><th scope="col" data-sort-key="runs" aria-sort="none"><button type="button">Runs Seen</button></th></tr></thead>`;
+  const head = `<thead><tr><th scope="col" data-sort-key="test" aria-sort="none"><button>Test</button></th><th scope="col" data-sort-key="verdict" aria-sort="none"><button>Verdict</button></th><th scope="col" data-sort-key="cause" aria-sort="none"><button>Cause</button></th><th scope="col" data-sort-key="confidence" aria-sort="none"><button>Confidence</button></th><th scope="col" data-sort-key="attempts" aria-sort="none"><button>Attempts</button></th><th scope="col" data-sort-key="runs" aria-sort="none"><button>Runs Seen</button></th></tr></thead>`;
   const bodies = report.entries.map((entry, index) => renderEntry(entry, counts[index])).join('');
   const flaky = report.entries.some((entry) => entry.verdict === 'flaky') ? `<p class="note">${escapeHtml(FLAKY_LINE)}</p>` : '';
   return `<section id="tests" aria-labelledby="tests-heading"><h2 id="tests-heading">Tests</h2>${flaky}${renderToolbar(report)}<div class="table-wrap"><table data-report-table><caption class="sr-only">Triage Tests</caption>${head}${bodies}</table></div><p id="filter-empty" class="filter-empty" hidden>No Matching Tests</p></section>`;
@@ -320,7 +320,7 @@ function renderEntry(entry: TriageEntry, counts: CheckedCounts | undefined): str
   const parts = splitId(entry.id);
   const title = `<b>${escapeHtml(parts.title)}</b>`;
   const meta = parts.meta ? `<small>${escapeHtml(parts.meta)}</small>` : '';
-  return `<tbody data-test="${escapeHtml(entry.id)}" data-v="${escapeHtml(entry.verdict)}" data-c="${escapeHtml(cause)}" data-k="${escapeHtml(entry.confidence)}" data-f="${counts.failed}" data-n="${counts.total}" data-r="${counts.runsSeen}" data-rule="${escapeHtml(entry.ruleId)}"><tr><th scope="row">${title}${meta}</th><td data-label="Verdict"><i class="${badge}">${escapeHtml(verdictLabel(entry.verdict))}</i></td><td data-label="Cause">${escapeHtml(causeLabel(cause))}</td><td data-label="Confidence">${escapeHtml(confidenceLabel(entry.confidence))}</td><td data-label="Attempts">${counts.failed}/${counts.total}</td><td data-label="Runs Seen">${counts.runsSeen}</td></tr><tr><td colspan="6"><details><summary>Details</summary>${renderDetail(entry, counts)}</details></td></tr></tbody>`;
+  return `<tbody data-test="${escapeHtml(entry.id)}" data-v="${escapeHtml(entry.verdict)}" data-c="${escapeHtml(cause)}" data-k="${escapeHtml(entry.confidence)}" data-f="${counts.failed}" data-n="${counts.total}" data-r="${counts.runsSeen}"><tr><th scope="row">${title}${meta}</th><td data-label="Verdict"><i class="${badge}">${escapeHtml(verdictLabel(entry.verdict))}</i></td><td data-label="Cause">${escapeHtml(causeLabel(cause))}</td><td data-label="Confidence">${escapeHtml(confidenceLabel(entry.confidence))}</td><td data-label="Attempts">${counts.failed}/${counts.total}</td><td data-label="Runs Seen">${counts.runsSeen}</td></tr><tr><td colspan="6"><details><summary>Details</summary>${renderDetail(entry, counts)}</details></td></tr></tbody>`;
 }
 
 function splitId(id: string): { title: string; meta: string } {
@@ -335,10 +335,10 @@ function splitId(id: string): { title: string; meta: string } {
 function renderDetail(entry: TriageEntry, counts: CheckedCounts): string {
   const parts: string[] = [];
   if (entry.evidence.length > 0) {
-    parts.push(`<h3>Evidence</h3><pre>${entry.evidence.map((line) => escapeHtml(line)).join('\n')}</pre>`);
+    parts.push(`<b>Evidence</b><pre>${entry.evidence.map((line) => escapeHtml(line)).join('\n')}</pre>`);
   }
   if (entry.signals.length > 0) {
-    parts.push('<h3>Signals</h3>');
+    parts.push('<b>Signals</b>');
     for (const signal of entry.signals) {
       parts.push(
         `<p data-signal="${escapeHtml(signal.kind)}">${escapeHtml(signalLabel(signal.kind))}: ${escapeHtml(signal.detail)}</p>`,
@@ -346,55 +346,39 @@ function renderDetail(entry: TriageEntry, counts: CheckedCounts): string {
     }
   }
   if (entry.causes.length > 0) {
-    parts.push('<h3>Causes</h3>');
+    parts.push('<b>Causes</b>');
     for (const finding of entry.causes) {
       parts.push(
         `<p>${escapeHtml(causeLabel(finding.cause))} (${escapeHtml(confidenceLabel(finding.confidence))}). ${escapeHtml(finding.ruleIds.join(', '))}</p>`,
       );
     }
   }
-  if (entry.suggestedFix) parts.push(`<h3>Suggested Fix</h3><p>${escapeHtml(entry.suggestedFix)}</p>`);
-  if (entry.nextStep) parts.push(`<h3>Next Step</h3>${renderNextStep(entry.nextStep)}`);
+  if (entry.suggestedFix) parts.push(`<b>Suggested Fix</b><p>${escapeHtml(entry.suggestedFix)}</p>`);
+  if (entry.nextStep) parts.push(`<b>Next Step</b>${renderNextStep(entry.nextStep)}`);
   const reruns = renderReruns(counts);
   if (reruns) parts.push(reruns);
   if (entry.observation) parts.push(`<p>${escapeHtml(entry.observation)}</p>`);
-  if (entry.note) parts.push(`<h3>Note</h3><p>${escapeHtml(entry.note)}</p>`);
-  const proposal = renderProposal(entry);
-  if (proposal) parts.push(proposal);
+  if (entry.note) parts.push(`<b>Note</b><p>${escapeHtml(entry.note)}</p>`);
   const sameCode = entry.attempts.sameCommit ? 'yes' : 'no';
   parts.push(
-    `<h3>Attempts</h3><p>Total ${counts.total}, failed ${counts.failed}, passed ${counts.passed}. Same code for a pass and a fail: ${sameCode}.</p>`,
+    `<b>Attempts</b><p>Total ${counts.total}, failed ${counts.failed}, passed ${counts.passed}. Same code for a pass and a fail: ${sameCode}.</p>`,
   );
   if (counts.runsSeen > 1) parts.push(`<p>Seen In ${counts.runsSeen} Runs</p>`);
-  parts.push(`<p>Review Status: ${escapeHtml(entry.review.status)}.</p>`);
+  parts.push(`<p>Review Status: ${escapeHtml(entry.review.status)}.${renderProposal(entry)}</p>`);
   return parts.join('');
 }
 
+/** A short status, plus a link when the patch file holds the diff and the explanation. */
 function renderProposal(entry: TriageEntry): string {
   const proposal = entry.healProposal;
   if (!proposal) return '';
-  const parts = [`<h3>${escapeHtml(proposal.label)}</h3>`];
-  parts.push(`<p data-heal-status="${escapeHtml(proposal.status)}">Status: ${escapeHtml(proposal.status)}.</p>`);
-  if (proposal.explanation) parts.push(`<p>${escapeHtml(proposal.explanation)}</p>`);
-  if (proposal.refusal) {
-    parts.push(
-      `<p data-heal-refusal="${escapeHtml(proposal.refusal.code)}">Refusal: ${escapeHtml(proposal.refusal.code)}. ${escapeHtml(proposal.refusal.message)}</p>`,
-    );
+  const status = escapeHtml(proposal.status);
+  const refusal = proposal.refusal ? ` data-heal-refusal="${escapeHtml(proposal.refusal.code)}"` : '';
+  if (proposalPatchBody(proposal).length === 0) {
+    return ` <i data-heal-status="${status}"${refusal}>${status}</i>`;
   }
-  if (proposal.verification?.baselineReproduced === false) {
-    parts.push('<p>Failure did not reproduce before the fix, so the passing re-run is weak evidence.</p>');
-  }
-  const diff = proposalDiff(proposal.changes);
-  if (diff.length > 0) {
-    if (patchIsExternal(diff)) {
-      const href = healPatchName(entry.id);
-      parts.push(`<p>Patch file: <a href="${escapeHtml(href)}">${escapeHtml(href)}</a></p>`);
-    } else {
-      parts.push(`<h3>Diff</h3><pre>${escapeHtml(diff)}</pre>`);
-    }
-  }
-  if (proposal.applyCommand) parts.push(`<p>Apply by hand: <code>${escapeHtml(proposal.applyCommand)}</code></p>`);
-  return parts.join('');
+  const href = escapeHtml(healPatchName(entry.id));
+  return ` <a data-heal-status="${status}"${refusal} href="${href}">${status}</a>`;
 }
 
 function renderNextStep(nextStep: string): string {
@@ -402,7 +386,7 @@ function renderNextStep(nextStep: string): string {
   const at = nextStep.indexOf(marker);
   const lead = at === -1 ? nextStep : nextStep.slice(0, at);
   const command = at === -1 ? nextStep : nextStep.slice(at);
-  return `<p>${escapeHtml(lead)}</p><pre>${escapeHtml(command)}</pre><button type="button" class="copy">Copy Command</button>`;
+  return `<p>${escapeHtml(lead)}</p><pre>${escapeHtml(command)}</pre><button class="copy">Copy Command</button>`;
 }
 
 function renderReruns(counts: CheckedCounts): string {
@@ -421,7 +405,7 @@ function renderReruns(counts: CheckedCounts): string {
     }
   }
   if (items.length === 0) return '';
-  return `<h3>Reruns</h3>${items.join('')}`;
+  return `<b>Reruns</b>${items.join('')}`;
 }
 
 function causeCounts(report: TriageReport): Map<string, number> {

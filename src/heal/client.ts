@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { HealProposal } from '../report/schema.js';
-import type { HealFinding, HealFindingsDocument } from './findings.js';
+import { renderHealFindings, type HealFinding, type HealFindingsDocument } from './findings.js';
 import {
   COMPAT_LABEL,
   errorProposal,
@@ -32,6 +32,25 @@ export async function collectHealProposals(input: {
   recordIndex: ReadonlyMap<string, HealFinding>;
   findingsText: string;
   findingsPath?: string;
+  /** Playwright `testDir` and `rootDir` values from the reports, in that order. */
+  specRoots?: readonly string[];
+}): Promise<HealSession> {
+  try {
+    return await collectHealProposalsInner(input);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Refusing to pass ')) {
+      return errorSession(input, '', error.message);
+    }
+    throw error;
+  }
+}
+
+async function collectHealProposalsInner(input: {
+  document: HealFindingsDocument;
+  recordIndex: ReadonlyMap<string, HealFinding>;
+  findingsText: string;
+  findingsPath?: string;
+  specRoots?: readonly string[];
 }): Promise<HealSession> {
   const timeoutMs = healTimeoutMs();
   const probe = await runHealCommand(['capabilities', '--json'], timeoutMs);
@@ -56,23 +75,20 @@ export function readFindingsContract(stdout: string): { findings: number | null;
 }
 
 async function runContract(
-  input: { document: HealFindingsDocument; recordIndex: ReadonlyMap<string, HealFinding>; findingsText: string; findingsPath?: string },
+  input: {
+    document: HealFindingsDocument;
+    recordIndex: ReadonlyMap<string, HealFinding>;
+    specRoots?: readonly string[];
+  },
   timeoutMs: number,
 ): Promise<HealSession> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-heal-'));
   try {
-    const findingsPath = input.findingsPath ? path.resolve(input.findingsPath) : path.join(dir, 'heal-findings.json');
-    if (input.findingsPath) {
-      fs.mkdirSync(path.dirname(findingsPath), { recursive: true });
-    }
-    fs.writeFileSync(findingsPath, input.findingsText);
+    const findingsPath = path.join(dir, 'heal-findings.json');
+    const facing = healFacingDocument(input.document, input.specRoots ?? [], process.cwd());
+    fs.writeFileSync(findingsPath, renderHealFindings(facing));
     const resultsPath = path.join(dir, 'heal-results.json');
-    const eligible = input.document.findings.filter((finding) => finding.handoff.mode !== 'none');
-    const args = ['--findings', findingsPath, '--results', resultsPath];
-    if (eligible.length === 1) {
-      const only = eligible[0];
-      if (only) args.push('--test', only.titlePath[only.titlePath.length - 1] ?? only.testId);
-    }
+    const args = ['--findings', findingsPath, '--results', resultsPath, '--dry-run'];
     const run = await runHealCommand(args, timeoutMs);
     if (run.timedOut) return timeoutSession(input, '');
     if (isMissing(run)) return unavailableSession(input.recordIndex);
@@ -102,16 +118,17 @@ async function runContract(
 }
 
 async function runCompat(
-  input: { document: HealFindingsDocument; recordIndex: ReadonlyMap<string, HealFinding> },
+  input: { document: HealFindingsDocument; recordIndex: ReadonlyMap<string, HealFinding>; specRoots?: readonly string[] },
   version: string,
   timeoutMs: number,
 ): Promise<HealSession> {
   const byFile = new Map<string, HealFinding[]>();
   for (const finding of input.document.findings) {
     if (finding.handoff.mode === 'none') continue;
-    const list = byFile.get(finding.file) ?? [];
+    const file = safeSpecArg(healSpecPath(finding.file, input.specRoots ?? [], process.cwd()));
+    const list = byFile.get(file) ?? [];
     list.push(finding);
-    byFile.set(finding.file, list);
+    byFile.set(file, list);
   }
   const byFinding = new Map<string, HealProposal>();
   let notice: string | undefined;
@@ -142,7 +159,7 @@ async function runCompat(
     for (const finding of group) {
       const full = finding.titlePath.join(' > ');
       const last = finding.titlePath[finding.titlePath.length - 1] ?? full;
-      const hits = rows.filter((row) => titlesMatch(row, full, last, finding.file));
+      const hits = rows.filter((row) => titlesMatch(row, full, last, file));
       if (hits.length !== 1) {
         const explanation =
           hits.length === 0
@@ -168,7 +185,7 @@ function proposalFor(
   toolVersion: string,
   label?: string,
 ): HealProposal {
-  if (finding.handoff.mode === 'none') return skippedProposal(toolVersion, finding.handoff.reason);
+  if (finding.handoff.mode === 'none') return skippedProposal(toolVersion, finding.handoff.reason, label);
   return (
     byFinding.get(finding.findingId) ??
     errorProposal(toolVersion, 'qa-core-heal did not return a result for this test.', label)
@@ -230,19 +247,85 @@ function parseResults(text: string): { version: string; mode: string; rows: Heal
   return { version: parsed.tool.version.trim(), mode: parsed.mode, rows };
 }
 
+/** Turn heal 0.3.x stdout into result rows. `verdicts` and `locators` are the real shape. */
+export function rowsFromCompatStdout(stdout: string): HealResultRow[] {
+  return parseCompatRows(stdout);
+}
+
 function parseCompatRows(stdout: string): HealResultRow[] {
   const parsed = extractJson(stdout);
-  const list = Array.isArray(parsed)
-    ? parsed
-    : isObject(parsed) && Array.isArray(parsed.results)
-      ? parsed.results
-      : isObject(parsed) && Array.isArray(parsed.tests)
-        ? parsed.tests
-        : [];
-  return list.filter(isObject).map((row) => {
-    const title = firstText(row.title, row.name, row.test, row.testTitle);
-    return { ...row, title: title || undefined };
-  });
+  if (Array.isArray(parsed)) return parsed.filter(isObject).map(normalizeLegacyRow);
+  if (!isObject(parsed)) return [];
+  if (Array.isArray(parsed.verdicts)) return rowsFromVerdicts(parsed);
+  const list = Array.isArray(parsed.results) ? parsed.results : Array.isArray(parsed.tests) ? parsed.tests : [];
+  return list.filter(isObject).map(normalizeLegacyRow);
+}
+
+function rowsFromVerdicts(data: Record<string, unknown>): HealResultRow[] {
+  const locators = Array.isArray(data.locators) ? data.locators.filter(isObject) : [];
+  const rows: HealResultRow[] = [];
+  for (const item of data.verdicts as unknown[]) {
+    if (!isObject(item)) continue;
+    const spec = firstText(item.spec, item.file);
+    const title = firstText(item.testTitle, item.title);
+    const classification = firstText(item.classification);
+    const message = firstText(item.message);
+    if (item.healApplied === true) {
+      rows.push({
+        file: spec,
+        title,
+        status: 'error',
+        explanation: 'qa-core-heal reported an applied change during a dry run.',
+      });
+      continue;
+    }
+    if (classification === 'non-locator') {
+      rows.push({ file: spec, title, status: 'not-locator', strategy: 'none', explanation: message });
+      continue;
+    }
+    const before = typeof item.before === 'string' ? item.before : '';
+    const after = typeof item.after === 'string' && item.after.length > 0 ? item.after : '';
+    const locator = locators.find((row) => samePath(firstText(row.file), spec) && row.old === before);
+    if (classification === 'locator' && after.length > 0) {
+      const line = (locator ? integerAtLeast1(locator.line) : null) ?? 1;
+      rows.push({
+        file: spec,
+        title,
+        status: 'proposed',
+        strategy: 'locator-heal',
+        explanation: message,
+        changes: [
+          {
+            file: locator ? firstText(locator.file) || spec : spec,
+            startLine: line,
+            endLine: line,
+            before,
+            after,
+          },
+        ],
+      });
+      continue;
+    }
+    const reason = locator ? firstText(locator.reason, locator.message) : '';
+    rows.push({
+      file: spec,
+      title,
+      status: 'refused',
+      message: reason || message,
+      reason: reason || message,
+    });
+  }
+  return rows;
+}
+
+function normalizeLegacyRow(row: Record<string, unknown>): HealResultRow {
+  const title = firstText(row.title, row.name, row.test, row.testTitle);
+  return { ...row, title: title || undefined };
+}
+
+function integerAtLeast1(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) return null;
+  return value;
 }
 
 function titlesMatch(row: HealResultRow, full: string, last: string, file: string): boolean {
@@ -258,13 +341,19 @@ function samePath(left: string, right: string): boolean {
   return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
 }
 
+function contractOne(value: unknown): boolean {
+  if (value === 1) return true;
+  if (Array.isArray(value)) return value.includes(1);
+  if (isObject(value) && value.schemaVersion === 1) return true;
+  return false;
+}
+
 function contractVersion(data: Record<string, unknown>): number | null {
   if (data.findingsContract === 1 || data.findingsSchemaVersion === 1) return 1;
   const contracts = data.contracts;
   if (!isObject(contracts)) return null;
-  if (contracts.findings === 1) return 1;
-  if (isObject(contracts.findings) && contracts.findings.schemaVersion === 1) return 1;
-  return null;
+  if (!contractOne(contracts.findings) || !contractOne(contracts.results)) return null;
+  return 1;
 }
 
 function toolVersion(data: Record<string, unknown>): string {
@@ -291,6 +380,7 @@ function isMissing(result: HealCommandResult): boolean {
   if (result.spawnError === 'ENOENT') return true;
   const stderr = result.stderr.toLowerCase();
   if (stderr.includes('could not determine executable')) return true;
+  if (stderr.includes('canceled due to missing packages')) return true;
   if (stderr.includes('404') && stderr.includes('qa-core-heal')) return true;
   return false;
 }
@@ -309,4 +399,83 @@ function firstText(...values: unknown[]): string {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Spec directories from a Playwright JSON report.
+ * Project `testDir` values come first, then `config.rootDir`.
+ */
+export function specRootsFromReport(text: string): string[] {
+  if (!text.trimStart().startsWith('{')) return [];
+  let data: unknown;
+  try {
+    data = JSON.parse(text) as unknown;
+  } catch {
+    return [];
+  }
+  if (!isObject(data) || !isObject(data.config)) return [];
+  const roots: string[] = [];
+  if (Array.isArray(data.config.projects)) {
+    for (const project of data.config.projects) {
+      if (isObject(project) && typeof project.testDir === 'string') roots.push(project.testDir);
+    }
+  }
+  if (typeof data.config.rootDir === 'string') roots.push(data.config.rootDir);
+  return roots;
+}
+
+/**
+ * A spec path heal can open from `cwd`.
+ * The report path is used when that file exists. Otherwise each root
+ * (testDir, then rootDir) is joined in front of it.
+ */
+export function healSpecPath(file: string, roots: readonly string[], cwd: string): string {
+  const normalized = file.replaceAll('\\', '/');
+  if (normalized.length === 0) return normalized;
+  if (pathExists(cwd, normalized)) return relativeToCwd(cwd, normalized);
+  for (const root of roots) {
+    const cleaned = root.replaceAll('\\', '/').replace(/\/+$/, '');
+    if (cleaned === '' || cleaned === '.') continue;
+    const joined = `${cleaned}/${normalized}`.replace(/\/{2,}/g, '/');
+    if (pathExists(cwd, joined)) return relativeToCwd(cwd, joined);
+  }
+  return normalized;
+}
+
+function healFacingDocument(
+  document: HealFindingsDocument,
+  roots: readonly string[],
+  cwd: string,
+): HealFindingsDocument {
+  return {
+    ...document,
+    findings: document.findings.map((finding) => ({
+      ...finding,
+      file: healSpecPath(finding.file, roots, cwd),
+      project: finding.project === 'default' ? '' : finding.project,
+      errorLocation: finding.errorLocation
+        ? { ...finding.errorLocation, file: healSpecPath(finding.errorLocation.file, roots, cwd) }
+        : null,
+    })),
+  };
+}
+
+function safeSpecArg(file: string): string {
+  return file.startsWith('-') ? `./${file}` : file;
+}
+
+function pathExists(cwd: string, file: string): boolean {
+  const abs = path.isAbsolute(file) ? file : path.resolve(cwd, file);
+  try {
+    return fs.existsSync(abs);
+  } catch {
+    return false;
+  }
+}
+
+function relativeToCwd(cwd: string, file: string): string {
+  const abs = path.isAbsolute(file) ? file : path.resolve(cwd, file);
+  let relative = path.relative(cwd, abs);
+  if (relative === '') relative = path.basename(abs);
+  return relative.split(path.sep).join('/');
 }

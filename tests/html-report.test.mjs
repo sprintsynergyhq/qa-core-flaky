@@ -226,45 +226,47 @@ test('kit sized reports stay under 300 KB at 200 entries and use a strict policy
   assert.equal(html.includes('\u2014') || html.includes('\u2013'), false);
 });
 
-test('a long heal diff on a 200 entry page is a link and stays under 300 KB', () => {
+test('200 entries each with a proposal stay under 300 KB', () => {
   const kit = JSON.parse(fs.readFileSync(kitJson, 'utf8'));
+  const long = Array.from({ length: 40 }, (_, index) => `patched line ${index}`).join('\n');
   const copies = Array.from({ length: 200 }, (_, index) => {
     const source = structuredClone(kit.entries[index % kit.entries.length]);
     source.id = `${source.id} #${index}`;
+    source.healProposal = {
+      contractVersion: 1,
+      tool: 'qa-core-heal',
+      toolVersion: '0.4.0',
+      mode: 'dry-run',
+      status: 'proposed',
+      strategy: 'locator-heal',
+      fixRuleId: 'HEAL-SEL-LOCATOR',
+      reviewLevel: 'review-carefully',
+      label: 'Proposal from qa-core-heal (dry run, not applied)',
+      changes: [{ file: 'tests/broken.spec.ts', startLine: 4, endLine: 4, before: long, after: 'page.locator("#ok")' }],
+      explanation: 'One confident candidate.',
+      refusal: null,
+      verification: {
+        performed: true,
+        method: 'shadow-rerun',
+        runs: 1,
+        passed: 1,
+        failed: 0,
+        baselineReproduced: true,
+        outcome: 'passed',
+      },
+      ai: { used: false, label: null, promptSha256: null },
+      applyCommand: null,
+    };
     return source;
   });
-  const long = Array.from({ length: 40 }, (_, index) => `patched line ${index}`).join('\n');
-  copies[0].healProposal = {
-    contractVersion: 1,
-    tool: 'qa-core-heal',
-    toolVersion: '0.4.0',
-    mode: 'dry-run',
-    status: 'proposed',
-    strategy: 'locator-heal',
-    fixRuleId: 'HEAL-SEL-LOCATOR',
-    reviewLevel: 'review-carefully',
-    label: 'Proposal from qa-core-heal (dry run, not applied)',
-    changes: [{ file: 'tests/broken.spec.ts', startLine: 4, endLine: 4, before: long, after: 'page.locator("#ok")' }],
-    explanation: 'One confident candidate.',
-    refusal: null,
-    verification: {
-      performed: true,
-      method: 'shadow-rerun',
-      runs: 1,
-      passed: 1,
-      failed: 0,
-      baselineReproduced: true,
-      outcome: 'passed',
-    },
-    ai: { used: false, label: null, promptSha256: null },
-    applyCommand: null,
-  };
   const html = renderTriageHtml(report(copies), { version: '0.0.1' });
   const bytes = Buffer.byteLength(html);
-  assert.equal(bytes < 300 * 1024, true, `html is ${bytes} bytes`);
+  assert.equal(bytes < 307_200, true, `html is ${bytes} bytes`);
   assert.equal(html.includes('patched line 39'), false);
-  assert.match(html, /heal-patches\/[0-9a-f]{12}\.diff/);
+  assert.equal(html.includes('One confident candidate'), false);
+  assert.match(html, /h\/[0-9a-f]{12}\.diff/);
   assert.match(html, /Needs Review/);
+  assert.equal(html.split('data-heal-status="proposed"').length, 201);
 });
 
 test('the committed example has no machine paths or PR numbers', () => {
@@ -299,7 +301,7 @@ test('the SauceDemo example is the rendered kit triage', () => {
   assert.match(html, /Tests Flagged/);
   assert.match(html, /Seen In 3 Runs/);
   assert.match(html, /Total 6, failed 3, passed 3\. Same code for a pass and a fail: yes\./);
-  assert.match(html, /<button type="button" class="copy">Copy Command<\/button>/);
+  assert.match(html, /<button class="copy">Copy Command<\/button>/);
   assert.match(html, /Triage Tests/);
   for (const item of source.entries) {
     assert.equal(html.includes(`data-test="${escapeHtml(item.id)}"`), true, item.id);
@@ -309,7 +311,6 @@ test('the SauceDemo example is the rendered kit triage', () => {
     assert.equal(html.includes(`data-f="${item.attempts.failed}"`), true, item.id);
     assert.equal(html.includes(`data-n="${item.attempts.total}"`), true, item.id);
     assert.equal(html.includes(`data-r="${item.history.runsSeen}"`), true, item.id);
-    assert.equal(html.includes(`data-rule="${item.ruleId}"`), true, item.id);
     for (const line of item.evidence) assert.equal(html.includes(escapeHtml(line)), true, line);
     for (const signal of item.signals) {
       assert.equal(html.includes(`data-signal="${signal.kind}"`), true, signal.kind);
@@ -327,7 +328,7 @@ test('the SauceDemo example is the rendered kit triage', () => {
       true,
       item.id,
     );
-    assert.equal(html.includes('<h3>Attempts</h3>'), true, item.id);
+    assert.equal(html.includes('<b>Attempts</b>'), true, item.id);
     assert.match(html, new RegExp(`Review Status: ${item.review.status}\\.`));
     const command = item.nextStep.slice(item.nextStep.indexOf('qa-core-flaky rerun '));
     assert.equal(html.includes(escapeHtml(command)), true, command);

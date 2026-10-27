@@ -6,9 +6,18 @@ import path from 'node:path';
 import test from 'node:test';
 import Ajv from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
-import { renderTriageHtml } from '../dist/index.js';
+import {
+  healCommand,
+  healTimeoutMs,
+  proposalFromCompatRow,
+  proposalFromContractRow,
+  readFindingsContract,
+  renderTriageHtml,
+  rowsFromCompatStdout,
+  runHealCommand,
+} from '../dist/index.js';
 
-const cli = 'dist/cli.js';
+const cli = path.resolve('dist/cli.js');
 const fake = path.resolve('tests/fake-heal.mjs');
 const recorded = 'demo/saucedemo/reports/recorded-seed-443.json';
 const FORBIDDEN = ['--apply', '--yes', '--no-verify'];
@@ -19,10 +28,11 @@ function keepTemp(t, prefix) {
   return dir;
 }
 
-function run(args, env = {}) {
+function run(args, env = {}, cwd) {
   return spawnSync(process.execPath, [cli, ...args], {
     encoding: 'utf8',
     env: { ...process.env, ...env },
+    cwd,
   });
 }
 
@@ -76,6 +86,7 @@ test('contract mode proposes the SauceDemo typo and refuses the strict Remove te
   const contract = lines.find((args) => args.includes('--findings'));
   assert.ok(contract, JSON.stringify(lines));
   assert.ok(contract.includes('--results'));
+  assert.ok(contract.includes('--dry-run'));
   assert.equal(contract.includes('--test'), false);
   assert.equal(lines.some((args) => args.includes('--version')), false);
 
@@ -97,10 +108,13 @@ test('contract mode proposes the SauceDemo typo and refuses the strict Remove te
     assert.equal(validateProposal(entry.healProposal), true, JSON.stringify(validateProposal.errors));
   }
   const html = fs.readFileSync(path.join(dir, 'triage.html'), 'utf8');
-  assert.match(html, /Proposal from qa-core-heal \(dry run, not applied\)/);
-  assert.match(html, /strict-needs-human/);
+  assert.match(html, /data-heal-status="proposed"/);
+  assert.match(html, /data-heal-refusal="strict-needs-human"/);
   assert.match(html, /Needs Review/);
   assert.equal(html.includes('<script>alert'), false);
+  const patches = fs.readdirSync(path.join(dir, 'h')).map((name) => fs.readFileSync(path.join(dir, 'h', name), 'utf8'));
+  assert.ok(patches.some((text) => text.includes('Proposal from qa-core-heal (dry run, not applied)')));
+  assert.ok(patches.some((text) => text.includes('choose the element')));
   const markdown = fs.readFileSync(path.join(dir, 'triage.md'), 'utf8');
   assert.match(markdown, /Proposal from qa-core-heal \(dry run, not applied\)/);
   assert.match(markdown, /Review status: Needs Review\./);
@@ -191,11 +205,11 @@ test('the spawned command is still a dry run when the diff contains a script tag
   assertDryRun(argvLog(dir));
   const html = fs.readFileSync(path.join(dir, 'triage.html'), 'utf8');
   assert.equal(html.includes('<script>alert(1)</script>'), false);
-  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.equal(html.split('<script').length, 2);
+  const patches = fs.readdirSync(path.join(dir, 'h')).map((name) => fs.readFileSync(path.join(dir, 'h', name), 'utf8'));
+  assert.ok(patches.some((text) => text.includes('<script>alert(1)</script>')));
   const markdown = fs.readFileSync(path.join(dir, 'triage.md'), 'utf8');
-  assert.equal(markdown.includes('<script>alert(1)</script>'), false);
-  assert.match(markdown, /&lt;script&gt;/);
+  assert.match(markdown, /<script>alert\(1\)<\/script>/);
 });
 
 test('a long diff is linked from the html and stored beside it', (t) => {
@@ -207,26 +221,35 @@ test('a long diff is linked from the html and stored beside it', (t) => {
   assert.equal(result.status, 0, result.stderr);
   const html = fs.readFileSync(path.join(dir, 'triage.html'), 'utf8');
   assert.equal(html.includes('patched line 19'), false);
-  const href = html.match(/heal-patches\/[0-9a-f]{12}\.diff/);
-  assert.ok(href, html);
-  const patch = fs.readFileSync(path.join(dir, href[0]), 'utf8');
-  assert.match(patch, /patched line 19/);
+  const hrefs = [...html.matchAll(/h\/[0-9a-f]{12}\.diff/g)].map((match) => match[0]);
+  assert.ok(hrefs.length > 0, html);
+  const patch = hrefs.map((href) => fs.readFileSync(path.join(dir, href), 'utf8')).find((text) => text.includes('patched line 19'));
+  assert.ok(patch);
   const page = renderTriageHtml(JSON.parse(fs.readFileSync(path.join(dir, 'triage.json'), 'utf8')));
   assert.equal(page.includes('patched line 19'), false);
 });
 
-test('--heal-findings is refused when it is the triage.json path', (t) => {
+test('--heal-findings is refused when it is a triage output path', (t) => {
   const dir = keepTemp(t, 'heal-same-');
-  const result = run(
-    ['triage', recorded, '--out-dir', dir, '--heal-findings', path.join(dir, 'triage.json'), '--fail-on', 'never'],
+  for (const name of ['triage.json', 'triage.md', 'triage.html']) {
+    const result = run(
+      ['triage', recorded, '--out-dir', dir, '--heal-findings', path.join(dir, name), '--fail-on', 'never'],
+    );
+    assert.equal(result.status, 1, name);
+    assert.match(result.stderr, /cannot be the same file as triage\.json/, name);
+    assert.equal(fs.existsSync(path.join(dir, 'triage.json')), false, name);
+  }
+  const link = path.join(dir, 'findings-link.json');
+  fs.symlinkSync(path.join(dir, 'triage.json'), link);
+  const linked = run(
+    ['triage', recorded, '--out-dir', dir, '--heal-findings', link, '--fail-on', 'never'],
   );
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /cannot be the same file as triage\.json/);
+  assert.equal(linked.status, 1);
+  assert.match(linked.stderr, /cannot be the same file/);
   assert.equal(fs.existsSync(path.join(dir, 'triage.json')), false);
-  assert.equal(fs.existsSync(path.join(dir, 'triage.md')), false);
 });
 
-test('one eligible finding is passed with --test', (t) => {
+test('one eligible finding is not passed with --test', (t) => {
   const dir = keepTemp(t, 'heal-one-');
   const report = path.join(dir, 'one.json');
   const message = "Error: expect(locator).toBeVisible() failed\\n\\nLocator: locator('#missing')\\nError: element(s) not found\\n";
@@ -268,13 +291,231 @@ test('one eligible finding is passed with --test', (t) => {
   assertDryRun(lines);
   const contract = lines.find((args) => args.includes('--findings'));
   assert.ok(contract, JSON.stringify(lines));
-  const testFlag = contract.indexOf('--test');
-  assert.notEqual(testFlag, -1, JSON.stringify(contract));
-  assert.equal(contract[testFlag + 1], 'only the missing button');
+  assert.equal(contract.includes('--test'), false, JSON.stringify(contract));
+  assert.ok(contract.includes('--dry-run'));
+  assert.equal(contract.includes('only the missing button'), false);
   const triage = JSON.parse(fs.readFileSync(path.join(dir, 'triage.json'), 'utf8'));
   assert.equal(triage.entries.length, 1);
   assert.equal(triage.entries[0].healProposal.status, 'proposed');
   assert.equal(triage.entries[0].review.status, 'Needs Review');
+});
+
+test('capabilities JSON with a contract array selects contract mode', () => {
+  const caps = fs.readFileSync('fixtures/heal/heal-0.4.0-capabilities.json', 'utf8');
+  assert.equal(readFindingsContract(caps).findings, 1);
+  assert.equal(readFindingsContract('{"contracts":{"findings":[1],"results":[1]}}').findings, 1);
+  assert.equal(readFindingsContract('{"contracts":{"findings":1,"results":1}}').findings, 1);
+  assert.equal(readFindingsContract('{"findingsContract":1}').findings, 1);
+  assert.equal(readFindingsContract('{"contracts":{"findings":[1]}}').findings, null);
+  assert.equal(readFindingsContract('{"contracts":{"findings":[2],"results":[1]}}').findings, null);
+});
+
+test('real 0.3.4 stdout maps a refusal and a proposal', () => {
+  const recorded = fs.readFileSync('fixtures/heal/real-heal-0.3.4-dry-run.json', 'utf8');
+  const refused = rowsFromCompatStdout(recorded);
+  assert.equal(refused.length, 1);
+  const refusedProposal = proposalFromCompatRow(refused[0], '0.3.4');
+  assert.equal(refusedProposal.status, 'refused');
+  assert.match(refusedProposal.refusal.message, /page-title/);
+  assert.equal(refusedProposal.verification.performed, false);
+  assert.equal(refusedProposal.label, 'Heal 0.3.x dry run, not re-run verified');
+
+  const both = rowsFromCompatStdout(fs.readFileSync('fixtures/heal/heal-0.3.4-compat.json', 'utf8'));
+  const proposed = both.find((row) => row.status === 'proposed');
+  const stillRefused = both.find((row) => row.status === 'refused');
+  assert.ok(proposed);
+  assert.ok(stillRefused);
+  const proposal = proposalFromCompatRow(proposed, '0.3.4');
+  assert.equal(proposal.status, 'proposed');
+  assert.equal(proposal.changes[0].startLine, 14);
+  assert.equal(proposal.changes[0].after, "page.getByTestId('join')");
+  assert.equal(proposal.verification.performed, false);
+  assert.equal(validateProposal(proposal), true, JSON.stringify(validateProposal.errors));
+  assert.equal(validateProposal(refusedProposal), true, JSON.stringify(validateProposal.errors));
+});
+
+test('an applied dry-run row becomes an error', () => {
+  const proposal = proposalFromContractRow(
+    {
+      status: 'applied',
+      strategy: 'rule-suggestion',
+      changes: [{ file: 'a.spec.ts', startLine: 1, endLine: 1, before: 'a', after: 'b' }],
+      verification: { performed: true, method: 'shadow-rerun', runs: 1, passed: 1, failed: 0, baselineReproduced: true, outcome: 'passed' },
+    },
+    '0.4.0',
+    'dry-run',
+  );
+  assert.equal(proposal.status, 'error');
+  assert.match(proposal.explanation, /applied/);
+  assert.equal(proposal.changes.length, 0);
+});
+
+test('the heal timeout honours 120 seconds and clamps above it', () => {
+  const saved = process.env.QA_CORE_HEAL_TIMEOUT_MS;
+  try {
+    process.env.QA_CORE_HEAL_TIMEOUT_MS = '120000';
+    assert.equal(healTimeoutMs(), 120_000);
+    process.env.QA_CORE_HEAL_TIMEOUT_MS = '130000';
+    assert.equal(healTimeoutMs(), 120_000);
+    process.env.QA_CORE_HEAL_TIMEOUT_MS = '5000';
+    assert.equal(healTimeoutMs(), 5000);
+    process.env.QA_CORE_HEAL_TIMEOUT_MS = '0';
+    assert.equal(healTimeoutMs(), 60_000);
+  } finally {
+    if (saved === undefined) delete process.env.QA_CORE_HEAL_TIMEOUT_MS;
+    else process.env.QA_CORE_HEAL_TIMEOUT_MS = saved;
+  }
+});
+
+test('the default heal command does not install from the registry', () => {
+  const saved = process.env.QA_CORE_HEAL_BIN;
+  try {
+    delete process.env.QA_CORE_HEAL_BIN;
+    assert.deepEqual(healCommand(['capabilities', '--json']), {
+      command: 'npx',
+      argv: ['--no-install', 'qa-core-heal', 'capabilities', '--json'],
+    });
+  } finally {
+    if (saved === undefined) delete process.env.QA_CORE_HEAL_BIN;
+    else process.env.QA_CORE_HEAL_BIN = saved;
+  }
+});
+
+test('a grandchild holding the pipe does not extend the timeout', async () => {
+  const savedBin = process.env.QA_CORE_HEAL_BIN;
+  const savedMode = process.env.FAKE_HEAL_MODE;
+  process.env.QA_CORE_HEAL_BIN = fake;
+  process.env.FAKE_HEAL_MODE = 'grandchild';
+  const started = Date.now();
+  try {
+    const result = await runHealCommand(['--version'], 400);
+    const elapsed = Date.now() - started;
+    assert.equal(result.timedOut, true);
+    assert.ok(elapsed >= 300, String(elapsed));
+    assert.ok(elapsed < 2000, String(elapsed));
+    const live = spawnSync('pgrep', ['-f', 'sleep 25'], { encoding: 'utf8' });
+    assert.equal(live.stdout.includes('sleep 25'), false, live.stdout);
+  } finally {
+    if (savedBin === undefined) delete process.env.QA_CORE_HEAL_BIN;
+    else process.env.QA_CORE_HEAL_BIN = savedBin;
+    if (savedMode === undefined) delete process.env.FAKE_HEAL_MODE;
+    else process.env.FAKE_HEAL_MODE = savedMode;
+  }
+});
+
+test('a test titled --apply does not abort the run', (t) => {
+  const dir = keepTemp(t, 'heal-apply-title-');
+  const report = path.join(dir, 'one.json');
+  const message = "Error: expect(locator).toBeVisible() failed\\n\\nLocator: locator('#missing')\\nError: element(s) not found\\n";
+  fs.writeFileSync(
+    report,
+    JSON.stringify({
+      config: { configFile: 'playwright.config.ts', rootDir: '.', version: '1.60.0' },
+      suites: [
+        {
+          title: 'a.spec.ts',
+          file: 'a.spec.ts',
+          specs: [
+            {
+              title: '--apply',
+              file: 'a.spec.ts',
+              line: 4,
+              tests: [
+                {
+                  projectName: 'chromium',
+                  expectedStatus: 'passed',
+                  status: 'unexpected',
+                  results: [0, 1, 2].map((retry) => ({
+                    retry,
+                    status: 'failed',
+                    duration: 10,
+                    errors: [{ message }],
+                  })),
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const result = run(['triage', report, '--out-dir', dir, '--heal', '--fail-on', 'never'], healEnv(dir, 'contract'));
+  assert.equal(result.status, 0, result.stderr);
+  const lines = argvLog(dir);
+  assertDryRun(lines);
+  const contract = lines.find((args) => args.includes('--findings'));
+  assert.ok(contract);
+  assert.equal(contract.includes('--apply'), false);
+  assert.equal(contract.includes('--test'), false);
+  const triage = JSON.parse(fs.readFileSync(path.join(dir, 'triage.json'), 'utf8'));
+  assert.equal(triage.entries.length, 1);
+  assert.equal(triage.entries[0].healProposal.status, 'proposed');
+  assert.equal(triage.entries[0].review.status, 'Needs Review');
+});
+
+test('a testDir relative spec is resolved before heal sees it', (t) => {
+  const dir = keepTemp(t, 'heal-spec-');
+  fs.mkdirSync(path.join(dir, 'tests'));
+  fs.writeFileSync(path.join(dir, 'tests', 'a.spec.ts'), 'test("only the missing button", () => {});\n');
+  const report = path.join(dir, 'one.json');
+  const message = "Error: expect(locator).toBeVisible() failed\\n\\nLocator: locator('#missing')\\nError: element(s) not found\\n";
+  fs.writeFileSync(
+    report,
+    JSON.stringify({
+      config: {
+        rootDir: '.',
+        version: '1.60.0',
+        projects: [{ name: 'chromium', testDir: 'tests' }],
+      },
+      suites: [
+        {
+          title: 'a.spec.ts',
+          file: 'a.spec.ts',
+          specs: [
+            {
+              title: 'only the missing button',
+              file: 'a.spec.ts',
+              line: 4,
+              tests: [
+                {
+                  expectedStatus: 'passed',
+                  status: 'unexpected',
+                  results: [0, 1, 2].map((retry) => ({
+                    retry,
+                    status: 'failed',
+                    duration: 10,
+                    errors: [{ message }],
+                  })),
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const findingsOut = path.join(dir, 'seen-findings.json');
+  const userFindings = path.join(dir, 'heal-findings.json');
+  const result = run(
+    ['triage', report, '--out-dir', dir, '--heal', '--heal-findings', userFindings, '--fail-on', 'never'],
+    healEnv(dir, 'contract', { FAKE_HEAL_FINDINGS_OUT: findingsOut }),
+    dir,
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const seen = JSON.parse(fs.readFileSync(findingsOut, 'utf8'));
+  assert.equal(seen.findings[0].file, 'tests/a.spec.ts');
+  assert.equal(seen.findings[0].project, '');
+  const user = JSON.parse(fs.readFileSync(userFindings, 'utf8'));
+  assert.equal(user.findings[0].file, 'a.spec.ts');
+  assert.equal(user.findings[0].project, 'default');
+  const compat = run(
+    ['triage', report, '--out-dir', path.join(dir, 'compat'), '--heal', '--fail-on', 'never'],
+    healEnv(dir, 'compat'),
+    dir,
+  );
+  assert.equal(compat.status, 0, compat.stderr);
+  const specs = argvLog(dir).filter((args) => args.includes('--json'));
+  assert.ok(specs.some((args) => args[0] === 'tests/a.spec.ts'), JSON.stringify(specs));
 });
 
 test('--heal is rejected outside triage', () => {

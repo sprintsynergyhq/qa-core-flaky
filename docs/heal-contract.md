@@ -10,35 +10,40 @@ The schema file in this repository is `schemas/heal-findings.v1.schema.json`. Un
 node dist/cli.js triage demo/saucedemo/reports/recorded-seed-443.json --heal-findings heal-findings.json --fail-on never
 ```
 
-`--heal-findings` is valid for `triage` only. The path is the findings file. It is refused when that path is `triage.json` inside `--out-dir`, so the later triage write cannot replace the findings file. `--out-dir` still writes `triage.json` and `triage.md`. Without `--heal`, `healProposal` in that triage report stays null.
+`--heal-findings` is valid for `triage` only. The path is the findings file. It is refused when that path is `triage.json`, `triage.md`, or `triage.html` inside `--out-dir`, including a symlink to one of those files, so the later triage write cannot replace the findings file. `--out-dir` still writes `triage.json` and `triage.md`. Without `--heal`, `healProposal` in that triage report stays null.
 
-The findings file is written before `triage.json` and `triage.md`. Contract mode has to read the findings file before heal runs. If a later write fails, the findings file can remain and the command exits 1.
+The user's `--heal-findings` file is written before `triage.json` and `triage.md`. Heal reads a temporary copy, so the dry run does not open that user file. If a later write fails, the findings file can remain and the command exits 1.
 
 ## Heal Runner
 
 `--heal` is valid for `triage` only. It asks qa-core-heal for a dry run and stores one `healProposal` on every triage entry. The command never passes `--apply`, `--yes`, or `--no-verify`. A person can still read `applyCommand` and run that later. This tool does not run it.
 
-The program is `npx qa-core-heal`. `QA_CORE_HEAL_BIN` selects another program. A path that ends in `.js` or `.mjs` is run with `node`. The default wait is 60 seconds. `QA_CORE_HEAL_TIMEOUT_MS` can set a shorter wait, up to 120 seconds.
+The program is `npx --no-install qa-core-heal`. A missing local install is status `unavailable`. The registry copy is not fetched. `QA_CORE_HEAL_BIN` selects another program. A path that ends in `.js` or `.mjs` is run with `node`. The default wait is 60 seconds. `QA_CORE_HEAL_TIMEOUT_MS` can set another wait. A value above 120 seconds is clamped to 120 seconds. The wait kills the heal process group, so a grandchild that still holds a pipe does not keep the run open. Compat mode runs one command per spec file, and each command has its own wait, so several specs can take longer than one wait.
 
 ### Contract Mode
 
-`npx qa-core-heal capabilities --json` selects this mode when the JSON reports findings contract 1. These shapes count:
+`npx --no-install qa-core-heal capabilities --json` selects this mode when the JSON reports findings contract 1 and results contract 1. These shapes count:
 
 | Field | Contract 1 |
 | --- | --- |
-| `contracts.findings` | `1` |
+| `contracts.findings` | `1`, or an array that includes `1` |
+| `contracts.results` | `1`, or an array that includes `1`, when `contracts` is present |
 | `findingsContract` | `1` |
 | `findingsSchemaVersion` | `1` |
 
-The dry run is one command: `npx qa-core-heal --findings <file> --results <file>`. When exactly one finding has a handoff other than `none`, the command also passes `--test` and that test's title. Heal writes the results file. Flaky reads it and does not keep it.
+Heal 0.4.0 reports `contracts.findings` and `contracts.results` as arrays, for example `[1]`.
+
+The dry run is one command: `npx --no-install qa-core-heal --findings <file> --results <file> --dry-run`. Test titles are not passed on the command line. Heal reads each test from the findings file. A title of `--apply` therefore cannot be read as a flag. Heal writes the results file. Flaky reads it and does not keep it.
+
+The file heal reads is a temporary copy. A spec path that is relative to the Playwright `testDir` is rewritten to a path that exists from the working folder. `config.rootDir` is tried the same way. The user's `--heal-findings` file is left as written. An unnamed Playwright project is stored as `default` in that file. The temporary copy writes an empty project string, so heal is not asked for a project named `default`.
 
 A handoff of `none` stays `skipped-by-gate` even if heal also returns a row. The label is `Proposal from qa-core-heal (dry run, not applied)`.
 
 ### Compat Mode
 
-Heal 0.3.x has no `capabilities` command. Flaky then runs `npx qa-core-heal --version`, and for each spec file `npx qa-core-heal <spec> --dry-run --json`. Rows join on the spec path plus the test title. The title may be the full title path or only the last segment.
+Heal 0.3.x has no `capabilities` command. Flaky then runs `npx --no-install qa-core-heal --version`, and for each spec file `npx --no-install qa-core-heal <spec> --dry-run --json`. The spec path is resolved the same way as in contract mode. Rows are the `verdicts` array. They join on `spec` plus `testTitle`. The title may be the full title path or only the last segment. A locator verdict with `after` set and `healApplied` false becomes `proposed`. The line comes from the matching `locators` row (`file` and `old` equal to `before`). A refused locator becomes `refused` with its `reason`. `classification` `non-locator` becomes `not-locator`. `healApplied` true becomes `error`, because this command only asks for a dry run.
 
-The label is `Heal 0.3.x dry run, not re-run verified`. `verification.performed` is false. That proposal is not a re-run result. The results schema's re-run rule is not applied to this older output. The proposal schema still accepts it.
+The label is `Heal 0.3.x dry run, not re-run verified`. A handoff of `none` uses that same label. `verification.performed` is false. That proposal is not a re-run result. The results schema's re-run rule is not applied to this older output. The proposal schema still accepts it.
 
 ### Missing Heal
 
@@ -58,7 +63,7 @@ The verdicts are unchanged. The command still exits the way triage exits without
 | tool | Always `qa-core-heal`. |
 | toolVersion | The version heal reported. Empty when heal is missing. |
 | mode | Always `dry-run` from this command. |
-| status | `proposed`, `applied`, `refused`, `not-locator`, `nothing-to-heal`, `error`, `unavailable`, or `skipped-by-gate`. |
+| status | `proposed`, `refused`, `not-locator`, `nothing-to-heal`, `error`, `unavailable`, or `skipped-by-gate`. An `applied` result from a dry run is stored as `error`. |
 | strategy | `locator-heal`, `rule-suggestion`, `ai-suggestion`, or `none`. |
 | label | The heading in Markdown and HTML. |
 | changes | Before and after text. Empty when nothing is proposed. |
@@ -66,7 +71,9 @@ The verdicts are unchanged. The command still exits the way triage exits without
 | verification | What heal re-ran, or a not-run value. |
 | applyCommand | A locator proposal's hand command, or null. It contains `--apply`. This tool does not run it. |
 
-Markdown and HTML show the label `Proposal from qa-core-heal (dry run, not applied)` for a contract run. Diff text is escaped, so a `<script>` in a change is text. A diff longer than 12 lines is not inlined. `--out-dir` writes it to `heal-patches/<id>.diff` and the report links that relative path. The id in the file name is a hash.
+Markdown shows the label `Proposal from qa-core-heal (dry run, not applied)` for a contract run. A diff inside a Markdown fence is not escaped as prose, so the text is the diff heal returned. A fence is long enough that backticks in the diff stay inside it. A diff longer than 12 lines, or larger than 4000 bytes, is the path `h/<id>.diff` instead of the diff text.
+
+HTML keeps a short status word on the row, with the refusal code when heal refused. The label, the explanation, and the diff are in `h/<id>.diff`, and the status word links to that file. The directory name is one letter so a page of 200 proposals stays under 300 KB. Diff text is not placed in the HTML, so a `<script>` in a change cannot run. A skipped or unavailable row is the status word only. `--out-dir` writes the patch files and removes `h/` from an earlier run when this run has nothing to link. The id in the file name is a hash of the triage entry id. A patch file is the diff text for a person to read. It is not applied.
 
 A needs-more-runs verdict can still be a locator handoff. The gates force `none` only for `likely-real-bug` and `environment-issue`. Heal still has to verify a change before it proposes one. One observed attempt is offered when the other gates pass.
 
@@ -189,7 +196,7 @@ The SauceDemo environment demo passes on a later retry, so its verdict is `flaky
 
 `findingId` is the first 12 hex characters of a SHA-256. The hashed bytes are the UTF-8 text of `JSON.stringify([file, project, titlePath])`, using the redacted values that are written in the row. The same file, project, and title path always produce the same id. The id does not include the attempt counts or the error text.
 
-Two tests can redact to the same file, project, and title path when the only difference was an email or another hidden part. Those rows would share an id, and heal joins on `findingId`. When that happens, the hash gains a fourth JSON value: the SHA-256 of the unredacted file, project, and title path. The raw title is not written. A row that does not collide keeps the three-value id, so one test alone stays on that id. The same reports still write the same ids.
+Two tests can redact to the same file, project, and title path when the only difference was an email or another hidden part. Those rows would share an id, and heal joins on `findingId`. When that happens, the hash gains a fourth JSON value: the SHA-256 of the unredacted file, project, and title path. The raw title is not written. The hash is not a secret: someone who can guess the title can check it. The id also changes when a colliding row appears or disappears in a later run, so it is stable for the same set of reports. A row that does not collide keeps the three-value id, so one test alone stays on that id. The same reports still write the same ids.
 
 ## Error Signature
 
@@ -220,11 +227,13 @@ These rules run on the file, the title, the evidence, the selector, the error lo
 | --- | --- |
 | home-user | A home directory username, using the same `<home>` marks as triage. |
 | absolute-path | A machine path under a known folder such as `/opt/`, `/root/`, `/workspace/`, `/private/`, `/tmp/`, or `/var/`, a Windows drive path, or a UNC path. The stored form is `<path>/` plus the last segment. |
-| url-query | The query string and the fragment on an `http`, `https`, `ws`, `wss`, or `ftp` URL. A user and password in the URL are removed too. A query on a masked machine path is removed. A query on a relative path such as `/cart?session=abc` is removed. |
+| url-query | The query string and the fragment on an `http`, `https`, `ws`, `wss`, or `ftp` URL. A user and password in the URL are removed too. A query on a masked machine path is removed. A query on a home mark such as `<home>/x?token=1` is removed. A query on a relative path such as `/cart?session=abc` is removed before emails are masked. |
 | token-like | A `Bearer` token, a JWT-shaped string, a value assigned to `token`, `password`, `api_key`, `access_token`, `refresh_token`, or `secret_key`, a `sk_live_` or `sk_test_` value, a GitHub token prefix, an AWS access key id, or an `Authorization: Basic` value. The stored form is `<token>`. |
 | email | An email address. The stored form is `<email>`. |
 
-An app route such as `/assets/` is not a machine path and is left as written. Machine folders also include `/app/`, `/data/`, `/code/`, `/src/`, `/project/`, `/Library/`, `/proc/`, `/run/`, `/dev/`, and `/nix/`. A `file://` URL becomes `file:///<path>/` plus the last segment. A `/mnt/<drive>/Users` path is masked as one path, so the home mark is not left in the middle.
+An app route such as `/assets/` is not a machine path and is left as written. Machine folders also include `/app/`, `/data/`, `/code/`, `/src/`, `/project/`, `/Library/`, `/proc/`, `/run/`, `/dev/`, and `/nix/`. A `file://` URL becomes `file:///<path>/` plus the last segment. A trailing `:line:column` is dropped before that segment is chosen, so the file name stays. A `/mnt/<drive>/Users` path is masked as one path, so the home mark is not left in the middle.
+
+Token-like text covers `Bearer`, a JWT, `Authorization: Basic`, `sk_live_` and `sk_test_`, GitHub token prefixes, AWS access key ids, and assigned names such as `token=`. Cookie values, Slack `xoxb-` tokens, `npm_` tokens, Google `AIza` keys, a user and password in a `postgres://` URL, and `~/` paths are not masked.
 
 A URL-encoded home or machine path, such as `%2Fhome%2F` or `%2Fopt%2F`, is replaced with `<path>`. A query on that encoded path is removed too.
 
@@ -254,4 +263,4 @@ The recorded JUnit file keeps one attempt per test. A test that passed on retry 
 
 ## What This Version Does Not Do
 
-`--heal` does not pass `--apply`, `--yes`, or `--no-verify`. It does not write the project source. It does not say the test is stable, and it does not say the test is fixed. `review.status` stays `Needs Review`. A patch file under `heal-patches/` is the diff text for a person to read. It is not applied.
+`--heal` does not pass `--apply`, `--yes`, or `--no-verify`. It does not pass `--test` together with `--findings`. It does not write the project source. It does not say the test is stable, and it does not say the test is fixed. `review.status` stays `Needs Review`. A patch file under `h/` is the diff text for a person to read. It is not applied.

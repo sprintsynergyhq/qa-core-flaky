@@ -75,13 +75,13 @@ export function unavailableProposal(): HealProposal {
 }
 
 /** Handoff was none, so heal is not asked to change the test. */
-export function skippedProposal(toolVersion: string, reason: string): HealProposal {
+export function skippedProposal(toolVersion: string, reason: string, label: string = CONTRACT_LABEL): HealProposal {
   return shape({
     toolVersion,
     status: 'skipped-by-gate',
     strategy: 'none',
     reviewLevel: 'standard',
-    label: CONTRACT_LABEL,
+    label,
     explanation: clip(reason, 600),
     verification: notRunVerification(),
   });
@@ -136,10 +136,13 @@ function proposalFromRow(row: HealResultRow, toolVersion: string, label: string,
     return errorProposal(toolVersion, 'qa-core-heal returned a status this tool does not know.', label);
   }
   const status = rawStatus;
+  if (status === 'applied') {
+    return errorProposal(toolVersion, 'qa-core-heal reported an applied change during a dry run.', label);
+  }
   const changes = readChanges(row.changes);
   const refusal = readRefusal(row.refusal, row);
   const strategy = readStrategy(row.strategy, changes, compat);
-  if (status === 'proposed' || status === 'applied') {
+  if (status === 'proposed') {
     if (changes.length === 0) {
       return errorProposal(toolVersion, 'qa-core-heal marked this test proposed without a change.', label);
     }
@@ -266,10 +269,13 @@ function readExplanation(row: HealResultRow): string {
 
 function readRefusal(value: unknown, row: HealResultRow): HealProposal['refusal'] {
   if (isObject(value) && typeof value.code === 'string') {
-    const code = REFUSAL_CODES.has(value.code) ? value.code : 'no-safe-pattern';
+    const known = REFUSAL_CODES.has(value.code);
+    const code = known ? value.code : 'no-safe-pattern';
     const message = typeof value.message === 'string' ? value.message : firstString(row.message, row.reason, row.explanation);
-    if (message.length === 0) return null;
-    return { code, message: clip(redactFindingText(message), 400) };
+    if (message.length === 0 && known) return null;
+    const shown = known || message.length === 0 ? message : `${value.code}: ${message}`;
+    if (shown.length === 0) return null;
+    return { code, message: clip(redactFindingText(shown), 400) };
   }
   if (row.status === 'refused') {
     const message = firstString(row.message, row.reason, row.explanation);

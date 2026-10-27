@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 
 /** Flags this tool must never put on a heal command line. */
 export const FORBIDDEN_HEAL_ARGS = ['--apply', '--yes', '--no-verify'] as const;
@@ -32,7 +32,7 @@ export function healCommand(args: readonly string[]): { command: string; argv: s
     }
     return { command: override, argv: [...args] };
   }
-  return { command: 'npx', argv: ['qa-core-heal', ...args] };
+  return { command: 'npx', argv: ['--no-install', 'qa-core-heal', ...args] };
 }
 
 /** Throw before spawn when a forbidden flag is present. */
@@ -48,7 +48,8 @@ export function healTimeoutMs(): number {
   const raw = process.env.QA_CORE_HEAL_TIMEOUT_MS?.trim();
   if (!raw || !/^[1-9]\d*$/.test(raw)) return DEFAULT_TIMEOUT_MS;
   const parsed = Number(raw);
-  if (!Number.isSafeInteger(parsed) || parsed > 120_000) return DEFAULT_TIMEOUT_MS;
+  if (!Number.isSafeInteger(parsed)) return DEFAULT_TIMEOUT_MS;
+  if (parsed > 120_000) return 120_000;
   return parsed;
 }
 
@@ -68,18 +69,26 @@ export function runHealCommand(args: readonly string[], timeoutMs: number = heal
     const child = spawn(command, argv, {
       shell: false,
       windowsHide: true,
+      // A new process group so the timeout can kill grandchildren.
+      detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGKILL');
+      killHealTree(child);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.unref();
+      finish({ args, argv, command, exitCode: null, stdout, stderr, timedOut: true });
     }, timeoutMs);
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('error', () => {});
+    child.stderr?.on('error', () => {});
+    child.stdout?.on('data', (chunk: string) => {
       if (stdout.length < 200_000) stdout += chunk;
     });
-    child.stderr.on('data', (chunk: string) => {
+    child.stderr?.on('data', (chunk: string) => {
       if (stderr.length < 20_000) stderr += chunk;
     });
     child.on('error', (error: NodeJS.ErrnoException) => {
@@ -100,6 +109,24 @@ export function runHealCommand(args: readonly string[], timeoutMs: number = heal
       finish({ args, argv, command, exitCode, stdout, stderr, timedOut });
     });
   });
+}
+
+function killHealTree(child: ChildProcess): void {
+  const pid = child.pid;
+  if (pid === undefined || pid <= 1) return;
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
+    return;
+  }
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // The child has already exited.
+    }
+  }
 }
 
 function isForbidden(arg: string): boolean {

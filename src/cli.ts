@@ -6,10 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { classifyCauses } from './causes/index.js';
 import type { CauseFinding } from './causes/types.js';
-import { collectHealProposals } from './heal/client.js';
+import { collectHealProposals, specRootsFromReport } from './heal/client.js';
 import { buildHealFindings, mergeProjectFacts, readReportProjectFacts, renderHealFindings } from './heal/findings.js';
 import type { HealFinding } from './heal/findings.js';
-import { healPatchName, patchIsExternal, proposalDiff } from './heal/patch.js';
+import { HEAL_PATCH_DIR, healPatchName, proposalPatchBody } from './heal/patch.js';
 import type { ParseResult, RerunMode, TestRecord } from './model.js';
 import { detectFormat } from './parsers/detect.js';
 import { parseJunit } from './parsers/junit.js';
@@ -81,7 +81,7 @@ Options:
   --heal-findings <file>      triage: also write a heal findings file for qa-core-heal.
                               This does not run heal by itself. A likely real bug
                               or an environment issue is handoff none.
-                              The path cannot be triage.json in --out-dir.
+                              The path cannot be triage.json, triage.md, or triage.html in --out-dir.
   --heal                      triage: ask qa-core-heal for a dry run and merge
                               each result into healProposal. This never passes
                               --apply, --yes, or --no-verify. A missing heal
@@ -314,6 +314,7 @@ async function runTriage(reportPaths: readonly string[], values: FlagValues): Pr
         recordIndex,
         findingsText: findings,
         findingsPath: values['heal-findings'],
+        specRoots: loadedReports.flatMap((loaded) => specRootsFromReport(loaded.text)),
       });
       healProposals = session.proposals;
       if (session.notice) process.stderr.write(`${session.notice}\n`);
@@ -449,22 +450,42 @@ function publishTriage(
 
 function assertFindingsNotTriage(findingsPath: string | undefined, outDir: string | undefined): void {
   if (findingsPath === undefined || outDir === undefined) return;
-  const findings = path.resolve(findingsPath);
-  const triage = path.resolve(outDir, 'triage.json');
-  if (findings === triage) fail('--heal-findings cannot be the same file as triage.json in --out-dir.');
+  const findings = canonicalPath(findingsPath);
+  const blocked = ['triage.json', 'triage.md', 'triage.html'];
+  for (const name of blocked) {
+    if (findings === canonicalPath(path.join(outDir, name))) {
+      fail('--heal-findings cannot be the same file as triage.json, triage.md, or triage.html in --out-dir.');
+    }
+  }
+}
+
+function canonicalPath(file: string): string {
+  const resolved = path.resolve(file);
+  try {
+    return fs.realpathSync(resolved);
+  } catch {
+    try {
+      const link = fs.readlinkSync(resolved);
+      return path.resolve(path.dirname(resolved), link);
+    } catch {
+      return resolved;
+    }
+  }
 }
 
 function writeHealPatches(dir: string, report: ReturnType<typeof buildTriageReport>): void {
+  const folder = path.join(path.resolve(dir), HEAL_PATCH_DIR);
+  fs.rmSync(folder, { recursive: true, force: true });
   for (const entry of report.entries) {
     const proposal = entry.healProposal;
     if (!proposal) continue;
-    const diff = proposalDiff(proposal.changes);
-    if (!patchIsExternal(diff)) continue;
+    const body = proposalPatchBody(proposal);
+    if (body.length === 0) continue;
     const relative = healPatchName(entry.id);
     try {
       const dest = path.join(path.resolve(dir), relative);
       fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.writeFileSync(dest, `${diff}\n`);
+      fs.writeFileSync(dest, body);
     } catch (error) {
       const detail = error instanceof Error ? error.message : 'unknown error';
       fail(redactHomeText(`Cannot write ${relative}: ${oneLine(detail)}`));

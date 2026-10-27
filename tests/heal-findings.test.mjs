@@ -399,6 +399,23 @@ test('secrets in a quoted error are absent from the findings file', () => {
   assert.match(hidden, /\/cart/);
   assert.match(hidden, /<token>/);
   assert.match(hidden, /file:\/\/\/<path>\/a\.ts/);
+
+  const homeQuery = redactFindingText('at /Users/bob/x?y=1#z see /home/bob/x?token=1');
+  assert.equal(homeQuery.includes('y=1'), false);
+  assert.equal(homeQuery.includes('token=1'), false);
+  assert.equal(homeQuery.includes('bob'), false);
+  assert.match(homeQuery, /<home>\/x/);
+
+  const emailQuery = redactFindingText('page.goto("/cart?session=abc&u=bob@corp.com")');
+  assert.equal(emailQuery.includes('session=abc'), false);
+  assert.equal(emailQuery.includes('bob@'), false);
+  assert.equal(emailQuery.includes('<email>'), false);
+  assert.match(emailQuery, /\/cart"/);
+
+  const fileLine = redactFindingText('file:///Users/bob/proj/tests/a.spec.ts:8:5');
+  assert.equal(fileLine.includes('bob'), false);
+  assert.match(fileLine, /file:\/\/\/<path>\/a\.spec\.ts/);
+  assert.equal(fileLine.endsWith(':8:5'), false);
 });
 
 test('titles that differ only by a redacted email do not share a findingId', () => {

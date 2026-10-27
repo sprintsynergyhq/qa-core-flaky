@@ -36,8 +36,8 @@ export {
   renderHealFindings,
 } from './heal/findings.js';
 export type { BuildHealFindingsOptions, HealFinding, HealFindingsDocument, HealProjectFacts } from './heal/findings.js';
-export { collectHealProposals, readFindingsContract } from './heal/client.js';
-export { healPatchName, PATCH_INLINE_LINE_LIMIT, patchIsExternal, proposalDiff } from './heal/patch.js';
+export { collectHealProposals, healSpecPath, readFindingsContract, rowsFromCompatStdout, specRootsFromReport } from './heal/client.js';
+export { HEAL_PATCH_DIR, healPatchName, PATCH_INLINE_BYTE_LIMIT, PATCH_INLINE_LINE_LIMIT, patchIsExternal, proposalDiff, proposalPatchBody } from './heal/patch.js';
 export {
   COMPAT_LABEL,
   CONTRACT_LABEL,
@@ -48,7 +48,7 @@ export {
   unavailableProposal,
   UNAVAILABLE_LINE,
 } from './heal/proposal.js';
-export { assertHealArgsAllowed, FORBIDDEN_HEAL_ARGS, healCommand, runHealCommand } from './heal/run.js';
+export { assertHealArgsAllowed, FORBIDDEN_HEAL_ARGS, healCommand, healTimeoutMs, runHealCommand } from './heal/run.js';
 export { decideHandoff } from './heal/handoff.js';
 export type { HandoffDecision, HandoffGate, HandoffInput, HandoffMode } from './heal/handoff.js';
 export { FINDING_REDACTION_RULES, redactFindingText } from './heal/redact.js';

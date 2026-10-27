@@ -60,7 +60,7 @@ When more than one commit is present, the cause list, the evidence, and the sugg
 
 The review line is `Review status: Needs Review.`
 
-When `healProposal` is set, the section also has the proposal label, the status, a refusal when heal returned one, and the diff. Diff text is escaped the same way as evidence. A diff longer than 12 lines is the relative path `heal-patches/<id>.diff` instead of the diff text. The JSON report keeps the changes. The HTML page uses the same rule and links that path.
+When `healProposal` is set, Markdown has the proposal label, the status, a refusal when heal returned one, and the diff. A diff in a fence is the diff text, not prose-escaped. A diff longer than 12 lines, or larger than 4000 bytes, is the relative path `h/<id>.diff`. The JSON report keeps the changes. The HTML page shows a short status word and links `h/<id>.diff` for the label, the explanation, and the diff. A skipped or unavailable row is the status word only. The detail headings in the HTML page are bold labels.
 
 ## HTML
 

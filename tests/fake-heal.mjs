@@ -1,15 +1,25 @@
 #!/usr/bin/env node
 /**
  * Stand-in for qa-core-heal. Tests point QA_CORE_HEAL_BIN at this file.
- * It records every argument list and returns a recorded dry-run result.
- * It exits 9 if it is ever passed --apply, --yes, or --no-verify.
+ * Capabilities JSON is fixtures/heal/heal-0.4.0-capabilities.json.
+ * That is the 0.4.0 shape from the PR 10 review: contracts.findings and
+ * contracts.results are arrays of version numbers. 0.4.0 was not released,
+ * so this is not a registry tarball.
+ * Compat JSON follows fixtures/heal/real-heal-0.3.4-dry-run.json, recorded
+ * from qa-core-heal 0.3.4: verdicts[] and locators[].
+ * It records every argument list. It exits 9 if passed --apply, --yes, or --no-verify.
  */
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
 const mode = process.env.FAKE_HEAL_MODE || 'contract';
 const log = process.env.FAKE_HEAL_LOG;
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, '..');
 if (log) fs.appendFileSync(log, `${JSON.stringify(args)}\n`);
 
 for (const arg of args) {
@@ -19,18 +29,17 @@ for (const arg of args) {
   }
 }
 
-if (args[0] === 'capabilities') {
+if (mode === 'grandchild') {
+  spawn('sleep', ['25'], { stdio: 'inherit' });
+  setInterval(() => {}, 1000);
+} else if (args[0] === 'capabilities') {
   if (mode === 'compat') {
     process.stderr.write('unknown command capabilities\n');
     process.exit(1);
   }
-  process.stdout.write(
-    `${JSON.stringify({
-      tool: { name: 'qa-core-heal', version: '0.4.0' },
-      contracts: { findings: 1, results: 1 },
-      playwrightVersion: '1.60.0',
-    })}\n`,
-  );
+  const caps = fs.readFileSync(path.join(root, 'fixtures/heal/heal-0.4.0-capabilities.json'));
+  process.stdout.write(caps);
+  if (!caps.toString('utf8').endsWith('\n')) process.stdout.write('\n');
   process.exit(0);
 }
 
@@ -51,10 +60,19 @@ if (mode === 'timeout') {
 }
 
 function writeContractResults() {
+  if (args.includes('--test')) {
+    process.stderr.write('--findings cannot be combined with --test. Each finding names its own test.\n');
+    process.exit(1);
+  }
+  if (!args.includes('--dry-run')) {
+    process.stderr.write('missing --dry-run\n');
+    process.exit(1);
+  }
   const findingsPath = valueAfter('--findings');
   const resultsPath = valueAfter('--results');
-  const findings = JSON.parse(fs.readFileSync(findingsPath, 'utf8'));
   const body = fs.readFileSync(findingsPath);
+  if (process.env.FAKE_HEAL_FINDINGS_OUT) fs.writeFileSync(process.env.FAKE_HEAL_FINDINGS_OUT, body);
+  const findings = JSON.parse(body.toString('utf8'));
   const document = {
     schema: 'qa-core.heal-results',
     schemaVersion: 1,
@@ -154,39 +172,76 @@ function row(finding, status, strategy, fixRuleId, changes, refusal) {
 }
 
 function writeCompatResults() {
-  const spec = args.find((arg) => !arg.startsWith('-')) ?? '';
+  const spec = args.find((arg) => arg !== '--' && !arg.startsWith('-')) ?? '';
   const base = spec.split(/[/\\]/).pop();
-  let results = [];
+  const locators = [];
+  const verdicts = [];
   if (base === 'broken.spec.ts') {
-    results = [
-      {
-        file: spec,
-        title: 'typo locator never finds the backpack button',
-        status: 'proposed',
-        strategy: 'locator-heal',
-        explanation: 'Compat dry run quoted a locator change.',
-        changes: [
-          {
-            file: 'broken.spec.ts',
-            startLine: 4,
-            endLine: 4,
-            before: "page.locator('#add-to-cart-sauce-labs-bakpack')",
-            after: 'page.locator("#add-to-cart-sauce-labs-backpack")',
-          },
-        ],
-      },
-    ];
+    const after =
+      process.env.FAKE_HEAL_XSS === '1'
+        ? '<script>alert(1)</script>'
+        : 'page.locator("#add-to-cart-sauce-labs-backpack")';
+    const before = "page.locator('#add-to-cart-sauce-labs-bakpack')";
+    locators.push({
+      file: spec,
+      line: 4,
+      old: before,
+      new: after,
+      level: 'css',
+      ambiguous: false,
+      status: 'proposed',
+      reason: null,
+    });
+    verdicts.push({
+      spec,
+      testTitle: 'typo locator never finds the backpack button',
+      classification: 'locator',
+      message: 'Compat dry run quoted a locator change.',
+      healApplied: false,
+      before,
+      after,
+      verified: null,
+      reverted: false,
+      revertReason: null,
+      occurrences: null,
+    });
   } else if (base === 'selectors.spec.ts') {
-    results = [
-      {
-        file: spec,
-        title: 'unscoped Remove is strict when two items were added',
-        status: 'refused',
-        message: 'A strict mode locator needs a person to choose the element.',
-      },
-    ];
+    const before = "page.getByRole('button', { name: 'Remove' })";
+    const reason = 'A strict mode locator needs a person to choose the element.';
+    locators.push({
+      file: spec,
+      line: 8,
+      old: before,
+      new: null,
+      level: 'role',
+      ambiguous: false,
+      status: 'refused',
+      reason,
+    });
+    verdicts.push({
+      spec,
+      testTitle: 'unscoped Remove is strict when two items were added',
+      classification: 'locator',
+      message: reason,
+      healApplied: false,
+      before,
+      after: null,
+      verified: null,
+      reverted: false,
+      revertReason: null,
+      occurrences: null,
+    });
   }
-  process.stdout.write(`${JSON.stringify({ results })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({
+      schemaVersion: 1,
+      dryRun: true,
+      locators,
+      verdicts,
+      summary: { heals: 0, refusals: verdicts.length, nonLocator: 0, errors: 0 },
+      fileErrors: [],
+    })}\n`,
+  );
   process.exit(0);
 }
 

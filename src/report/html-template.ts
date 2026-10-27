@@ -4,8 +4,6 @@
  * Do not read them from the network, and do not build them from report text.
  */
 
-const WIDTHS = Array.from({ length: 101 }, (_, index) => `.w${index}{width:${index}%}`).join('');
-
 function minifyCss(css: string): string {
   return css
     .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -87,7 +85,7 @@ h1 { margin: 0.2rem 0 0; font-size: 2rem; font-weight: 650; letter-spacing: -0.0
 main { padding-top: 0.25rem; padding-bottom: 1rem; }
 section { margin-top: 1.6rem; }
 h2 { margin: 0 0 0.75rem; font-size: 1.2rem; font-weight: 650; }
-h3 { margin: 0.7rem 0 0.25rem; font-size: 0.92rem; font-weight: 650; }
+details b { display: block; margin: 0.7rem 0 0.25rem; font-size: 0.92rem; font-weight: 650; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: 0.75rem; }
 .card, .table-wrap, .empty {
   background: var(--bg-elevated);
@@ -212,7 +210,6 @@ button {
 .empty p { margin: 0.4rem 0 0; color: var(--muted); }
 .footer { padding-bottom: 2rem; color: var(--muted); font-size: 0.85rem; }
 .footer p { margin: 0; }
-${WIDTHS}
 @media (max-width: 640px) {
   h1 { font-size: 1.6rem; }
   .top-inner, main, .footer { padding-left: 1rem; padding-right: 1rem; }

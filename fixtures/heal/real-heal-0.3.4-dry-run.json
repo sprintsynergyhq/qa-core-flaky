@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "dryRun": true,
+  "scanned": 1,
+  "healed": 0,
+  "intact": 0,
+  "refused": 1,
+  "locators": [
+    {
+      "file": "tests/landing.spec.ts",
+      "line": 9,
+      "old": "page.getByText('Join the Weekly Reader newsletter')",
+      "new": null,
+      "level": "text",
+      "ambiguous": false,
+      "status": "refused",
+      "reason": "not found on route /: closest candidates below the confidence threshold: #page-title (0.59)"
+    }
+  ],
+  "nonLocatorFailures": [],
+  "unmatchedFailures": [],
+  "verdicts": [
+    {
+      "spec": "tests/landing.spec.ts",
+      "testTitle": "shows the newsletter headline",
+      "classification": "locator",
+      "message": "not found on route /: closest candidates below the confidence threshold: #page-title (0.59)",
+      "healApplied": false,
+      "before": "page.getByText('Join the Weekly Reader newsletter')",
+      "after": null,
+      "verified": null,
+      "reverted": false,
+      "revertReason": null,
+      "occurrences": null
+    }
+  ],
+  "summary": {
+    "heals": 0,
+    "refusals": 1,
+    "nonLocator": 0,
+    "errors": 0
+  },
+  "fileErrors": []
+}

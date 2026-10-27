@@ -76,12 +76,15 @@ const RELATIVE_QUERY_PATTERN =
  * strings, and emails. The same input returns the same text.
  * `marks` numbers home usernames the same way triage does.
  * A query is removed from http, https, ws, wss, and ftp URLs, from a
- * masked machine path, and from a relative path such as `/cart?session=abc`.
+ * masked machine path, from a home mark, and from a relative path such as
+ * `/cart?session=abc`. The relative query is removed before emails, so a
+ * query that contains an email does not leave a fragment of that address.
  */
 export function redactFindingText(value: string, marks?: HomeMarks): string {
   const urls = sanitizeUrls(value, marks);
   const files = redactFileUrls(urls);
-  const emails = files.replace(EMAIL_PATTERN, '<email>');
+  const queried = stripRelativeQueries(files);
+  const emails = queried.replace(EMAIL_PATTERN, '<email>');
   const tokens = emails
     .replace(BEARER_PATTERN, 'Bearer <token>')
     .replace(JWT_PATTERN, '<token>')
@@ -92,7 +95,7 @@ export function redactFindingText(value: string, marks?: HomeMarks): string {
     .replace(ASSIGNED_SECRET_PATTERN, '<token>');
   const mounted = tokens.replace(MNT_HOME_PATTERN, (token) => maskPathToken(token));
   const homes = redactHomeText(mounted, marks);
-  return stripRelativeQueries(redactEncodedPaths(redactAbsolutePaths(homes)));
+  return stripHomeQueries(stripRelativeQueries(redactEncodedPaths(redactAbsolutePaths(homes))));
 }
 
 function sanitizeUrls(value: string, marks: HomeMarks | undefined): string {
@@ -109,7 +112,8 @@ function sanitizeUrls(value: string, marks: HomeMarks | undefined): string {
 function redactFileUrls(value: string): string {
   return value.replace(FILE_URL_PATTERN, (raw) => {
     const pathOnly = raw.split(/[?#]/)[0] ?? raw;
-    const base = pathOnly.replace(/\\/g, '/').split('/').filter((part) => part.length > 0 && part.toLowerCase() !== 'file:').pop();
+    const baseRaw = pathOnly.replace(/\\/g, '/').split('/').filter((part) => part.length > 0 && part.toLowerCase() !== 'file:').pop();
+    const base = baseRaw?.replace(/:\d+(?::\d+)?$/, '');
     if (!base || base.includes(':') || base.startsWith('<')) return 'file:///<path>';
     return `file:///<path>/${base}`;
   });
@@ -117,6 +121,11 @@ function redactFileUrls(value: string): string {
 
 function stripRelativeQueries(value: string): string {
   return value.replace(RELATIVE_QUERY_PATTERN, '$1$2');
+}
+
+/** A home mark keeps the path tail and drops `?query` and `#fragment`. */
+function stripHomeQueries(value: string): string {
+  return value.replace(/(<home(?:~\d+)?>\/[^\s<>"'`?#]*)[?#][^\s<>"'`]*/g, '$1');
 }
 
 function redactEncodedPaths(value: string): string {
