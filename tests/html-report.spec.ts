@@ -113,7 +113,7 @@ test('the report works offline in a browser', async ({ page, browserName }) => {
   await expect(page.locator('[data-summary="tests"]')).toHaveText('6');
   await expect(page.locator('[data-summary="flaky"]')).toHaveText('6');
   await expect(page.locator('[data-summary="likely-real-bug"]')).toHaveText('0');
-  await expect(page.locator('dt', { hasText: 'Commit' })).toHaveCount(0);
+  await expect(page.locator('dd.sha')).toHaveText('679e0bb');
   await expect(page.getByText('Tests Flagged')).toBeVisible();
   await expect(page.getByText('Built by SprintSynergy.')).toBeVisible();
 
@@ -134,7 +134,7 @@ test('the report works offline in a browser', async ({ page, browserName }) => {
   expect(after[0]).toContain('product image');
 
   await page.getByLabel('Cause', { exact: true }).selectOption('timing');
-  await expect(page.locator('tbody:not([hidden])')).toHaveCount(2);
+  await expect(page.locator('tbody:not([hidden])')).toHaveCount(3);
   await page.getByLabel('Cause', { exact: true }).selectOption('');
   await page.getByLabel('Search', { exact: true }).fill('bike light');
   await expect(page.locator('tbody:not([hidden])')).toHaveCount(1);

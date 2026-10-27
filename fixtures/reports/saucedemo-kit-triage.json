@@ -9,7 +9,7 @@
       "signals": [
         {
           "kind": "same-code-flip",
-          "detail": "At least one pass and one fail share commit tonight."
+          "detail": "At least one pass and one fail share commit 679e0bb."
         }
       ],
       "causes": [
@@ -39,7 +39,7 @@
       },
       "suggestedFix": "Check the network and the base URL. Keep retries only for infrastructure errors.",
       "healProposal": null,
-      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-network.spec.ts::chromium::login page loads after a network drop' --config '/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts'",
+      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-network.spec.ts::chromium::login page loads after a network drop' --config 'playwright.config.ts'",
       "note": null,
       "llm": null,
       "review": {
@@ -56,7 +56,7 @@
       "signals": [
         {
           "kind": "same-code-flip",
-          "detail": "At least one pass and one fail share commit tonight."
+          "detail": "At least one pass and one fail share commit 679e0bb."
         }
       ],
       "causes": [
@@ -88,7 +88,7 @@
       },
       "suggestedFix": "The rules did not name a cause. Compare the quoted expected and received values with what the user sees. Do not loosen the assertion to make it pass.",
       "healProposal": null,
-      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-order.spec.ts::chromium::B expects a cart with only the bike light' --config '/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts'",
+      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-order.spec.ts::chromium::B expects a cart with only the bike light' --config 'playwright.config.ts'",
       "note": null,
       "llm": null,
       "review": {
@@ -105,7 +105,7 @@
       "signals": [
         {
           "kind": "same-code-flip",
-          "detail": "At least one pass and one fail share commit tonight."
+          "detail": "At least one pass and one fail share commit 679e0bb."
         }
       ],
       "causes": [
@@ -137,7 +137,7 @@
       },
       "suggestedFix": "The rules did not name a cause. Compare the quoted expected and received values with what the user sees. Do not loosen the assertion to make it pass.",
       "healProposal": null,
-      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-random.spec.ts::chromium::random coin flip after login' --config '/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts'",
+      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-random.spec.ts::chromium::random coin flip after login' --config 'playwright.config.ts'",
       "note": null,
       "llm": null,
       "review": {
@@ -154,13 +154,23 @@
       "signals": [
         {
           "kind": "same-code-flip",
-          "detail": "At least one pass and one fail share commit tonight."
+          "detail": "At least one pass and one fail share commit 679e0bb."
         }
       ],
       "causes": [
         {
-          "cause": "selectors",
+          "cause": "timing",
           "confidence": "high",
+          "evidence": [
+            "Timeout: 2000ms"
+          ],
+          "ruleIds": [
+            "TIM-SLOW-LOAD"
+          ]
+        },
+        {
+          "cause": "selectors",
+          "confidence": "low",
           "evidence": [
             "Error: element(s) not found"
           ],
@@ -171,6 +181,7 @@
         }
       ],
       "evidence": [
+        "Timeout: 2000ms",
         "Error: element(s) not found"
       ],
       "attempts": {
@@ -183,9 +194,9 @@
         "runsSeen": 3,
         "firstFailingCommit": null
       },
-      "suggestedFix": "Check whether the app changed or the locator is wrong. This is a candidate for qa-core-heal (PR 9).",
+      "suggestedFix": "The page was still loading or navigation was slow, so the element was not there yet. Wait for the page to finish loading, then assert what the user sees, and check whether the app itself is slow.",
       "healProposal": null,
-      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-slow-user.spec.ts::chromium::slow user reaches the inventory' --config '/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts'",
+      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-slow-user.spec.ts::chromium::slow user reaches the inventory' --config 'playwright.config.ts'",
       "note": null,
       "llm": null,
       "review": {
@@ -202,7 +213,7 @@
       "signals": [
         {
           "kind": "same-code-flip",
-          "detail": "At least one pass and one fail share commit tonight."
+          "detail": "At least one pass and one fail share commit 679e0bb."
         }
       ],
       "causes": [
@@ -234,7 +245,7 @@
       },
       "suggestedFix": "The test hit its time limit while waiting. Wait for what the user sees with a web-first assertion, and check whether the app itself is slow.",
       "healProposal": null,
-      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-timing.spec.ts::chromium::fixed wait longer than the test timeout' --config '/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts'",
+      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-timing.spec.ts::chromium::fixed wait longer than the test timeout' --config 'playwright.config.ts'",
       "note": null,
       "llm": null,
       "review": {
@@ -251,7 +262,7 @@
       "signals": [
         {
           "kind": "same-code-flip",
-          "detail": "At least one pass and one fail share commit tonight."
+          "detail": "At least one pass and one fail share commit 679e0bb."
         }
       ],
       "causes": [
@@ -281,7 +292,7 @@
       },
       "suggestedFix": "Replace fixed waits with web-first assertions on what the user sees, and check whether the app itself is slow.",
       "healProposal": null,
-      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-timing.spec.ts::chromium::product image visible within a too short timeout' --config '/workspace/p3-test-kit/saucedemo-flaky-kit/playwright.config.ts'",
+      "nextStep": "Review the suggested fix. To see the test again, run: qa-core-flaky rerun --from 'reports/run-1.json' --only 'flaky-timing.spec.ts::chromium::product image visible within a too short timeout' --config 'playwright.config.ts'",
       "note": null,
       "llm": null,
       "review": {
@@ -290,5 +301,6 @@
         "decision": null
       }
     }
-  ]
+  ],
+  "generatedAt": "2026-10-26T18:07:00.000Z"
 }
