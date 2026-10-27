@@ -36,8 +36,10 @@ export {
   renderHealFindings,
 } from './heal/findings.js';
 export type { BuildHealFindingsOptions, HealFinding, HealFindingsDocument, HealProjectFacts } from './heal/findings.js';
-export { collectHealProposals, healSpecPath, readFindingsContract, rowsFromCompatStdout, specRootsFromReport } from './heal/client.js';
-export { HEAL_PATCH_DIR, HEAL_PATCH_MARKER, healPatchName, ownedPatchNames, PATCH_INLINE_BYTE_LIMIT, PATCH_INLINE_LINE_LIMIT, patchIsExternal, patchMarkerText, proposalDiff, proposalPatchBody } from './heal/patch.js';
+export { collectHealProposals, healSpecPath, readFindingsContract, readRunTimeoutSupport, rowsFromCompatStdout, specRootsFromReport } from './heal/client.js';
+export { canonicalFindingsPath, findingsPathIsTriageOutput } from './heal/findings-guard.js';
+export { HEAL_PATCH_DIR, HEAL_PATCH_MARKER, healPatchName, ownedPatchEntries, ownedPatchNames, PATCH_INLINE_BYTE_LIMIT, PATCH_INLINE_LINE_LIMIT, patchBodyHash, patchIsExternal, patchMarkerText, proposalDiff, proposalPatchBody } from './heal/patch.js';
+export { PatchWriteError, writeHealPatchFiles } from './heal/patch-write.js';
 export {
   COMPAT_LABEL,
   CONTRACT_LABEL,
@@ -48,7 +50,7 @@ export {
   unavailableProposal,
   UNAVAILABLE_LINE,
 } from './heal/proposal.js';
-export { assertHealArgsAllowed, FORBIDDEN_HEAL_ARGS, healCommand, healTimeoutMs, runHealCommand } from './heal/run.js';
+export { assertHealArgsAllowed, bindHealTempDir, FORBIDDEN_HEAL_ARGS, healCommand, healTimeoutMs, installHealStopHandlers, removeHealStopHandlers, runHealCommand, runTimeoutSeconds } from './heal/run.js';
 export { decideHandoff } from './heal/handoff.js';
 export type { HandoffDecision, HandoffGate, HandoffInput, HandoffMode } from './heal/handoff.js';
 export { FINDING_REDACTION_RULES, redactFindingText } from './heal/redact.js';
@@ -70,7 +72,9 @@ export {
   formatCap,
   formatPrintedCommand,
   planReruns,
+  commandForInvocation,
   shellCommand,
+  splitRerunSentence,
 } from './rerun/plan.js';
 export type { PlanOptions, PlannedRun, RerunPlan, RunCap } from './rerun/plan.js';
 export { commitFor, mergeRerunRecords, tagRerunAttempts } from './rerun/merge.js';

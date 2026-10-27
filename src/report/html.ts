@@ -2,13 +2,21 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { healPatchName, proposalPatchBody } from '../heal/patch.js';
+import { healPatchName, proposalDiff, proposalPatchBody } from '../heal/patch.js';
+import { maskDatabaseUserinfo, maskTokenText } from '../heal/redact.js';
 import { redactHomeText } from '../report-path.js';
+import { splitRerunSentence } from '../rerun/plan.js';
 import { VERDICT_ORDER } from '../verdict.js';
 import { REPORT_SCRIPT, REPORT_STYLE } from './html-template.js';
 import type { RerunCounts, TriageEntry, TriageReport, VerdictName } from './schema.js';
 
 const FLAKY_LINE = 'A flaky test can still point to a real app defect. Check the app behavior too.';
+
+/** The page stays this far under 300 KB, including a proposal on every row. */
+const HTML_SIZE_CAP = 307_200;
+const HTML_SIZE_MARGIN = 5 * 1024;
+
+type ProposalFit = { clip: number; links: boolean; note: boolean };
 
 const CAUSE_ORDER = ['selectors', 'timing', 'test-data', 'environment', 'unknown'] as const;
 
@@ -77,7 +85,7 @@ export type HtmlRenderOptions = {
  */
 export function renderTriageHtml(report: TriageReport, options: HtmlRenderOptions = {}): string {
   const source = structuredClone(report);
-  if (options.redact !== false) redactStrings(source);
+  redactStrings(source, options.redact !== false);
   const counts = source.entries.map((entry) => checkedCounts(entry));
   const version = options.version ?? readPackageVersion();
   const style = `${REPORT_STYLE}${causeBarCss(causeBarWidths(source))}`;
@@ -97,38 +105,8 @@ export function renderTriageHtml(report: TriageReport, options: HtmlRenderOption
     "base-uri 'none'",
     "form-action 'none'",
   ].join('; ');
-
-  const body = omitOptionalEndTags(
-    [
-      '<a class="skip" href="#tests">Skip To Tests</a>',
-      renderHeader(source),
-      '<main>',
-      renderSummary(source),
-      renderCauses(source),
-      renderTests(source, counts),
-      '</main>',
-      `<footer class="footer"><p>${footerLine(version)}</p></footer>`,
-      `<script>${REPORT_SCRIPT}</script>`,
-    ].join(''),
-  );
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="${policy}">
-<title>Triage Report</title>
-<link rel="icon" href="data:,">
-<style>${style}</style>
-</head>
-<body>
-${body}
-</body>
-</html>
-`;
+  const fit = chooseProposalFit(source, counts, version, style, policy);
+  return documentHtml(style, policy, renderBody(source, counts, version, fit));
 }
 
 /**
@@ -201,6 +179,73 @@ function requireCount(value: unknown, field: string): number {
  * Drop end tags the HTML parser restores on its own.
  * A 200 entry report stays under 300 KB, and the DOM is unchanged.
  */
+function documentHtml(style: string, policy: string, body: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="${policy}">
+<title>Triage Report</title>
+<link rel="icon" href="data:,">
+<style>${style}</style>
+</head>
+<body>
+${body}
+</body>
+</html>
+`;
+}
+
+function renderBody(report: TriageReport, counts: readonly CheckedCounts[], version: string, fit: ProposalFit): string {
+  return omitOptionalEndTags(
+    [
+      '<a class="skip" href="#tests">Skip To Tests</a>',
+      renderHeader(report),
+      '<main>',
+      renderSummary(report),
+      renderCauses(report),
+      renderTests(report, counts, fit),
+      '</main>',
+      `<footer class="footer"><p>${footerLine(version)}</p></footer>`,
+      `<script>${REPORT_SCRIPT}</script>`,
+    ].join(''),
+  );
+}
+
+/**
+ * The longest inline preview that keeps the page under the size cap.
+ * Links are added only when they still fit. The label note is one line for the page.
+ */
+function chooseProposalFit(
+  report: TriageReport,
+  counts: readonly CheckedCounts[],
+  version: string,
+  style: string,
+  policy: string,
+): ProposalFit {
+  const limit = HTML_SIZE_CAP - HTML_SIZE_MARGIN;
+  const bytes = (fit: ProposalFit): number => Buffer.byteLength(documentHtml(style, policy, renderBody(report, counts, version, fit)));
+  const hasProposal = report.entries.some((entry) => entry.healProposal);
+  let note = hasProposal && bytes({ clip: 0, links: false, note: true }) <= limit;
+  let lo = 0;
+  let hi = 4_000;
+  let clip = 0;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (bytes({ clip: mid, links: false, note }) <= limit) {
+      clip = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  const links = bytes({ clip, links: true, note }) <= limit;
+  return { clip, links, note };
+}
+
 function omitOptionalEndTags(html: string): string {
   return html
     .replaceAll('</td>', '')
@@ -289,14 +334,15 @@ function renderCauses(report: TriageReport): string {
   return `<section aria-labelledby="cause-heading"><h2 id="cause-heading">Cause Breakdown</h2><ul class="bars">${bars}</ul></section>`;
 }
 
-function renderTests(report: TriageReport, counts: readonly CheckedCounts[]): string {
+function renderTests(report: TriageReport, counts: readonly CheckedCounts[], fit: ProposalFit): string {
   if (report.entries.length === 0) {
     return `<section id="tests" aria-labelledby="tests-heading"><h2 id="tests-heading">Tests</h2><div class="empty"><p class="empty-title">No Entries</p><p>Every test passed or was skipped. There is nothing to review.</p></div></section>`;
   }
   const head = `<thead><tr><th scope="col" data-sort-key="test" aria-sort="none"><button>Test</button></th><th scope="col" data-sort-key="verdict" aria-sort="none"><button>Verdict</button></th><th scope="col" data-sort-key="cause" aria-sort="none"><button>Cause</button></th><th scope="col" data-sort-key="confidence" aria-sort="none"><button>Confidence</button></th><th scope="col" data-sort-key="attempts" aria-sort="none"><button>Attempts</button></th><th scope="col" data-sort-key="runs" aria-sort="none"><button>Runs Seen</button></th></tr></thead>`;
-  const bodies = report.entries.map((entry, index) => renderEntry(entry, counts[index])).join('');
+  const bodies = report.entries.map((entry, index) => renderEntry(entry, counts[index], fit)).join('');
   const flaky = report.entries.some((entry) => entry.verdict === 'flaky') ? `<p class="note">${escapeHtml(FLAKY_LINE)}</p>` : '';
-  return `<section id="tests" aria-labelledby="tests-heading"><h2 id="tests-heading">Tests</h2>${flaky}${renderToolbar(report)}<div class="table-wrap"><table data-report-table><caption class="sr-only">Triage Tests</caption>${head}${bodies}</table></div><p id="filter-empty" class="filter-empty" hidden>No Matching Tests</p></section>`;
+  const note = fit.note ? proposalNote(report) : '';
+  return `<section id="tests" aria-labelledby="tests-heading"><h2 id="tests-heading">Tests</h2>${flaky}${note}${renderToolbar(report)}<div class="table-wrap"><table data-report-table><caption class="sr-only">Triage Tests</caption>${head}${bodies}</table></div><p id="filter-empty" class="filter-empty" hidden>No Matching Tests</p></section>`;
 }
 
 function renderToolbar(report: TriageReport): string {
@@ -314,14 +360,14 @@ function options(values: readonly string[], labels: Record<string, string>): str
   return parts.join('');
 }
 
-function renderEntry(entry: TriageEntry, counts: CheckedCounts | undefined): string {
+function renderEntry(entry: TriageEntry, counts: CheckedCounts | undefined, fit: ProposalFit): string {
   if (!counts) throw new Error('attempts.total must be a finite number');
   const cause = primaryCause(entry);
   const badge = BADGE_CLASS[entry.verdict] ?? 'b0';
   const parts = splitId(entry.id);
   const title = `<b>${escapeHtml(parts.title)}</b>`;
   const meta = parts.meta ? `<small>${escapeHtml(parts.meta)}</small>` : '';
-  return `<tbody data-test="${escapeHtml(entry.id)}" data-v="${escapeHtml(entry.verdict)}" data-c="${escapeHtml(cause)}" data-k="${escapeHtml(entry.confidence)}" data-f="${counts.failed}" data-n="${counts.total}" data-r="${counts.runsSeen}"><tr><th scope="row">${title}${meta}</th><td data-label="Verdict"><i class="${badge}">${escapeHtml(verdictLabel(entry.verdict))}</i></td><td data-label="Cause">${escapeHtml(causeLabel(cause))}</td><td data-label="Confidence">${escapeHtml(confidenceLabel(entry.confidence))}</td><td data-label="Attempts">${counts.failed}/${counts.total}</td><td data-label="Runs Seen">${counts.runsSeen}</td></tr><tr><td colspan="6"><details><summary>Details</summary>${renderDetail(entry, counts)}</details></td></tr></tbody>`;
+  return `<tbody data-test="${escapeHtml(entry.id)}" data-v="${escapeHtml(entry.verdict)}" data-c="${escapeHtml(cause)}" data-k="${escapeHtml(entry.confidence)}" data-f="${counts.failed}" data-n="${counts.total}" data-r="${counts.runsSeen}"><tr><th scope="row">${title}${meta}</th><td data-label="Verdict"><i class="${badge}">${escapeHtml(verdictLabel(entry.verdict))}</i></td><td data-label="Cause">${escapeHtml(causeLabel(cause))}</td><td data-label="Confidence">${escapeHtml(confidenceLabel(entry.confidence))}</td><td data-label="Attempts">${counts.failed}/${counts.total}</td><td data-label="Runs Seen">${counts.runsSeen}</td></tr><tr><td colspan="6"><details><summary>Details</summary>${renderDetail(entry, counts, fit)}</details></td></tr></tbody>`;
 }
 
 function splitId(id: string): { title: string; meta: string } {
@@ -333,7 +379,7 @@ function splitId(id: string): { title: string; meta: string } {
   return { title, meta: `${file} · ${project}` };
 }
 
-function renderDetail(entry: TriageEntry, counts: CheckedCounts): string {
+function renderDetail(entry: TriageEntry, counts: CheckedCounts, fit: ProposalFit): string {
   const parts: string[] = [];
   if (entry.evidence.length > 0) {
     parts.push(`<b>Evidence</b><pre>${entry.evidence.map((line) => escapeHtml(line)).join('\n')}</pre>`);
@@ -365,14 +411,11 @@ function renderDetail(entry: TriageEntry, counts: CheckedCounts): string {
     `<b>Attempts</b><p>Total ${counts.total}, failed ${counts.failed}, passed ${counts.passed}. Same code for a pass and a fail: ${sameCode}.</p>`,
   );
   if (counts.runsSeen > 1) parts.push(`<p>Seen In ${counts.runsSeen} Runs</p>`);
-  parts.push(`<p>Review Status: ${escapeHtml(entry.review.status)}.${renderProposal(entry)}</p>`);
+  parts.push(`<p>Review Status: ${escapeHtml(entry.review.status)}.${renderProposal(entry, fit)}</p>`);
   return parts.join('');
 }
 
-/**
- * One class per status. The word is painted from the stylesheet, so a page
- * of 200 rows does not repeat it, and the refusal code stays in the patch file.
- */
+/** One class per status. The word is real text so it can be selected and read. */
 const PROPOSAL_CLASS: Record<string, string> = {
   proposed: 'hp',
   applied: 'ha',
@@ -384,21 +427,44 @@ const PROPOSAL_CLASS: Record<string, string> = {
   'skipped-by-gate': 'hs',
 };
 
-/** A short status, plus a link when the patch file holds the diff and the explanation. */
-function renderProposal(entry: TriageEntry): string {
+/**
+ * The status word, plus as much of the diff or refusal message as fits.
+ * The text is escaped. A link to the patch file is added when the page still
+ * has room. The refusal code stays in the patch file.
+ */
+function renderProposal(entry: TriageEntry, fit: ProposalFit): string {
   const proposal = entry.healProposal;
   if (!proposal) return '';
   const mark = PROPOSAL_CLASS[proposal.status] ?? 'he';
-  if (proposalPatchBody(proposal).length === 0) return `<i class=${mark}></i>`;
-  return `<a class=${mark} href=${healPatchName(entry.id)}></a>`;
+  const preview = inlinePreview(proposal, fit.clip);
+  const text = preview ? `${proposal.status} ${preview}` : proposal.status;
+  const escaped = escapeHtml(text);
+  if (fit.links && proposalPatchBody(proposal).length > 0) {
+    return `<a class=${mark} href=${healPatchName(entry.id)}>${escaped}</a>`;
+  }
+  return `<i class=${mark}>${escaped}</i>`;
+}
+
+function inlinePreview(proposal: NonNullable<TriageEntry['healProposal']>, clip: number): string {
+  if (clip <= 0) return '';
+  const diff = proposalDiff(proposal.changes);
+  const source = diff || proposal.refusal?.message || '';
+  return source.slice(0, clip);
+}
+
+function proposalNote(report: TriageReport): string {
+  const labels: string[] = [];
+  for (const entry of report.entries) {
+    const label = entry.healProposal?.label;
+    if (label && !labels.includes(label)) labels.push(label);
+  }
+  if (labels.length === 0) return '';
+  return `<p class="note">${escapeHtml(labels.join(' '))}</p>`;
 }
 
 function renderNextStep(nextStep: string): string {
-  const marker = 'qa-core-flaky rerun ';
-  const at = nextStep.indexOf(marker);
-  const lead = at === -1 ? nextStep : nextStep.slice(0, at);
-  const command = at === -1 ? nextStep : nextStep.slice(at);
-  return `<p>${escapeHtml(lead)}</p><pre>${escapeHtml(command)}</pre><button class="copy">Copy Command</button>`;
+  const parts = splitRerunSentence(nextStep);
+  return `<p>${escapeHtml(parts.lead)}</p><pre>${escapeHtml(parts.command)}</pre><button class="copy">Copy Command</button>`;
 }
 
 function renderReruns(counts: CheckedCounts): string {
@@ -487,21 +553,25 @@ function commitsIn(report: TriageReport): string[] {
   return found;
 }
 
-function redactStrings(value: unknown): void {
+function redactStrings(value: unknown, hideHomes: boolean): void {
   if (!value || typeof value !== 'object') return;
+  const hide = (item: string) => {
+    const masked = maskTokenText(maskDatabaseUserinfo(item));
+    return hideHomes ? redactHomeText(masked) : masked;
+  };
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index += 1) {
       const item = value[index];
-      if (typeof item === 'string') value[index] = redactHomeText(item);
-      else redactStrings(item);
+      if (typeof item === 'string') value[index] = hide(item);
+      else redactStrings(item, hideHomes);
     }
     return;
   }
   const record = value as Record<string, unknown>;
   for (const key of Object.keys(record)) {
     const item = record[key];
-    if (typeof item === 'string') record[key] = redactHomeText(item);
-    else redactStrings(item);
+    if (typeof item === 'string') record[key] = hide(item);
+    else redactStrings(item, hideHomes);
   }
 }
 

@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { RerunMode, TestRecord } from '../model.js';
 import { homeMarks, redactHomeText } from '../report-path.js';
 import { escapeRegex, shellQuote } from './quote.js';
@@ -249,10 +250,41 @@ export function formatPrintedCommand(
   return `${shown} (the title was redacted, so -g is omitted here)`;
 }
 
-export function shellCommand(reportPath: string, id: string, configFile?: string): string {
-  const parts = ['qa-core-flaky rerun', '--from', shellQuote(reportPath), '--only', shellQuote(id)];
+const PROGRAM_BIN = /^qa-core-flaky(?:\.(?:js|mjs|cjs|cmd))?$/i;
+
+/**
+ * The program prefix for a rerun command a person can paste.
+ * `node` plus a path is used when triage was started from a script.
+ * The path is relative to `cwd`, including `..` when the script is outside
+ * that folder. A path that contains a home username is not printed.
+ * A program named `qa-core-flaky` is `npx qa-core-flaky`, because that
+ * name works after the package is installed in the project.
+ */
+export function commandForInvocation(script: string | undefined, cwd: string): string {
+  if (!script) return 'npx qa-core-flaky';
+  if (PROGRAM_BIN.test(path.basename(script))) return 'npx qa-core-flaky';
+  const absolute = path.resolve(cwd, script);
+  let shown = path.relative(cwd, absolute);
+  if (shown === '') shown = path.basename(absolute);
+  shown = shown.split(path.sep).join('/');
+  if (redactHomeText(shown) !== shown) return 'npx qa-core-flaky';
+  return `node ${shellQuote(shown)}`;
+}
+
+export function shellCommand(reportPath: string, id: string, configFile?: string, program = 'qa-core-flaky'): string {
+  const parts = [program, 'rerun', '--from', shellQuote(reportPath), '--only', shellQuote(id)];
   if (configFile) parts.push('--config', shellQuote(configFile));
   return parts.join(' ');
+}
+
+/** Split `run: <command>` so the command can sit in its own block. */
+export function splitRerunSentence(nextStep: string): { lead: string; command: string } {
+  const marker = 'run: ';
+  const at = nextStep.lastIndexOf(marker);
+  if (at === -1) return { lead: nextStep, command: nextStep };
+  const command = nextStep.slice(at + marker.length);
+  if (!command.includes(' rerun ')) return { lead: nextStep, command: nextStep };
+  return { lead: nextStep.slice(0, at + marker.length), command };
 }
 
 function escapeSlash(value: string): string {

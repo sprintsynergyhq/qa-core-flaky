@@ -1032,12 +1032,11 @@ test('the printed config path runs from the folder where triage ran', { timeout:
   const runIn = (cwd, args) =>
     spawnSync(process.execPath, [path.resolve(cli), ...args], { encoding: 'utf8', cwd });
   const paste = (nextStep, cwd) => {
-    const marker = 'qa-core-flaky rerun ';
-    const at = nextStep.indexOf(marker);
+    const marker = 'run: ';
+    const at = nextStep.lastIndexOf(marker);
     assert.ok(at >= 0, nextStep);
-    const command = nextStep
-      .slice(at)
-      .replace(/^qa-core-flaky\b/, `${process.execPath} ${path.resolve(cli)}`);
+    const command = nextStep.slice(at + marker.length);
+    assert.match(command, / rerun /);
     return spawnSync('sh', ['-c', command], { encoding: 'utf8', cwd, timeout: 180000 });
   };
   const assertRan = (result, label) => {

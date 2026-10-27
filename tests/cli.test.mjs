@@ -36,6 +36,11 @@ function keepTemp(t, prefix) {
   return dir;
 }
 
+/** Golden files are built by the library, which prints `qa-core-flaky`. The CLI prints how it was started. */
+function asLibraryReport(text) {
+  return text.replaceAll("node 'dist/cli.js' rerun", 'qa-core-flaky rerun');
+}
+
 test('parse exits 0 and prints schemaVersion 1', () => {
   const result = run(['parse', fixture]);
   assert.equal(result.status, 0, result.stderr);
@@ -159,8 +164,9 @@ test('triage writes both files and exits 2 when there are entries', (t) => {
   assert.equal(result.stderr, '');
   const json = fs.readFileSync(path.join(dir, 'triage.json'), 'utf8');
   const markdown = fs.readFileSync(path.join(dir, 'triage.md'), 'utf8');
-  assert.equal(json, fs.readFileSync('fixtures/reports/golden/triage.json', 'utf8'));
-  assert.equal(markdown, fs.readFileSync('fixtures/reports/golden/triage.md', 'utf8'));
+  assert.match(json, /node 'dist\/cli\.js' rerun /);
+  assert.equal(asLibraryReport(json), fs.readFileSync('fixtures/reports/golden/triage.json', 'utf8'));
+  assert.equal(asLibraryReport(markdown), fs.readFileSync('fixtures/reports/golden/triage.md', 'utf8'));
   assert.equal(json.endsWith('\n'), true);
   assert.equal(markdown.endsWith('\n'), true);
 });
@@ -264,7 +270,7 @@ test('triage exit 2 leaves the full stdout report intact', () => {
   const result = run(['triage', fixture, '--json']);
   assert.equal(result.status, 2, result.stderr);
   assert.equal(result.stderr, '');
-  assert.equal(result.stdout, fs.readFileSync('fixtures/reports/golden/triage.json', 'utf8'));
+  assert.equal(asLibraryReport(result.stdout), fs.readFileSync('fixtures/reports/golden/triage.json', 'utf8'));
   JSON.parse(result.stdout);
 });
 

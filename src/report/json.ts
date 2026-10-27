@@ -3,6 +3,7 @@ import type { Cause, CauseFinding } from '../causes/types.js';
 import { suggestFix } from '../fixes/templates.js';
 import type { Attempt, RerunMode, TestRecord } from '../model.js';
 import { homeMarks, redactHomeText, runnableConfigPath } from '../report-path.js';
+import { maskDatabaseUserinfo, maskTokenText } from '../heal/redact.js';
 import { shellCommand } from '../rerun/plan.js';
 import { collapseRunRecords, decideVerdict, VERDICT_ORDER } from '../verdict.js';
 import type { HealProposal, RerunCounts, TriageAttempts, TriageEntry, TriageReport } from './schema.js';
@@ -17,6 +18,16 @@ export type BuildTriageOptions = {
    * Omit the map and every entry keeps `healProposal` null.
    */
   healProposals?: ReadonlyMap<string, HealProposal>;
+  /**
+   * Hide home usernames. Default true.
+   * Token-like strings are hidden either way.
+   */
+  redact?: boolean;
+  /**
+   * Program prefix for the rerun sentence.
+   * Default `qa-core-flaky`. The CLI passes the command that started this process.
+   */
+  rerunProgram?: string;
 };
 
 /**
@@ -33,10 +44,12 @@ export function buildTriageReport(records: readonly TestRecord[], options: Build
   }
 
   const entries: TriageEntry[] = [];
+  const hideHomes = options.redact !== false;
+  const program = options.rerunProgram ?? 'qa-core-flaky';
   for (const group of byId.values()) {
     if (!group.some((record) => record.outcome === 'failed' || record.outcome === 'flaky')) continue;
     const recordId = group[0]?.id ?? '';
-    entries.push(buildEntry(group, options.testTimeoutMs, options.healProposals?.get(recordId) ?? null));
+    entries.push(buildEntry(group, options.testTimeoutMs, options.healProposals?.get(recordId) ?? null, hideHomes, program));
   }
 
   entries.sort((left, right) => {
@@ -65,6 +78,8 @@ function buildEntry(
   group: readonly TestRecord[],
   testTimeoutMs: number | undefined,
   healProposal: HealProposal | null,
+  hideHomes: boolean,
+  program: string,
 ): TriageEntry {
   const records = collapseRunRecords(group);
   const base = records[0];
@@ -98,7 +113,10 @@ function buildEntry(
     ...rawEvidence,
     ...ordered.flatMap((finding) => finding.evidence),
   ]);
-  const redact = (value: string) => redactHomeText(value, marks);
+  const redact = (value: string) => {
+    const masked = maskTokenText(maskDatabaseUserinfo(value));
+    return hideHomes ? redactHomeText(masked, marks) : masked;
+  };
   const evidence = rawEvidence.map((line) => redact(line));
   const causes = ordered.map((finding) => ({
     ...finding,
@@ -127,7 +145,7 @@ function buildEntry(
     },
     suggestedFix: suggestFix(decision.ruleIds),
     healProposal,
-    nextStep: nextStepText(reportPath, id, configFile, singleRunAllFailed(records, attempts)),
+    nextStep: nextStepText(reportPath, id, configFile, singleRunAllFailed(records, attempts), program),
     note: decision.note,
     llm: null,
     review: {
@@ -220,10 +238,11 @@ function nextStepText(
   id: string,
   configFile: string | undefined,
   hint: boolean,
+  program: string,
 ): string {
   const configArg = configFile ? runnableConfigPath(configFile) : undefined;
   const prefix = hint ? `Review the suggested fix. ${SINGLE_RUN_HINT}` : 'Review the suggested fix. ';
-  return `${prefix}To see the test again, run: ${shellCommand(reportPath, id, configArg)}`;
+  return `${prefix}To see the test again, run: ${shellCommand(reportPath, id, configArg, program)}`;
 }
 
 function orderCauses(findings: readonly CauseFinding[], cause: Cause | null): CauseFinding[] {

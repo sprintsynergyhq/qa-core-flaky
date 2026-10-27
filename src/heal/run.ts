@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import fs from 'node:fs';
 
 /** Flags this tool must never put on a heal command line. */
 export const FORBIDDEN_HEAL_ARGS = ['--apply', '--yes', '--no-verify'] as const;
@@ -53,6 +54,65 @@ export function healTimeoutMs(): number {
   return parsed;
 }
 
+/**
+ * Whole seconds for heal's `--run-timeout`, one second under the flaky wait.
+ * A wait under two seconds cannot be expressed as a positive whole number
+ * that is still shorter, so the flag is omitted.
+ */
+export function runTimeoutSeconds(timeoutMs: number): number | null {
+  const seconds = Math.floor(timeoutMs / 1000) - 1;
+  if (!Number.isSafeInteger(seconds) || seconds < 1) return null;
+  return seconds;
+}
+
+const healStop = {
+  child: null as ChildProcess | null,
+  tempDir: null as string | null,
+};
+let healStopHandlersOn = false;
+
+function onHealStop(signal: NodeJS.Signals): void {
+  const child = healStop.child;
+  const dir = healStop.tempDir;
+  if (child) killHealTree(child);
+  if (dir) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // The folder is already gone.
+    }
+  }
+  process.exit(signal === 'SIGTERM' ? 143 : 130);
+}
+
+/** Remember the heal child so a later interrupt can kill its process group. */
+export function bindHealChild(child: ChildProcess | null): void {
+  healStop.child = child;
+}
+
+/** Remember the temporary findings folder so an interrupt can remove it. */
+export function bindHealTempDir(dir: string | null): void {
+  healStop.tempDir = dir;
+}
+
+/** Handle SIGINT and SIGTERM for the current heal run. A second call does nothing. */
+export function installHealStopHandlers(): void {
+  if (healStopHandlersOn) return;
+  process.on('SIGINT', onHealStop);
+  process.on('SIGTERM', onHealStop);
+  healStopHandlersOn = true;
+}
+
+/** Drop the interrupt handlers. Later commands are not tied to this heal run. */
+export function removeHealStopHandlers(): void {
+  if (!healStopHandlersOn) return;
+  process.off('SIGINT', onHealStop);
+  process.off('SIGTERM', onHealStop);
+  healStopHandlersOn = false;
+  healStop.child = null;
+  healStop.tempDir = null;
+}
+
 /** Run heal without a shell. The child is killed when the timeout fires. */
 export function runHealCommand(args: readonly string[], timeoutMs: number = healTimeoutMs()): Promise<HealCommandResult> {
   const { command, argv } = healCommand(args);
@@ -73,6 +133,7 @@ export function runHealCommand(args: readonly string[], timeoutMs: number = heal
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    bindHealChild(child);
     const timer = setTimeout(() => {
       timedOut = true;
       killHealTree(child);
@@ -93,6 +154,7 @@ export function runHealCommand(args: readonly string[], timeoutMs: number = heal
     });
     child.on('error', (error: NodeJS.ErrnoException) => {
       clearTimeout(timer);
+      if (healStop.child === child) bindHealChild(null);
       finish({
         args,
         argv,
@@ -106,6 +168,7 @@ export function runHealCommand(args: readonly string[], timeoutMs: number = heal
     });
     child.on('close', (exitCode) => {
       clearTimeout(timer);
+      if (healStop.child === child) bindHealChild(null);
       finish({ args, argv, command, exitCode, stdout, stderr, timedOut });
     });
   });

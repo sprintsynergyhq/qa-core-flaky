@@ -13,7 +13,15 @@ import {
   UNAVAILABLE_LINE,
   type HealResultRow,
 } from './proposal.js';
-import { healTimeoutMs, runHealCommand, type HealCommandResult } from './run.js';
+import {
+  bindHealTempDir,
+  healTimeoutMs,
+  installHealStopHandlers,
+  removeHealStopHandlers,
+  runHealCommand,
+  runTimeoutSeconds,
+  type HealCommandResult,
+} from './run.js';
 
 export type HealSession = {
   /** Proposals keyed by the raw record id. */
@@ -53,18 +61,41 @@ async function collectHealProposalsInner(input: {
   specRoots?: readonly string[];
 }): Promise<HealSession> {
   const timeoutMs = healTimeoutMs();
-  const probe = await runHealCommand(['capabilities', '--json'], timeoutMs);
-  if (isMissing(probe)) return unavailableSession(input.recordIndex);
-  if (probe.timedOut) return timeoutSession(input, '');
-  const caps = readFindingsContract(probe.stdout);
-  if (probe.exitCode === 0 && caps.findings === 1) {
-    return runContract(input, timeoutMs);
+  const deadline = Date.now() + timeoutMs;
+  const left = (): number => deadline - Date.now();
+  installHealStopHandlers();
+  try {
+    const probe = await runWithinBudget(['capabilities', '--json'], left);
+    if (isMissing(probe)) return unavailableSession(input.recordIndex);
+    if (probe.timedOut) return timeoutSession(input, '');
+    const caps = readFindingsContract(probe.stdout);
+    if (probe.exitCode === 0 && caps.findings === 1) {
+      return await runContract(input, left, readRunTimeoutSupport(probe.stdout));
+    }
+    const versionProbe = await runWithinBudget(['--version'], left);
+    if (versionProbe.timedOut) return timeoutSession(input, caps.version);
+    if (isMissing(versionProbe) || versionProbe.exitCode !== 0) return unavailableSession(input.recordIndex);
+    const version = firstLine(versionProbe.stdout) || caps.version || '0.3.x';
+    return await runCompat(input, version, left);
+  } finally {
+    bindHealTempDir(null);
+    removeHealStopHandlers();
   }
-  const versionProbe = await runHealCommand(['--version'], timeoutMs);
-  if (versionProbe.timedOut) return timeoutSession(input, caps.version);
-  if (isMissing(versionProbe) || versionProbe.exitCode !== 0) return unavailableSession(input.recordIndex);
-  const version = firstLine(versionProbe.stdout) || caps.version || '0.3.x';
-  return runCompat(input, version, timeoutMs);
+}
+
+/** True when capabilities JSON says this heal build accepts `--run-timeout`. */
+export function readRunTimeoutSupport(stdout: string): boolean {
+  const parsed = extractJson(stdout);
+  if (!isObject(parsed) || !isObject(parsed.features)) return false;
+  return parsed.features.runTimeout === true;
+}
+
+async function runWithinBudget(args: readonly string[], left: () => number): Promise<HealCommandResult> {
+  const timeoutMs = left();
+  if (timeoutMs <= 0) {
+    return { args, argv: [], command: '', exitCode: null, stdout: '', stderr: '', timedOut: true };
+  }
+  return runHealCommand(args, timeoutMs);
 }
 
 /** Read a findings contract version from `capabilities --json` stdout. */
@@ -80,16 +111,21 @@ async function runContract(
     recordIndex: ReadonlyMap<string, HealFinding>;
     specRoots?: readonly string[];
   },
-  timeoutMs: number,
+  left: () => number,
+  passRunTimeout: boolean,
 ): Promise<HealSession> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-heal-'));
+  bindHealTempDir(dir);
   try {
     const findingsPath = path.join(dir, 'heal-findings.json');
     const facing = healFacingDocument(input.document, input.specRoots ?? [], process.cwd());
     fs.writeFileSync(findingsPath, renderHealFindings(facing));
     const resultsPath = path.join(dir, 'heal-results.json');
+    const wait = left();
+    const seconds = passRunTimeout ? runTimeoutSeconds(wait) : null;
     const args = ['--findings', findingsPath, '--results', resultsPath, '--dry-run'];
-    const run = await runHealCommand(args, timeoutMs);
+    if (seconds !== null) args.push('--run-timeout', String(seconds));
+    const run = await runWithinBudget(args, () => wait);
     if (run.timedOut) return timeoutSession(input, '');
     if (isMissing(run)) return unavailableSession(input.recordIndex);
     if (!fs.existsSync(resultsPath)) {
@@ -120,7 +156,7 @@ async function runContract(
 async function runCompat(
   input: { document: HealFindingsDocument; recordIndex: ReadonlyMap<string, HealFinding>; specRoots?: readonly string[] },
   version: string,
-  timeoutMs: number,
+  left: () => number,
 ): Promise<HealSession> {
   const byFile = new Map<string, HealFinding[]>();
   for (const finding of input.document.findings) {
@@ -133,7 +169,7 @@ async function runCompat(
   const byFinding = new Map<string, HealProposal>();
   let notice: string | undefined;
   for (const [file, group] of byFile) {
-    const run = await runHealCommand([file, '--dry-run', '--json'], timeoutMs);
+    const run = await runWithinBudget([file, '--dry-run', '--json'], left);
     if (run.timedOut) {
       notice = 'qa-core-heal timed out.';
       for (const finding of group) {

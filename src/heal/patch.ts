@@ -13,8 +13,6 @@ export const HEAL_PATCH_DIR = 'h';
  */
 export const HEAL_PATCH_MARKER = '.qa-core-flaky';
 
-const OWNED_PATCH = /^[0-9a-f]{12}\.diff$/;
-
 /** Diffs longer than this are written to a patch file and linked from Markdown. */
 export const PATCH_INLINE_LINE_LIMIT = 12;
 
@@ -68,14 +66,37 @@ export function healPatchName(entryId: string): string {
   return `${HEAL_PATCH_DIR}/${hash}.diff`;
 }
 
-/** Diff names this tool recorded in a marker file. Anything else is left alone. */
-export function ownedPatchNames(markerText: string): string[] {
+export type OwnedPatch = { name: string; sha256: string };
+
+const OWNED_LINE = /^([0-9a-f]{12}\.diff) ([0-9a-f]{64})$/;
+
+/**
+ * Diff files this tool recorded, each with the SHA-256 of the bytes it wrote.
+ * A line that is only a file name is ignored, so a planted name is not deleted.
+ */
+export function ownedPatchEntries(markerText: string): OwnedPatch[] {
   const lines = markerText.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
   if (lines[0] !== 'qa-core-flaky') return [];
-  return lines.slice(1).filter((name) => OWNED_PATCH.test(name));
+  const owned: OwnedPatch[] = [];
+  for (const line of lines.slice(1)) {
+    const match = OWNED_LINE.exec(line);
+    if (!match?.[1] || !match[2]) continue;
+    owned.push({ name: match[1], sha256: match[2] });
+  }
+  return owned;
 }
 
-/** Marker body listing the diff files this run wrote. */
-export function patchMarkerText(names: readonly string[]): string {
-  return ['qa-core-flaky', ...names, ''].join('\n');
+/** Diff names this tool recorded in a marker file. Anything else is left alone. */
+export function ownedPatchNames(markerText: string): string[] {
+  return ownedPatchEntries(markerText).map((entry) => entry.name);
+}
+
+/** SHA-256 of a patch body. The marker stores this next to the file name. */
+export function patchBodyHash(body: string): string {
+  return createHash('sha256').update(body, 'utf8').digest('hex');
+}
+
+/** Marker body listing the diff files this run wrote, with the hash of each body. */
+export function patchMarkerText(entries: readonly OwnedPatch[]): string {
+  return ['qa-core-flaky', ...entries.map((entry) => `${entry.name} ${entry.sha256}`), ''].join('\n');
 }
