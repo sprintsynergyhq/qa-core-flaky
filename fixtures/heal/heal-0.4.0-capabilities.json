@@ -1,0 +1,15 @@
+{
+  "tool": {
+    "name": "qa-core-heal",
+    "version": "0.4.0"
+  },
+  "contracts": {
+    "findings": [
+      1
+    ],
+    "results": [
+      1
+    ]
+  },
+  "playwrightVersion": "1.60.0"
+}

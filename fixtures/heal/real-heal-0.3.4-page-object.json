@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "dryRun": true,
+  "scanned": 1,
+  "healed": 1,
+  "intact": 0,
+  "refused": 0,
+  "locators": [
+    {
+      "file": "pages/newsletter-page.ts",
+      "line": 20,
+      "old": "this.page.locator('#email-4f9c21')",
+      "new": "this.page.locator(\"input[type=\\\"email\\\"]\")",
+      "level": "css",
+      "ambiguous": false,
+      "status": "healed",
+      "occurrences": 1,
+      "occurrenceLines": [
+        20
+      ]
+    }
+  ],
+  "nonLocatorFailures": [],
+  "unmatchedFailures": [],
+  "verdicts": [
+    {
+      "spec": "pages/newsletter-page.ts",
+      "testTitle": "subscribes with an email and the weekly digest",
+      "classification": "locator",
+      "message": null,
+      "healApplied": false,
+      "before": "this.page.locator('#email-4f9c21')",
+      "after": "this.page.locator(\"input[type=\\\"email\\\"]\")",
+      "verified": null,
+      "reverted": false,
+      "revertReason": null,
+      "occurrences": 1
+    }
+  ],
+  "summary": {
+    "heals": 1,
+    "refusals": 0,
+    "nonLocator": 0,
+    "errors": 0
+  },
+  "fileErrors": []
+}

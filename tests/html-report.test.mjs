@@ -226,6 +226,75 @@ test('kit sized reports stay under 300 KB at 200 entries and use a strict policy
   assert.equal(html.includes('\u2014') || html.includes('\u2013'), false);
 });
 
+test('200 entries of every heal status stay under 300 KB', () => {
+  const kit = JSON.parse(fs.readFileSync(kitJson, 'utf8'));
+  const long = Array.from({ length: 40 }, (_, index) => `patched line ${index}`).join('\n');
+  const statuses = [
+    'proposed',
+    'applied',
+    'refused',
+    'not-locator',
+    'nothing-to-heal',
+    'error',
+    'unavailable',
+    'skipped-by-gate',
+  ];
+  const codes = [
+    'ambiguous-match',
+    'element-changed',
+    'strict-needs-human',
+    'possible-real-bug',
+    'weakens-test',
+    'verification-failed',
+    'baseline-not-reproduced',
+    'no-safe-pattern',
+    'ai-disabled',
+    'ai-invalid-output',
+    'ineligible-handoff',
+    'navigation-or-network',
+    'spec-not-found',
+    'timeout',
+  ];
+  const margin = 5 * 1024;
+  for (const status of statuses) {
+    for (const code of codes) {
+      const copies = Array.from({ length: 200 }, (_, index) => {
+        const source = structuredClone(kit.entries[index % kit.entries.length]);
+        source.id = `${source.id} #${index}`;
+        source.healProposal = {
+          contractVersion: 1,
+          tool: 'qa-core-heal',
+          toolVersion: '0.4.0',
+          mode: 'dry-run',
+          status,
+          strategy: status === 'proposed' ? 'locator-heal' : 'none',
+          fixRuleId: null,
+          reviewLevel: 'standard',
+          label: 'Proposal from qa-core-heal (dry run, not applied)',
+          changes:
+            status === 'proposed' || status === 'applied'
+              ? [{ file: 'tests/broken.spec.ts', startLine: 4, endLine: 4, before: long, after: 'page.locator("#ok")' }]
+              : [],
+          explanation: 'One confident candidate.',
+          refusal: { code, message: 'A person has to choose.' },
+          verification: null,
+          ai: { used: false, label: null, promptSha256: null },
+          applyCommand: null,
+        };
+        return source;
+      });
+      const html = renderTriageHtml(report(copies), { version: '0.0.1' });
+      const bytes = Buffer.byteLength(html);
+      assert.equal(bytes < 307_200, true, `${status} ${code} is ${bytes} bytes`);
+      assert.equal(307_200 - bytes >= margin, true, `${status} ${code} has ${307_200 - bytes} bytes of room`);
+      assert.equal(html.includes('data-heal-refusal'), false, status);
+      assert.equal(html.includes('baseline-not-reproduced'), false, status);
+      assert.equal(html.includes('patched line 39'), false, status);
+      assert.equal(html.includes('style="width:'), false, status);
+    }
+  }
+});
+
 test('the committed example has no machine paths or PR numbers', () => {
   const html = fs.readFileSync(kitHtml, 'utf8');
   for (const needle of ['/workspace', '/tmp/', '/home/', '/Users/', 'C:\\Users']) {
@@ -258,7 +327,7 @@ test('the SauceDemo example is the rendered kit triage', () => {
   assert.match(html, /Tests Flagged/);
   assert.match(html, /Seen In 3 Runs/);
   assert.match(html, /Total 6, failed 3, passed 3\. Same code for a pass and a fail: yes\./);
-  assert.match(html, /<button type="button" class="copy">Copy Command<\/button>/);
+  assert.match(html, /<button class="copy">Copy Command<\/button>/);
   assert.match(html, /Triage Tests/);
   for (const item of source.entries) {
     assert.equal(html.includes(`data-test="${escapeHtml(item.id)}"`), true, item.id);
@@ -268,7 +337,6 @@ test('the SauceDemo example is the rendered kit triage', () => {
     assert.equal(html.includes(`data-f="${item.attempts.failed}"`), true, item.id);
     assert.equal(html.includes(`data-n="${item.attempts.total}"`), true, item.id);
     assert.equal(html.includes(`data-r="${item.history.runsSeen}"`), true, item.id);
-    assert.equal(html.includes(`data-rule="${item.ruleId}"`), true, item.id);
     for (const line of item.evidence) assert.equal(html.includes(escapeHtml(line)), true, line);
     for (const signal of item.signals) {
       assert.equal(html.includes(`data-signal="${signal.kind}"`), true, signal.kind);
@@ -286,7 +354,7 @@ test('the SauceDemo example is the rendered kit triage', () => {
       true,
       item.id,
     );
-    assert.equal(html.includes('<h3>Attempts</h3>'), true, item.id);
+    assert.equal(html.includes('<b>Attempts</b>'), true, item.id);
     assert.match(html, new RegExp(`Review Status: ${item.review.status}\\.`));
     const command = item.nextStep.slice(item.nextStep.indexOf('qa-core-flaky rerun '));
     assert.equal(html.includes(escapeHtml(command)), true, command);

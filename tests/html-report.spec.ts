@@ -198,6 +198,27 @@ test('the table is readable without script', async ({ browser }) => {
   await context.close();
 });
 
+test('cause bars use the stylesheet width', async ({ page }) => {
+  const blocked: string[] = [];
+  page.on('console', (message) => {
+    if (/content security policy|style-src/i.test(message.text())) blocked.push(message.text());
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(reportUrl);
+  expect(blocked).toEqual([]);
+  expect(await page.locator('.bb[style]').count()).toBe(0);
+  const measures = await page.locator('.bb').evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const bar = node.getBoundingClientRect().width;
+      const track = node.parentElement ? node.parentElement.getBoundingClientRect().width : 0;
+      return { bar, track };
+    }),
+  );
+  expect(measures.length).toBeGreaterThan(0);
+  expect(measures.some((item) => item.bar === 0)).toBe(true);
+  expect(measures.some((item) => item.track > 40 && Math.abs(item.bar - item.track) < 1)).toBe(true);
+});
+
 test('the page fits a phone width', async ({ page }) => {
   const urls = track(page);
   await page.setViewportSize({ width: 375, height: 812 });
@@ -335,6 +356,53 @@ test('escaped titles do not run', async ({ page }, testInfo) => {
   await page.locator('summary').click();
   await expect(page.locator('pre').first()).toContainText('back`tick');
   expect(await page.locator('img').count()).toBe(0);
+  expect(await page.locator('script').count()).toBe(1);
+  expect(dialog).toBe(false);
+  expect(httpUrls(urls)).toEqual([]);
+});
+
+test('a heal diff that contains a script tag stays text', async ({ page }, testInfo) => {
+  const { spawnSync } = await import('node:child_process');
+  const dir = testInfo.outputPath('heal-demo');
+  fs.mkdirSync(dir, { recursive: true });
+  const ran = spawnSync(
+    process.execPath,
+    ['dist/cli.js', 'triage', 'demo/saucedemo/reports/recorded-seed-443.json', '--out-dir', dir, '--html', '--heal', '--fail-on', 'never'],
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        QA_CORE_HEAL_BIN: path.resolve('tests/fake-heal.mjs'),
+        FAKE_HEAL_MODE: 'contract',
+        FAKE_HEAL_XSS: '1',
+      },
+    },
+  );
+  expect(ran.status, ran.stderr).toBe(0);
+  const urls = track(page);
+  let dialog = false;
+  page.on('dialog', () => {
+    dialog = true;
+  });
+  await page.goto(pathToFileURL(path.join(dir, 'triage.html')).href);
+  const typo = page.locator('tbody', { hasText: 'typo locator' });
+  await typo.locator('summary').click();
+  const typoLink = typo.locator('a.hp');
+  await expect(typoLink).toBeVisible();
+  expect(await typoLink.evaluate((node) => getComputedStyle(node, '::after').content)).toContain('proposed');
+  const typoPatch = fs.readFileSync(path.join(dir, await typoLink.getAttribute('href')), 'utf8');
+  expect(typoPatch).toContain('Proposal from qa-core-heal (dry run, not applied)');
+  expect(typoPatch).toContain('<script>alert(1)</script>');
+  await expect(typo.getByText('<script>alert(1)</script>')).toHaveCount(0);
+  await expect(typo.getByText('Needs Review')).toBeVisible();
+  const remove = page.locator('tbody', { hasText: 'unscoped Remove' });
+  await remove.locator('summary').click();
+  const refusal = remove.locator('a.hr');
+  await expect(refusal).toBeVisible();
+  const removePatch = fs.readFileSync(path.join(dir, await refusal.getAttribute('href')), 'utf8');
+  expect(removePatch).toContain('strict-needs-human');
+  expect(removePatch).toContain('choose the element');
+  await expect(remove.getByText('Needs Review')).toBeVisible();
   expect(await page.locator('script').count()).toBe(1);
   expect(dialog).toBe(false);
   expect(httpUrls(urls)).toEqual([]);
