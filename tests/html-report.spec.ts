@@ -339,3 +339,41 @@ test('escaped titles do not run', async ({ page }, testInfo) => {
   expect(dialog).toBe(false);
   expect(httpUrls(urls)).toEqual([]);
 });
+
+test('a heal diff that contains a script tag stays text', async ({ page }, testInfo) => {
+  const { spawnSync } = await import('node:child_process');
+  const dir = testInfo.outputPath('heal-demo');
+  fs.mkdirSync(dir, { recursive: true });
+  const ran = spawnSync(
+    process.execPath,
+    ['dist/cli.js', 'triage', 'demo/saucedemo/reports/recorded-seed-443.json', '--out-dir', dir, '--html', '--heal', '--fail-on', 'never'],
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        QA_CORE_HEAL_BIN: path.resolve('tests/fake-heal.mjs'),
+        FAKE_HEAL_MODE: 'contract',
+        FAKE_HEAL_XSS: '1',
+      },
+    },
+  );
+  expect(ran.status, ran.stderr).toBe(0);
+  const urls = track(page);
+  let dialog = false;
+  page.on('dialog', () => {
+    dialog = true;
+  });
+  await page.goto(pathToFileURL(path.join(dir, 'triage.html')).href);
+  const typo = page.locator('tbody', { hasText: 'typo locator' });
+  await typo.locator('summary').click();
+  await expect(typo.getByText('Proposal from qa-core-heal (dry run, not applied)')).toBeVisible();
+  await expect(typo.getByText('<script>alert(1)</script>')).toBeVisible();
+  await expect(typo.getByText('Needs Review')).toBeVisible();
+  const remove = page.locator('tbody', { hasText: 'unscoped Remove' });
+  await remove.locator('summary').click();
+  await expect(remove.locator('[data-heal-refusal="strict-needs-human"]')).toContainText('choose the element');
+  await expect(remove.getByText('Needs Review')).toBeVisible();
+  expect(await page.locator('script').count()).toBe(1);
+  expect(dialog).toBe(false);
+  expect(httpUrls(urls)).toEqual([]);
+});

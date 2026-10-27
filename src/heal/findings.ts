@@ -87,6 +87,11 @@ export type BuildHealFindingsOptions = {
   timestamp?: string;
   /** Working directory used to make report paths relative. */
   cwd?: string;
+  /**
+   * Filled with the finding for each raw record id.
+   * The same object is updated when a redacted id collision is resolved.
+   */
+  recordIndex?: Map<string, HealFinding>;
 };
 
 /**
@@ -109,11 +114,17 @@ export function buildHealFindings(
   }
 
   const findings: HealFinding[] = [];
+  const preimages = new Map<HealFinding, string>();
   for (const group of byId.values()) {
     if (!group.some((record) => record.outcome === 'failed' || record.outcome === 'flaky')) continue;
-    const finding = buildFinding(group, options.testTimeoutMs);
-    if (finding) findings.push(finding);
+    const built = buildFinding(group, options.testTimeoutMs);
+    if (!built) continue;
+    findings.push(built.finding);
+    preimages.set(built.finding, built.preimage);
+    const recordId = group[0]?.id;
+    if (recordId !== undefined) options.recordIndex?.set(recordId, built.finding);
   }
+  disambiguateFindingIds(findings, preimages);
 
   findings.sort((left, right) => {
     const byVerdict = VERDICT_ORDER.indexOf(left.verdict) - VERDICT_ORDER.indexOf(right.verdict);
@@ -165,10 +176,24 @@ export function renderHealFindings(document: HealFindingsDocument): string {
 /**
  * First 12 hex characters of SHA-256 over the redacted file, project, and
  * full title path. The bytes are `JSON.stringify([file, project, titlePath])`.
+ * When `preimage` is set, it is a fourth JSON value. That value is the
+ * SHA-256 of the same three fields before redaction, so two titles that
+ * redact to one string do not share an id, and the raw title is not stored.
  */
-export function findingIdFor(file: string, project: string, titlePath: readonly string[]): string {
-  const payload = JSON.stringify([file, project, [...titlePath]]);
-  return createHash('sha256').update(payload, 'utf8').digest('hex').slice(0, 12);
+export function findingIdFor(
+  file: string,
+  project: string,
+  titlePath: readonly string[],
+  preimage?: string,
+): string {
+  const parts: unknown[] = [file, project, [...titlePath]];
+  if (preimage !== undefined) parts.push(preimage);
+  return createHash('sha256').update(JSON.stringify(parts), 'utf8').digest('hex').slice(0, 12);
+}
+
+/** SHA-256 of the unredacted file, project, and title path. Not written to the file. */
+export function findingPreimage(file: string, project: string, titlePath: readonly string[]): string {
+  return createHash('sha256').update(JSON.stringify([file, project, [...titlePath]]), 'utf8').digest('hex');
 }
 
 /**
@@ -212,10 +237,16 @@ export function mergeProjectFacts(list: readonly HealProjectFacts[]): HealProjec
   return merged;
 }
 
-function buildFinding(group: readonly TestRecord[], testTimeoutMs: number | undefined): HealFinding | null {
+function buildFinding(
+  group: readonly TestRecord[],
+  testTimeoutMs: number | undefined,
+): { finding: HealFinding; preimage: string } | null {
   const records = collapseRunRecords(group);
   const base = records[0];
   if (!base) return null;
+  const rawFile = base.file;
+  const rawProject = base.project;
+  const rawTitlePath = base.titlePath.length > 0 ? [...base.titlePath] : [base.titlePath[0] ?? base.id];
   const attempts = records.flatMap((record) => record.attempts);
   const merged: TestRecord = {
     ...base,
@@ -293,7 +324,32 @@ function buildFinding(group: readonly TestRecord[], testTimeoutMs: number | unde
     }),
     review: { status: 'Needs Review' },
   };
-  return finding;
+  return { finding, preimage: findingPreimage(rawFile, rawProject, rawTitlePath) };
+}
+
+/**
+ * Titles that differ only in a redacted part share a file, project, and
+ * title path after redaction. Mix in the preimage hash so heal can join
+ * on findingId. Ids that do not collide stay on the redacted hash.
+ */
+function disambiguateFindingIds(findings: HealFinding[], preimages: Map<HealFinding, string>): void {
+  const groups = new Map<string, HealFinding[]>();
+  for (const finding of findings) {
+    const list = groups.get(finding.findingId) ?? [];
+    list.push(finding);
+    groups.set(finding.findingId, list);
+  }
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    for (const finding of group) {
+      finding.findingId = findingIdFor(
+        finding.file,
+        finding.project,
+        finding.titlePath,
+        preimages.get(finding) ?? '',
+      );
+    }
+  }
 }
 
 function errorTexts(attempt: Attempt): string[] {

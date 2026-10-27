@@ -6,7 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { classifyCauses } from './causes/index.js';
 import type { CauseFinding } from './causes/types.js';
+import { collectHealProposals } from './heal/client.js';
 import { buildHealFindings, mergeProjectFacts, readReportProjectFacts, renderHealFindings } from './heal/findings.js';
+import type { HealFinding } from './heal/findings.js';
+import { healPatchName, patchIsExternal, proposalDiff } from './heal/patch.js';
 import type { ParseResult, RerunMode, TestRecord } from './model.js';
 import { detectFormat } from './parsers/detect.js';
 import { parseJunit } from './parsers/junit.js';
@@ -17,6 +20,7 @@ import { writeReportPair } from './report/pair.js';
 import { executePlan, guardPipe, isStoppedRun } from './rerun/run.js';
 import { formatCap, planReruns } from './rerun/plan.js';
 import { renderTriageMarkdown } from './report/markdown.js';
+import type { HealProposal } from './report/schema.js';
 import { renderTriageHtml, writeTriageHtml } from './report/html.js';
 import { buildTriageReport, renderTriageJson } from './report/json.js';
 
@@ -30,7 +34,8 @@ import { buildTriageReport, renderTriageJson } from './report/json.js';
  *                     [--test-timeout <ms>] [--root <dir>] [--out <file>]
  *   qa-core-flaky triage <report...> [--out-dir <dir>] [--json] [--html]
  *                     [--html-no-redact] [--heal-findings <file>]
- *                     [--fail-on findings|never] [--timestamp] [--root <dir>]
+ *                     [--fail-on findings|never] [--heal-findings <file>]
+ *                     [--heal] [--timestamp] [--root <dir>]
  *   qa-core-flaky rerun --from <report.json> [--times 5] [--retries <n>]
  *                     [--modes repeat,isolated] [--config <playwright.config>]
  *                     [--only <id>] [--max-tests 20] [--commit <sha>]
@@ -74,8 +79,13 @@ Options:
   --json                      causes: print a JSON array. triage: also print JSON
   --fail-on <findings|never>  triage: exit 2 when there are entries (default findings)
   --heal-findings <file>      triage: also write a heal findings file for qa-core-heal.
-                              This does not run heal. A likely real bug or an
-                              environment issue is handoff none.
+                              This does not run heal by itself. A likely real bug
+                              or an environment issue is handoff none.
+                              The path cannot be triage.json in --out-dir.
+  --heal                      triage: ask qa-core-heal for a dry run and merge
+                              each result into healProposal. This never passes
+                              --apply, --yes, or --no-verify. A missing heal
+                              leaves the proposal unavailable.
   --timestamp                 triage: include generatedAt. Output then changes every run
   --test-timeout <ms>         Test timeout for the near-timeout rule
   --root <dir>                JUnit: project root used to make paths relative.
@@ -109,6 +119,7 @@ type FlagValues = {
   json?: boolean;
   'fail-on'?: string;
   'heal-findings'?: string;
+  heal?: boolean;
   timestamp?: boolean;
   'test-timeout'?: string;
   redact?: boolean;
@@ -167,6 +178,7 @@ function run(args: readonly string[]): void | Promise<void> {
         json: { type: 'boolean' },
         'fail-on': { type: 'string' },
         'heal-findings': { type: 'string' },
+        heal: { type: 'boolean' },
         timestamp: { type: 'boolean' },
         'test-timeout': { type: 'string' },
         redact: { type: 'boolean' },
@@ -200,11 +212,13 @@ function run(args: readonly string[]): void | Promise<void> {
   if (values['heal-findings'] !== undefined && command !== 'triage') {
     fail('--heal-findings is only valid for triage');
   }
+  if (values.heal === true && command !== 'triage') {
+    fail('--heal is only valid for triage');
+  }
   if (command === 'rerun') return runRerun(rest, values);
   if (command === 'triage') {
     assertNoRerunFlags(values);
-    runTriage(rest, values);
-    return;
+    return runTriage(rest, values);
   }
   const [reportPath, ...extra] = rest;
   if (reportPath === undefined || extra.length > 0) {
@@ -249,7 +263,7 @@ function run(args: readonly string[]): void | Promise<void> {
   writeOutput(values.out, body);
 }
 
-function runTriage(reportPaths: readonly string[], values: FlagValues): void {
+async function runTriage(reportPaths: readonly string[], values: FlagValues): Promise<void> {
   if (reportPaths.length === 0) fail('Usage: qa-core-flaky triage <report...> [--out-dir <dir>]');
   if (values.out !== undefined) fail('--out is not used by triage. Use --out-dir.');
   assertHtmlFlags(values);
@@ -278,24 +292,45 @@ function runTriage(reportPaths: readonly string[], values: FlagValues): void {
 
   const timestamp = values.timestamp === true ? new Date().toISOString() : undefined;
   const testTimeoutMs = readTimeout(values['test-timeout']);
+  assertFindingsNotTriage(values['heal-findings'], values['out-dir']);
+  const wantFindings = values['heal-findings'] !== undefined || values.heal === true;
+  const recordIndex = new Map<string, HealFinding>();
+  const findingsDocument = wantFindings
+    ? buildHealFindings(records, {
+        reports: loadedReports.map((loaded) => loaded.reportPath),
+        version: readVersion(),
+        project: mergeProjectFacts(loadedReports.map((loaded) => readReportProjectFacts(loaded.text))),
+        testTimeoutMs,
+        timestamp,
+        recordIndex,
+      })
+    : undefined;
+  const findings = findingsDocument ? renderHealFindings(findingsDocument) : undefined;
+  let healProposals: Map<string, HealProposal> | undefined;
+  if (values.heal === true && findingsDocument && findings) {
+    try {
+      const session = await collectHealProposals({
+        document: findingsDocument,
+        recordIndex,
+        findingsText: findings,
+        findingsPath: values['heal-findings'],
+      });
+      healProposals = session.proposals;
+      if (session.notice) process.stderr.write(`${session.notice}\n`);
+    } catch (error) {
+      if (error instanceof ExitRequest) throw error;
+      const detail = error instanceof Error ? error.message : 'Could not run qa-core-heal';
+      fail(redactHomeText(oneLine(detail)));
+    }
+  }
   const report = buildTriageReport(records, {
     testTimeoutMs,
     timestamp,
+    healProposals,
   });
-  const findingsPath = values['heal-findings'];
-  const findings =
-    findingsPath === undefined
-      ? undefined
-      : renderHealFindings(
-          buildHealFindings(records, {
-            reports: loadedReports.map((loaded) => loaded.reportPath),
-            version: readVersion(),
-            project: mergeProjectFacts(loadedReports.map((loaded) => readReportProjectFacts(loaded.text))),
-            testTimeoutMs,
-            timestamp,
-          }),
-        );
-  publishTriage(values, report, renderTriageJson(report), renderTriageMarkdown(report), findings);
+  publishTriage(values, report, renderTriageJson(report), renderTriageMarkdown(report, {
+    externalPatches: values['out-dir'] !== undefined,
+  }), findings);
 }
 
 async function runRerun(extra: readonly string[], values: FlagValues): Promise<void> {
@@ -387,6 +422,7 @@ function publishTriage(
     writeHealFindingsFile(findingsPath, findings);
   }
   if (values['out-dir'] !== undefined) {
+    writeHealPatches(values['out-dir'], report);
     writeTriagePair(values['out-dir'], json, markdown);
     if (values.html === true) {
       try {
@@ -409,6 +445,31 @@ function publishTriage(
   const failOn = readFailOn(values['fail-on']);
   const code = failOn === 'never' || report.entries.length === 0 ? 0 : 2;
   if (code !== 0) process.exitCode = code;
+}
+
+function assertFindingsNotTriage(findingsPath: string | undefined, outDir: string | undefined): void {
+  if (findingsPath === undefined || outDir === undefined) return;
+  const findings = path.resolve(findingsPath);
+  const triage = path.resolve(outDir, 'triage.json');
+  if (findings === triage) fail('--heal-findings cannot be the same file as triage.json in --out-dir.');
+}
+
+function writeHealPatches(dir: string, report: ReturnType<typeof buildTriageReport>): void {
+  for (const entry of report.entries) {
+    const proposal = entry.healProposal;
+    if (!proposal) continue;
+    const diff = proposalDiff(proposal.changes);
+    if (!patchIsExternal(diff)) continue;
+    const relative = healPatchName(entry.id);
+    try {
+      const dest = path.join(path.resolve(dir), relative);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, `${diff}\n`);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'unknown error';
+      fail(redactHomeText(`Cannot write ${relative}: ${oneLine(detail)}`));
+    }
+  }
 }
 
 function writeHealFindingsFile(filePath: string, body: string): void {

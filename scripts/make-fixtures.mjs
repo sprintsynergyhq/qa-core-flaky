@@ -23,6 +23,12 @@
  *     including the indented line under them, because the count and its
  *     spacing change from run to run
  *
+ * After the Playwright reports are written, the script also regenerates
+ * fixtures/reports/golden/heal-findings-saucedemo.json and
+ * fixtures/reports/golden/heal-findings-saucedemo-junit.json by running
+ * triage --heal-findings on the recorded SauceDemo reports. That step
+ * uses dist/cli.js and builds it first when the file is missing.
+ *
  * Run this from the repository root. It needs the Playwright browser
  * installed locally. Tests and CI do not run it.
  */
@@ -63,6 +69,30 @@ fs.writeFileSync(jsonReportPath, `${JSON.stringify(sanitized, null, 2)}\n`);
 
 const xml = sanitizeJunit(fs.readFileSync(junitReportPath, 'utf8'), prefixes);
 fs.writeFileSync(junitReportPath, xml.endsWith('\n') ? xml : `${xml}\n`);
+
+writeHealGoldens();
+
+function writeHealGoldens() {
+  const cli = path.join(repoRoot, 'dist/cli.js');
+  if (!fs.existsSync(cli)) {
+    const built = spawnSync(process.execPath, [path.join(repoRoot, 'node_modules/typescript/bin/tsc'), '-p', 'tsconfig.build.json'], {
+      cwd: repoRoot,
+      stdio: 'inherit',
+    });
+    if (built.status !== 0) process.exit(built.status === null ? 1 : built.status);
+  }
+  const jobs = [
+    ['demo/saucedemo/reports/recorded-seed-443.json', 'fixtures/reports/golden/heal-findings-saucedemo.json'],
+    ['demo/saucedemo/reports/recorded-seed-443.junit.xml', 'fixtures/reports/golden/heal-findings-saucedemo-junit.json'],
+  ];
+  for (const [report, out] of jobs) {
+    const result = spawnSync(process.execPath, [cli, 'triage', report, '--heal-findings', out, '--fail-on', 'never'], {
+      cwd: repoRoot,
+      stdio: 'inherit',
+    });
+    if (result.status !== 0) process.exit(result.status === null ? 1 : result.status);
+  }
+}
 
 function sanitizeJunit(xml, prefixes) {
   let out = sanitizeString(xml, prefixes);

@@ -30,11 +30,25 @@ export { buildTriageReport, renderTriageJson } from './report/json.js';
 export {
   buildHealFindings,
   findingIdFor,
+  findingPreimage,
   mergeProjectFacts,
   readReportProjectFacts,
   renderHealFindings,
 } from './heal/findings.js';
 export type { BuildHealFindingsOptions, HealFinding, HealFindingsDocument, HealProjectFacts } from './heal/findings.js';
+export { collectHealProposals, readFindingsContract } from './heal/client.js';
+export { healPatchName, PATCH_INLINE_LINE_LIMIT, patchIsExternal, proposalDiff } from './heal/patch.js';
+export {
+  COMPAT_LABEL,
+  CONTRACT_LABEL,
+  errorProposal,
+  proposalFromCompatRow,
+  proposalFromContractRow,
+  skippedProposal,
+  unavailableProposal,
+  UNAVAILABLE_LINE,
+} from './heal/proposal.js';
+export { assertHealArgsAllowed, FORBIDDEN_HEAL_ARGS, healCommand, runHealCommand } from './heal/run.js';
 export { decideHandoff } from './heal/handoff.js';
 export type { HandoffDecision, HandoffGate, HandoffInput, HandoffMode } from './heal/handoff.js';
 export { FINDING_REDACTION_RULES, redactFindingText } from './heal/redact.js';
@@ -78,6 +92,11 @@ export {
 } from './rerun/run.js';
 export type { CommandRunner, ReleaseState } from './rerun/run.js';
 export type {
+  HealChange,
+  HealProposal,
+  HealProposalStatus,
+  HealStrategy,
+  HealVerification,
   TriageAttempts,
   TriageEntry,
   TriageHistory,

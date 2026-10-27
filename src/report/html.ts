@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { healPatchName, patchIsExternal, proposalDiff } from '../heal/patch.js';
 import { redactHomeText } from '../report-path.js';
 import { VERDICT_ORDER } from '../verdict.js';
 import { REPORT_SCRIPT, REPORT_STYLE } from './html-template.js';
@@ -358,12 +359,41 @@ function renderDetail(entry: TriageEntry, counts: CheckedCounts): string {
   if (reruns) parts.push(reruns);
   if (entry.observation) parts.push(`<p>${escapeHtml(entry.observation)}</p>`);
   if (entry.note) parts.push(`<h3>Note</h3><p>${escapeHtml(entry.note)}</p>`);
+  const proposal = renderProposal(entry);
+  if (proposal) parts.push(proposal);
   const sameCode = entry.attempts.sameCommit ? 'yes' : 'no';
   parts.push(
     `<h3>Attempts</h3><p>Total ${counts.total}, failed ${counts.failed}, passed ${counts.passed}. Same code for a pass and a fail: ${sameCode}.</p>`,
   );
   if (counts.runsSeen > 1) parts.push(`<p>Seen In ${counts.runsSeen} Runs</p>`);
   parts.push(`<p>Review Status: ${escapeHtml(entry.review.status)}.</p>`);
+  return parts.join('');
+}
+
+function renderProposal(entry: TriageEntry): string {
+  const proposal = entry.healProposal;
+  if (!proposal) return '';
+  const parts = [`<h3>${escapeHtml(proposal.label)}</h3>`];
+  parts.push(`<p data-heal-status="${escapeHtml(proposal.status)}">Status: ${escapeHtml(proposal.status)}.</p>`);
+  if (proposal.explanation) parts.push(`<p>${escapeHtml(proposal.explanation)}</p>`);
+  if (proposal.refusal) {
+    parts.push(
+      `<p data-heal-refusal="${escapeHtml(proposal.refusal.code)}">Refusal: ${escapeHtml(proposal.refusal.code)}. ${escapeHtml(proposal.refusal.message)}</p>`,
+    );
+  }
+  if (proposal.verification?.baselineReproduced === false) {
+    parts.push('<p>Failure did not reproduce before the fix, so the passing re-run is weak evidence.</p>');
+  }
+  const diff = proposalDiff(proposal.changes);
+  if (diff.length > 0) {
+    if (patchIsExternal(diff)) {
+      const href = healPatchName(entry.id);
+      parts.push(`<p>Patch file: <a href="${escapeHtml(href)}">${escapeHtml(href)}</a></p>`);
+    } else {
+      parts.push(`<h3>Diff</h3><pre>${escapeHtml(diff)}</pre>`);
+    }
+  }
+  if (proposal.applyCommand) parts.push(`<p>Apply by hand: <code>${escapeHtml(proposal.applyCommand)}</code></p>`);
   return parts.join('');
 }
 

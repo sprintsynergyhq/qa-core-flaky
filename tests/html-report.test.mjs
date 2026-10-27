@@ -226,6 +226,47 @@ test('kit sized reports stay under 300 KB at 200 entries and use a strict policy
   assert.equal(html.includes('\u2014') || html.includes('\u2013'), false);
 });
 
+test('a long heal diff on a 200 entry page is a link and stays under 300 KB', () => {
+  const kit = JSON.parse(fs.readFileSync(kitJson, 'utf8'));
+  const copies = Array.from({ length: 200 }, (_, index) => {
+    const source = structuredClone(kit.entries[index % kit.entries.length]);
+    source.id = `${source.id} #${index}`;
+    return source;
+  });
+  const long = Array.from({ length: 40 }, (_, index) => `patched line ${index}`).join('\n');
+  copies[0].healProposal = {
+    contractVersion: 1,
+    tool: 'qa-core-heal',
+    toolVersion: '0.4.0',
+    mode: 'dry-run',
+    status: 'proposed',
+    strategy: 'locator-heal',
+    fixRuleId: 'HEAL-SEL-LOCATOR',
+    reviewLevel: 'review-carefully',
+    label: 'Proposal from qa-core-heal (dry run, not applied)',
+    changes: [{ file: 'tests/broken.spec.ts', startLine: 4, endLine: 4, before: long, after: 'page.locator("#ok")' }],
+    explanation: 'One confident candidate.',
+    refusal: null,
+    verification: {
+      performed: true,
+      method: 'shadow-rerun',
+      runs: 1,
+      passed: 1,
+      failed: 0,
+      baselineReproduced: true,
+      outcome: 'passed',
+    },
+    ai: { used: false, label: null, promptSha256: null },
+    applyCommand: null,
+  };
+  const html = renderTriageHtml(report(copies), { version: '0.0.1' });
+  const bytes = Buffer.byteLength(html);
+  assert.equal(bytes < 300 * 1024, true, `html is ${bytes} bytes`);
+  assert.equal(html.includes('patched line 39'), false);
+  assert.match(html, /heal-patches\/[0-9a-f]{12}\.diff/);
+  assert.match(html, /Needs Review/);
+});
+
 test('the committed example has no machine paths or PR numbers', () => {
   const html = fs.readFileSync(kitHtml, 'utf8');
   for (const needle of ['/workspace', '/tmp/', '/home/', '/Users/', 'C:\\Users']) {

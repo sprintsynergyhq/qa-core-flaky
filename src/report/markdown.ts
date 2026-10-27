@@ -1,9 +1,15 @@
+import { healPatchName, patchIsExternal, proposalDiff } from '../heal/patch.js';
 import type { TriageEntry, TriageReport } from './schema.js';
 
 const FLAKY_LINE = 'A flaky test can still point to a real app defect. Check the app behavior too.';
 
+export type MarkdownRenderOptions = {
+  /** When true, a long diff is a patch path instead of the diff text. */
+  externalPatches?: boolean;
+};
+
 /** Markdown triage report. The same report always renders the same text. */
-export function renderTriageMarkdown(report: TriageReport): string {
+export function renderTriageMarkdown(report: TriageReport, options: MarkdownRenderOptions = {}): string {
   const lines: string[] = ['# Triage Report', '', '## Summary', '', '| Test | Verdict | Cause | Confidence |', '| --- | --- | --- | --- |'];
   for (const entry of report.entries) {
     const cause = entry.causes[0]?.cause ?? 'none';
@@ -14,12 +20,12 @@ export function renderTriageMarkdown(report: TriageReport): string {
   }
   lines.push('');
   for (const entry of report.entries) {
-    lines.push(...renderEntry(entry), '');
+    lines.push(...renderEntry(entry, options.externalPatches === true), '');
   }
   return `${lines.join('\n').replace(/\n$/, '')}\n`;
 }
 
-function renderEntry(entry: TriageEntry): string[] {
+function renderEntry(entry: TriageEntry, externalPatches: boolean): string[] {
   const lines = [
     `## ${cell(entry.id)}`,
     '',
@@ -60,7 +66,33 @@ function renderEntry(entry: TriageEntry): string[] {
   if (entry.note) {
     lines.push('', '### Note', '', entry.note);
   }
+  lines.push(...renderProposal(entry, externalPatches));
   lines.push('', `Review status: ${entry.review.status}.`);
+  return lines;
+}
+
+function renderProposal(entry: TriageEntry, externalPatches: boolean): string[] {
+  const proposal = entry.healProposal;
+  if (!proposal) return [];
+  const lines = ['', `### ${cell(proposal.label)}`, '', `Status: ${proposal.status}.`];
+  if (proposal.explanation) lines.push('', escapeHtml(proposal.explanation));
+  if (proposal.refusal) {
+    lines.push('', `Refusal: ${escapeHtml(proposal.refusal.code)}. ${escapeHtml(proposal.refusal.message)}`);
+  }
+  if (proposal.verification?.baselineReproduced === false) {
+    lines.push('', 'Failure did not reproduce before the fix, so the passing re-run is weak evidence.');
+  }
+  const diff = proposalDiff(proposal.changes);
+  if (diff.length > 0) {
+    if (externalPatches && patchIsExternal(diff)) {
+      lines.push('', `Patch file: ${healPatchName(entry.id)}`);
+    } else {
+      lines.push('', '```');
+      for (const line of diff.split('\n')) lines.push(escapeHtml(line));
+      lines.push('```');
+    }
+  }
+  if (proposal.applyCommand) lines.push('', `Apply by hand: \`${proposal.applyCommand.replaceAll('`', "'")}\``);
   return lines;
 }
 

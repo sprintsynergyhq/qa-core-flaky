@@ -78,6 +78,60 @@ export type TriageReview = {
   decision: null;
 };
 
+/** One line range copied from a heal result. */
+export type HealChange = {
+  file: string;
+  startLine: number;
+  endLine: number;
+  before: string;
+  after: string;
+};
+
+export type HealProposalStatus =
+  | 'proposed'
+  | 'applied'
+  | 'refused'
+  | 'not-locator'
+  | 'nothing-to-heal'
+  | 'error'
+  | 'unavailable'
+  | 'skipped-by-gate';
+
+export type HealStrategy = 'locator-heal' | 'rule-suggestion' | 'ai-suggestion' | 'none';
+
+export type HealVerification = {
+  performed: boolean;
+  method: 'shadow-rerun' | 'none';
+  runs: number;
+  passed: number;
+  failed: number;
+  baselineReproduced: boolean | null;
+  outcome: 'passed' | 'failed' | 'not-run';
+};
+
+/**
+ * A dry-run proposal merged from qa-core-heal.
+ * `null` means this command did not ask heal.
+ * The shape matches `schemas/heal-proposal.v1.schema.json`.
+ */
+export type HealProposal = {
+  contractVersion: 1;
+  tool: 'qa-core-heal';
+  toolVersion: string;
+  mode: 'dry-run' | 'apply';
+  status: HealProposalStatus;
+  strategy: HealStrategy;
+  fixRuleId: string | null;
+  reviewLevel: 'standard' | 'review-carefully';
+  label: string;
+  changes: HealChange[];
+  explanation: string;
+  refusal: { code: string; message: string } | null;
+  verification: HealVerification | null;
+  ai: { used: boolean; label: string | null; promptSha256: string | null } | null;
+  applyCommand: string | null;
+};
+
 /** One non-passing test in a triage report. */
 export type TriageEntry = {
   /** Stable test id from the normalized record. */
@@ -103,8 +157,11 @@ export type TriageEntry = {
   history: TriageHistory;
   /** Fix text for the primary rule id. It never says to only raise a timeout. */
   suggestedFix: string;
-  /** Reserved for a later heal diff. Always null in this version. */
-  healProposal: null;
+  /**
+   * A dry-run proposal from qa-core-heal.
+   * Null when triage was not run with `--heal`.
+   */
+  healProposal: HealProposal | null;
   /** A sentence that contains `qa-core-flaky rerun --from <report> --only <id>`, plus `--config` when the report recorded one. */
   nextStep: string;
   /**

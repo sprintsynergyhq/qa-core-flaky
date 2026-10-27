@@ -19,6 +19,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npm run test:html
       - name: Check for em dashes
         run: |
           # grep exits 1 when it finds nothing. That is the passing case.

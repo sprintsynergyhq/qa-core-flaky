@@ -40,7 +40,7 @@ Passed and skipped tests are omitted. A test that was expected to fail, and did 
 | history.runsSeen | `number` | How many input records had this id. |
 | history.firstFailingCommit | `null` | Always null in this version. A later version can name the first failing commit. |
 | suggestedFix | `string` | The fix template for the primary cause rule. It does not say to only raise a timeout. |
-| healProposal | `null` | Always null in this version. A later version can attach a heal diff. The findings file is a separate document. See [heal-contract.md](heal-contract.md). |
+| healProposal | object or `null` | Null when triage is run without `--heal`. With `--heal`, a dry-run proposal from qa-core-heal. See [heal-contract.md](heal-contract.md). |
 | nextStep | `string` | A sentence that contains `qa-core-flaky rerun --from <report> --only <id>`. The id is the redacted id. The report path is redacted. When the report recorded a Playwright config, the sentence also contains `--config`. Paste the command from the folder where triage ran. That path is relative to that folder when the config file is inside it and the relative path has no username. It is the file name when the relative path would climb with `..` or contain a username. It is never `<home>`. The rerun looks up Playwright from the config file's folder and each parent folder, so a kit that holds `node_modules` can be triaged from its parent. When one run failed on every attempt and no rerun was merged, the sentence also says to triage several runs with the same `--commit` before relying on the verdict. That hint does not change the verdict. |
 | note | `string` or `null` | Set for an unexpected `test.fail()` pass, or when the failures have no error text. Otherwise null. |
 | llm | `null` | Always null in this version. |
@@ -59,6 +59,8 @@ The Markdown file starts with a summary table: test, verdict, cause, confidence.
 When more than one commit is present, the cause list, the evidence, and the suggested fix come from the commit that selected the verdict. The other commit is a separate signal, and each signal names its commit.
 
 The review line is `Review status: Needs Review.`
+
+When `healProposal` is set, the section also has the proposal label, the status, a refusal when heal returned one, and the diff. Diff text is escaped the same way as evidence. A diff longer than 12 lines is the relative path `heal-patches/<id>.diff` instead of the diff text. The JSON report keeps the changes. The HTML page uses the same rule and links that path.
 
 ## HTML
 

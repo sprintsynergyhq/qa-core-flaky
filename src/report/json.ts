@@ -5,13 +5,18 @@ import type { Attempt, RerunMode, TestRecord } from '../model.js';
 import { homeMarks, redactHomeText, runnableConfigPath } from '../report-path.js';
 import { shellCommand } from '../rerun/plan.js';
 import { collapseRunRecords, decideVerdict, VERDICT_ORDER } from '../verdict.js';
-import type { RerunCounts, TriageAttempts, TriageEntry, TriageReport } from './schema.js';
+import type { HealProposal, RerunCounts, TriageAttempts, TriageEntry, TriageReport } from './schema.js';
 
 export type BuildTriageOptions = {
   /** ISO time. Omit it and the report has no timestamp. */
   timestamp?: string;
   /** Forwarded to cause classification for the near-timeout rule. */
   testTimeoutMs?: number;
+  /**
+   * Proposals keyed by the raw record id.
+   * Omit the map and every entry keeps `healProposal` null.
+   */
+  healProposals?: ReadonlyMap<string, HealProposal>;
 };
 
 /**
@@ -30,7 +35,8 @@ export function buildTriageReport(records: readonly TestRecord[], options: Build
   const entries: TriageEntry[] = [];
   for (const group of byId.values()) {
     if (!group.some((record) => record.outcome === 'failed' || record.outcome === 'flaky')) continue;
-    entries.push(buildEntry(group, options.testTimeoutMs));
+    const recordId = group[0]?.id ?? '';
+    entries.push(buildEntry(group, options.testTimeoutMs, options.healProposals?.get(recordId) ?? null));
   }
 
   entries.sort((left, right) => {
@@ -55,7 +61,11 @@ export function renderTriageJson(report: TriageReport): string {
   return `${JSON.stringify(report, null, 2)}\n`;
 }
 
-function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefined): TriageEntry {
+function buildEntry(
+  group: readonly TestRecord[],
+  testTimeoutMs: number | undefined,
+  healProposal: HealProposal | null,
+): TriageEntry {
   const records = collapseRunRecords(group);
   const base = records[0];
   if (!base) {
@@ -116,7 +126,7 @@ function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefi
       firstFailingCommit: null,
     },
     suggestedFix: suggestFix(decision.ruleIds),
-    healProposal: null,
+    healProposal,
     nextStep: nextStepText(reportPath, id, configFile, singleRunAllFailed(records, attempts)),
     note: decision.note,
     llm: null,
