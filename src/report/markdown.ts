@@ -1,4 +1,5 @@
 import { healPatchName, patchIsExternal, proposalDiff } from '../heal/patch.js';
+import { splitRerunSentence } from '../rerun/plan.js';
 import type { TriageEntry, TriageReport } from './schema.js';
 
 const FLAKY_LINE = 'A flaky test can still point to a real app defect. Check the app behavior too.';
@@ -114,16 +115,14 @@ function formatReruns(reruns: TriageEntry['attempts']['reruns']): string | undef
  * backslashes inside it. The sentence before the command is still escaped.
  */
 function renderNextStep(nextStep: string): string {
-  const marker = 'qa-core-flaky rerun ';
-  const at = nextStep.indexOf(marker);
-  if (at === -1) return escapeHtml(nextStep);
-  const command = nextStep
-    .slice(at)
+  const parts = splitRerunSentence(nextStep);
+  if (parts.lead === nextStep && parts.command === nextStep) return escapeHtml(nextStep);
+  const command = parts.command
     .replaceAll('`', "'")
     .replaceAll('\r\n', '\\n')
     .replaceAll('\n', '\\n')
     .replaceAll('\r', '\\n');
-  return `${escapeHtml(nextStep.slice(0, at))}\`${command}\``;
+  return `${escapeHtml(parts.lead)}\`${command}\``;
 }
 
 /** A fence long enough that backticks inside the diff stay literal. */

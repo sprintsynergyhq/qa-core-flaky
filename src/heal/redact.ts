@@ -62,6 +62,12 @@ const STRIPE_PATTERN = /\bsk_(?:live|test)_[A-Za-z0-9]{8,}\b/g;
 const GITHUB_PATTERN = /\b(?:gh[pousr]_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{16,})\b/g;
 const AWS_KEY_PATTERN = /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g;
 const BASIC_AUTH_PATTERN = /\bAuthorization\s*:\s*Basic\s+\S+/gi;
+const COOKIE_PATTERN = /\b(Set-Cookie|Cookie)\s*:\s*\S[^\r\n]*/gi;
+const SLACK_PATTERN = /\bxoxb-[A-Za-z0-9-]{8,}/g;
+const NPM_TOKEN_PATTERN = /\bnpm_[A-Za-z0-9]{8,}\b/g;
+const GOOGLE_KEY_PATTERN = /\bAIza[0-9A-Za-z\-_]{20,}/g;
+const POSTGRES_USERINFO_PATTERN = /\b(postgres(?:ql)?:\/\/)[^/\s@]+@/gi;
+const TILDE_PATH_PATTERN = /(^|[\s"'`(=:[{,])(~\/[^\s<>"'`|)]*)/g;
 const ENCODED_ROOTS =
   'home|users|opt|root|workspace|private|tmp|var|etc|usr|mnt|github|agent|app|data|code|src|project|library|proc|run|dev|nix';
 const ENCODED_PATH_PATTERN = new RegExp(
@@ -70,6 +76,32 @@ const ENCODED_PATH_PATTERN = new RegExp(
 );
 const RELATIVE_QUERY_PATTERN =
   /(^|[\s"'`(=:[{,])((?:\.\.?\/|\/)[^?\s"'`<>#\\]*)[?][^\s"'`<>]*/g;
+
+/** Hide a user and password in a postgres URL. The host stays. */
+export function maskDatabaseUserinfo(value: string): string {
+  return value.replace(POSTGRES_USERINFO_PATTERN, '$1<token>@');
+}
+
+/**
+ * Hide bearer tokens, JWTs, basic auth, cookies, Stripe, GitHub, AWS,
+ * Slack, npm, and Google keys, assigned secrets, and `~/` paths.
+ * The same input returns the same text.
+ */
+export function maskTokenText(value: string): string {
+  const tokens = value
+    .replace(BEARER_PATTERN, 'Bearer <token>')
+    .replace(JWT_PATTERN, '<token>')
+    .replace(BASIC_AUTH_PATTERN, 'Authorization: Basic <token>')
+    .replace(COOKIE_PATTERN, '$1: <token>')
+    .replace(STRIPE_PATTERN, '<token>')
+    .replace(GITHUB_PATTERN, '<token>')
+    .replace(AWS_KEY_PATTERN, '<token>')
+    .replace(SLACK_PATTERN, '<token>')
+    .replace(NPM_TOKEN_PATTERN, '<token>')
+    .replace(GOOGLE_KEY_PATTERN, '<token>')
+    .replace(ASSIGNED_SECRET_PATTERN, '<token>');
+  return tokens.replace(TILDE_PATH_PATTERN, (_full, boundary: string, token: string) => `${boundary}${maskTildePath(token)}`);
+}
 
 /**
  * Hide home usernames, other absolute paths, URL queries, token-like
@@ -84,15 +116,9 @@ export function redactFindingText(value: string, marks?: HomeMarks): string {
   const urls = sanitizeUrls(value, marks);
   const files = redactFileUrls(urls);
   const queried = stripRelativeQueries(files);
-  const emails = queried.replace(EMAIL_PATTERN, '<email>');
-  const tokens = emails
-    .replace(BEARER_PATTERN, 'Bearer <token>')
-    .replace(JWT_PATTERN, '<token>')
-    .replace(BASIC_AUTH_PATTERN, 'Authorization: Basic <token>')
-    .replace(STRIPE_PATTERN, '<token>')
-    .replace(GITHUB_PATTERN, '<token>')
-    .replace(AWS_KEY_PATTERN, '<token>')
-    .replace(ASSIGNED_SECRET_PATTERN, '<token>');
+  const databases = maskDatabaseUserinfo(queried);
+  const emails = databases.replace(EMAIL_PATTERN, '<email>');
+  const tokens = maskTokenText(emails);
   const mounted = tokens.replace(MNT_HOME_PATTERN, (token) => maskPathToken(token));
   const homes = redactHomeText(mounted, marks);
   return stripHomeQueries(stripRelativeQueries(redactEncodedPaths(redactAbsolutePaths(homes))));
@@ -192,9 +218,20 @@ function isBoundary(value: string, index: number): boolean {
 }
 
 function maskPathToken(token: string): string {
-  const withoutQuery = token.split(/[?#]/)[0] ?? token;
-  const normalized = withoutQuery.replace(/\\/g, '/').replace(/\/+$/, '');
-  const base = normalized.split('/').filter((part) => part.length > 0).pop() ?? '';
+  const base = lastPathSegment(token);
   if (base === '' || base.includes(':') || base.startsWith('<')) return '<path>';
   return `<path>/${base}`;
+}
+
+/** A `~/...` path keeps the file name and hides the home folder. */
+function maskTildePath(token: string): string {
+  const base = lastPathSegment(token);
+  if (base === '' || base === '~' || base.includes(':') || base.startsWith('<')) return '<home>';
+  return `<home>/${base}`;
+}
+
+function lastPathSegment(token: string): string {
+  const withoutQuery = token.split(/[?#]/)[0] ?? token;
+  const normalized = withoutQuery.replace(/\\/g, '/').replace(/\/+$/, '').replace(/:\d+(?::\d+)?$/, '');
+  return normalized.split('/').filter((part) => part.length > 0).pop() ?? '';
 }

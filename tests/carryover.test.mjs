@@ -1031,14 +1031,20 @@ test('the printed config path runs from the folder where triage ran', { timeout:
   };
   const runIn = (cwd, args) =>
     spawnSync(process.execPath, [path.resolve(cli), ...args], { encoding: 'utf8', cwd });
+  const quote = (value) => `'${value.replaceAll("'", `'\\''`)}'`;
   const paste = (nextStep, cwd) => {
-    const marker = 'qa-core-flaky rerun ';
-    const at = nextStep.indexOf(marker);
+    const marker = 'run: ';
+    const at = nextStep.lastIndexOf(marker);
     assert.ok(at >= 0, nextStep);
-    const command = nextStep
-      .slice(at)
-      .replace(/^qa-core-flaky\b/, `${process.execPath} ${path.resolve(cli)}`);
-    return spawnSync('sh', ['-c', command], { encoding: 'utf8', cwd, timeout: 180000 });
+    const command = nextStep.slice(at + marker.length);
+    const rerunAt = command.indexOf(' rerun ');
+    assert.ok(rerunAt >= 0, command);
+    // A script path under a home directory is printed as `npx qa-core-flaky`.
+    // This package is not on npm, so the flags are run with the local cli.
+    assert.equal(command.includes('/home/'), false, command);
+    const tail = command.slice(rerunAt + 1);
+    const runnable = `${quote(process.execPath)} ${quote(path.resolve(cli))} ${tail}`;
+    return spawnSync('sh', ['-c', runnable], { encoding: 'utf8', cwd, timeout: 180000 });
   };
   const assertRan = (result, label) => {
     const output = `${result.stdout}\n${result.stderr}`;

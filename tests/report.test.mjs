@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   buildTriageReport,
+  commandForInvocation,
   classifyCauses,
   collapseRunRecords,
   decideVerdict,
@@ -64,6 +65,16 @@ function validateTriage(report) {
     }
   }
 }
+
+test('the rerun sentence uses the program that started triage', () => {
+  assert.equal(commandForInvocation('/workspace/dist/cli.js', '/workspace'), "node 'dist/cli.js'");
+  assert.equal(commandForInvocation('/tmp/kit/node_modules/.bin/qa-core-flaky', '/tmp/kit'), 'npx qa-core-flaky');
+  assert.equal(commandForInvocation(undefined, '/workspace'), 'npx qa-core-flaky');
+  const outside = commandForInvocation('/workspace/dist/cli.js', '/tmp/kit');
+  assert.match(outside, /^node '/);
+  assert.equal(outside.includes('qa-core-flaky'), false);
+  assert.equal(commandForInvocation('/home/alice/proj/dist/cli.js', '/tmp'), 'npx qa-core-flaky');
+});
 
 test('fix templates cover the cause rules and do not only say to raise a timeout', () => {
   const templates = fixTemplates();

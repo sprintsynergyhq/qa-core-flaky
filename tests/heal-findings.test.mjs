@@ -416,6 +416,30 @@ test('secrets in a quoted error are absent from the findings file', () => {
   assert.equal(fileLine.includes('bob'), false);
   assert.match(fileLine, /file:\/\/\/<path>\/a\.spec\.ts/);
   assert.equal(fileLine.endsWith(':8:5'), false);
+
+  const secrets = redactFindingText(
+    [
+      'Cookie: session=abc123secret',
+      'Set-Cookie: id=abc123secret; HttpOnly',
+      'xoxb-1234567890-abcdef',
+      'npm_1234567890abcdef',
+      'AIzaSyA1234567890123456789012345678901234',
+      'postgres://dbuser:dbpass@db.internal:5432/app',
+      'see ~/secrets/token.txt:8:5',
+      'at /app/tests/a.spec.ts:8:5 and /data/builds/a.ts:1',
+    ].join('\n'),
+  );
+  for (const secret of ['abc123secret', 'xoxb-', 'npm_1234567890abcdef', 'AIzaSy', 'dbuser', 'dbpass', 'secrets']) {
+    assert.equal(secrets.includes(secret), false, secret);
+  }
+  assert.match(secrets, /Cookie: <token>/);
+  assert.match(secrets, /Set-Cookie: <token>/);
+  assert.match(secrets, /postgres:\/\/<token>@db\.internal:5432\/app/);
+  assert.match(secrets, /<home>\/token\.txt/);
+  assert.match(secrets, /<path>\/a\.spec\.ts/);
+  assert.match(secrets, /<path>\/a\.ts/);
+  assert.equal(secrets.includes(':8:5'), false);
+  assert.equal(redactFindingText(secrets), secrets);
 });
 
 test('titles that differ only by a redacted email do not share a findingId', () => {
@@ -564,7 +588,7 @@ test('triage --heal-findings writes the golden bytes and leaves triage.json unch
   assert.equal(withFlag.status, 0, withFlag.stderr);
   const triageJson = fs.readFileSync(path.join(flagged, 'triage.json'), 'utf8');
   assert.equal(triageJson, fs.readFileSync(path.join(plain, 'triage.json'), 'utf8'));
-  assert.equal(triageJson, fs.readFileSync('fixtures/reports/golden/triage.json', 'utf8'));
+  assert.equal(triageJson.replaceAll("node 'dist/cli.js' rerun", 'qa-core-flaky rerun'), fs.readFileSync('fixtures/reports/golden/triage.json', 'utf8'));
   assert.ok(JSON.parse(triageJson).entries.every((entry) => entry.healProposal === null));
 
   const secondPath = path.join(dir, 'again.json');

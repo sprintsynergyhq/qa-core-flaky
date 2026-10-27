@@ -625,29 +625,52 @@ function defaultRunner(
   });
 }
 
-function signalTree(pid: number, signal: NodeJS.Signals, child?: ChildProcess): number[] {
-  // pid 1 and a negative broadcast are not this child. `kill(-1)` signals every process.
-  // Descendants are collected only for the child this run spawned. A caller-supplied
-  // pid may not be that child, and walking it would signal unrelated processes.
+/**
+ * Signal one spawned child, then every descendant.
+ * Descendants are collected before the signal. Each one is signaled, and so
+ * is its process group, so a grandchild that called setsid still stops.
+ * On macOS and Windows the proc walk is empty, and only this child's group
+ * is signaled, which is the same cleanup the rerun path uses there.
+ * pid 1 and a negative broadcast are not this child. `kill(-1)` signals every process.
+ * A caller-supplied pid may not be the spawned child, and walking it would
+ * signal unrelated processes.
+ */
+export function signalTree(pid: number, signal: NodeJS.Signals, child?: ChildProcess): number[] {
   if (!Number.isInteger(pid) || pid <= 1) return [];
   const tracked = child?.pid === pid ? descendantPids(pid) : [];
+  signalPid(pid, signal);
+  for (const extra of tracked) signalPid(extra, signal);
+  return tracked;
+}
+
+/** SIGKILL the child, its group, and descendants in other groups, then wait until they are gone. */
+export async function stopChildTree(child: ChildProcess): Promise<void> {
+  const pid = child.pid;
+  if (pid === undefined || pid <= 1) return;
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
+    return;
+  }
+  let tracked = signalTree(pid, 'SIGKILL', child);
+  const gone = await waitUntilGone(pid, SIGNAL_WAIT_MS, child, tracked);
+  if (!gone) {
+    tracked = [...new Set([...tracked, ...signalTree(pid, 'SIGKILL', child)])];
+    await waitUntilGone(pid, SIGNAL_WAIT_MS, child, tracked);
+  }
+}
+
+function signalPid(pid: number, signal: NodeJS.Signals): void {
+  if (!Number.isInteger(pid) || pid <= 1) return;
   try {
     process.kill(-pid, signal);
   } catch {
-    try {
-      process.kill(pid, signal);
-    } catch {
-      // The process is already gone.
-    }
+    // This pid is not a process group, or the group is already gone.
   }
-  for (const extra of tracked) {
-    try {
-      process.kill(extra, signal);
-    } catch {
-      // That process is already gone, or it is not ours.
-    }
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // The process is already gone.
   }
-  return tracked;
 }
 
 function descendantPids(root: number): number[] {

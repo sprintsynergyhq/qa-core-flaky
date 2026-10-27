@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
  * Stand-in for qa-core-heal. Tests point QA_CORE_HEAL_BIN at this file.
- * Capabilities JSON is fixtures/heal/heal-0.4.0-capabilities.json.
- * That is the 0.4.0 shape from the PR 10 review: contracts.findings and
- * contracts.results are arrays of version numbers. 0.4.0 was not released,
- * so this is not a registry tarball.
+ * Capabilities JSON is fixtures/heal/heal-0.4.0-capabilities.json, recorded
+ * on 2026-10-27 from qa-core-heal 0.4.0 (git 2bc0407) with
+ * `node dist/cli.js capabilities --json`. That build's features are
+ * findings, targetedRun, ruleSuggestions, and ai. It does not set
+ * features.runTimeout. FAKE_HEAL_CAPABILITIES can point at another file.
  * Compat JSON follows fixtures/heal/real-heal-0.3.4-dry-run.json, recorded
  * from qa-core-heal 0.3.4: verdicts[] and locators[].
  * It records every argument list. It exits 9 if passed --apply, --yes, or --no-verify.
@@ -12,6 +13,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,26 +31,41 @@ for (const arg of args) {
   }
 }
 
+let holding = false;
 if (mode === 'grandchild') {
+  // Same process group, and it keeps the stdout pipe open.
   spawn('sleep', ['25'], { stdio: 'inherit' });
-  setInterval(() => {}, 1000);
+  // Own process group, and it writes where TMPDIR points.
+  startDetachedLeak('26');
+  holding = true;
+} else if (mode === 'orphan' && args.includes('--findings')) {
+  startDetachedLeak('47');
+  holding = true;
 } else if (args[0] === 'capabilities') {
-  if (mode === 'compat') {
+  if (mode === 'compat' || mode === 'compat-hang') {
     process.stderr.write('unknown command capabilities\n');
     process.exit(1);
   }
-  const caps = fs.readFileSync(path.join(root, 'fixtures/heal/heal-0.4.0-capabilities.json'));
+  const capsPath = process.env.FAKE_HEAL_CAPABILITIES
+    ? path.resolve(process.env.FAKE_HEAL_CAPABILITIES)
+    : path.join(root, 'fixtures/heal/heal-0.4.0-capabilities.json');
+  const caps = fs.readFileSync(capsPath);
   process.stdout.write(caps);
   if (!caps.toString('utf8').endsWith('\n')) process.stdout.write('\n');
   process.exit(0);
 }
 
-if (args.includes('--version')) {
+if (!holding && args.includes('--version')) {
   process.stdout.write(mode === 'compat' ? '0.3.4\n' : '0.4.0\n');
   process.exit(0);
 }
 
-if (mode === 'timeout') {
+if (holding) {
+  // The detached child is unref'd, so this timer is what keeps the process up.
+  setInterval(() => {}, 1000);
+} else if (mode === 'compat-hang') {
+  setInterval(() => {}, 1000);
+} else if (mode === 'timeout') {
   setInterval(() => {}, 1000);
 } else if (mode === 'error') {
   process.stderr.write('heal failed\n');
@@ -250,6 +267,20 @@ function writeCompatResults() {
     })}\n`,
   );
   process.exit(0);
+}
+
+/** A detached child in its own process group, plus a folder under os.tmpdir(). */
+function startDetachedLeak(seconds) {
+  const child = spawn('sleep', [seconds], { detached: true, stdio: 'ignore' });
+  child.unref();
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-heal-out-'));
+  fs.writeFileSync(path.join(out, 'live'), `${child.pid ?? ''}\n`);
+  const note = process.env.FAKE_HEAL_TEMP_NOTE;
+  if (note) {
+    const findingsPath = args.includes('--findings') ? valueAfter('--findings') : '';
+    const flakyDir = findingsPath ? path.dirname(findingsPath) : '';
+    fs.writeFileSync(note, `${flakyDir}\n${out}\n${child.pid ?? ''}\n`);
+  }
 }
 
 function valueAfter(flag) {

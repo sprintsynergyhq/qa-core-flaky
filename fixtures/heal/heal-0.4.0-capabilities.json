@@ -1,4 +1,6 @@
 {
+  "schema": "qa-core.heal-capabilities",
+  "schemaVersion": 1,
   "tool": {
     "name": "qa-core-heal",
     "version": "0.4.0"
@@ -11,5 +13,11 @@
       1
     ]
   },
-  "playwrightVersion": "1.60.0"
+  "playwrightVersion": "1.60.0",
+  "features": {
+    "findings": true,
+    "targetedRun": true,
+    "ruleSuggestions": false,
+    "ai": false
+  }
 }

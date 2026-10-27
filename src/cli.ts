@@ -6,11 +6,15 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { classifyCauses } from './causes/index.js';
 import type { CauseFinding } from './causes/types.js';
-import { collectHealProposals, specRootsFromReport } from './heal/client.js';
-import { buildHealFindings, mergeProjectFacts, readReportProjectFacts, renderHealFindings } from './heal/findings.js';
+import { collectHealProposals, healSpecPath, specRootsFromReport } from './heal/client.js';
+import { buildHealFindings, findingIdFor, mergeProjectFacts, readReportProjectFacts, renderHealFindings } from './heal/findings.js';
+import type { HealFindingsDocument } from './heal/findings.js';
 import type { HealFinding } from './heal/findings.js';
-import { HEAL_PATCH_DIR, HEAL_PATCH_MARKER, healPatchName, ownedPatchNames, patchMarkerText, proposalPatchBody } from './heal/patch.js';
+import { findingsPathIsTriageOutput } from './heal/findings-guard.js';
+import { healPatchName, proposalPatchBody } from './heal/patch.js';
+import { PatchWriteError, writeHealPatchFiles } from './heal/patch-write.js';
 import type { ParseResult, RerunMode, TestRecord } from './model.js';
+import { makeTestId } from './id.js';
 import { detectFormat } from './parsers/detect.js';
 import { parseJunit } from './parsers/junit.js';
 import { parsePlaywrightJson } from './parsers/playwright-json.js';
@@ -18,7 +22,7 @@ import { homeMarks, redactHomeText, runnableConfigPath } from './report-path.js'
 import { redactParseResult } from './redact.js';
 import { writeReportPair } from './report/pair.js';
 import { executePlan, guardPipe, isStoppedRun } from './rerun/run.js';
-import { formatCap, planReruns } from './rerun/plan.js';
+import { commandForInvocation, formatCap, planReruns } from './rerun/plan.js';
 import { renderTriageMarkdown } from './report/markdown.js';
 import type { HealProposal } from './report/schema.js';
 import { renderTriageHtml, writeTriageHtml } from './report/html.js';
@@ -295,6 +299,7 @@ async function runTriage(reportPaths: readonly string[], values: FlagValues): Pr
   assertFindingsNotTriage(values['heal-findings'], values['out-dir']);
   const wantFindings = values['heal-findings'] !== undefined || values.heal === true;
   const recordIndex = new Map<string, HealFinding>();
+  const specRoots = loadedReports.flatMap((loaded) => specRootsFromReport(loaded.text));
   const findingsDocument = wantFindings
     ? buildHealFindings(records, {
         reports: loadedReports.map((loaded) => loaded.reportPath),
@@ -305,6 +310,7 @@ async function runTriage(reportPaths: readonly string[], values: FlagValues): Pr
         recordIndex,
       })
     : undefined;
+  if (findingsDocument) rewriteHealSpecPaths(findingsDocument, specRoots, process.cwd());
   const findings = findingsDocument ? renderHealFindings(findingsDocument) : undefined;
   let healProposals: Map<string, HealProposal> | undefined;
   if (values.heal === true && findingsDocument && findings) {
@@ -314,7 +320,7 @@ async function runTriage(reportPaths: readonly string[], values: FlagValues): Pr
         recordIndex,
         findingsText: findings,
         findingsPath: values['heal-findings'],
-        specRoots: loadedReports.flatMap((loaded) => specRootsFromReport(loaded.text)),
+        specRoots,
       });
       healProposals = session.proposals;
       if (session.notice) process.stderr.write(`${session.notice}\n`);
@@ -324,14 +330,17 @@ async function runTriage(reportPaths: readonly string[], values: FlagValues): Pr
       fail(redactHomeText(oneLine(detail)));
     }
   }
-  const report = buildTriageReport(records, {
-    testTimeoutMs,
-    timestamp,
-    healProposals,
-  });
-  publishTriage(values, report, renderTriageJson(report), renderTriageMarkdown(report, {
-    externalPatches: values['out-dir'] !== undefined,
-  }), findings);
+  const built = reportsFor(records, values, { testTimeoutMs, timestamp, healProposals });
+  publishTriage(
+    values,
+    built.report,
+    built.htmlReport,
+    renderTriageJson(built.report),
+    renderTriageMarkdown(built.report, {
+      externalPatches: values['out-dir'] !== undefined,
+    }),
+    findings,
+  );
 }
 
 async function runRerun(extra: readonly string[], values: FlagValues): Promise<void> {
@@ -394,11 +403,11 @@ async function runRerun(extra: readonly string[], values: FlagValues): Promise<v
       source: { ...record.source, configFile },
     }));
   }
-  const report = buildTriageReport(merged, {
+  const built = reportsFor(merged, values, {
     testTimeoutMs: readTimeout(values['test-timeout']),
     timestamp: values.timestamp === true ? new Date().toISOString() : undefined,
   });
-  publishTriage(values, report, renderTriageJson(report), renderTriageMarkdown(report));
+  publishTriage(values, built.report, built.htmlReport, renderTriageJson(built.report), renderTriageMarkdown(built.report));
 }
 
 function assertHtmlFlags(values: FlagValues): void {
@@ -410,9 +419,50 @@ function assertHtmlFlags(values: FlagValues): void {
   }
 }
 
+function reportsFor(
+  records: readonly TestRecord[],
+  values: FlagValues,
+  options: {
+    testTimeoutMs?: number;
+    timestamp?: string;
+    healProposals?: Map<string, HealProposal>;
+  },
+): { report: ReturnType<typeof buildTriageReport>; htmlReport: ReturnType<typeof buildTriageReport> } {
+  const shared = {
+    testTimeoutMs: options.testTimeoutMs,
+    timestamp: options.timestamp,
+    healProposals: options.healProposals,
+    rerunProgram: commandForInvocation(process.argv[1], process.cwd()),
+  };
+  const report = buildTriageReport(records, { ...shared, redact: true });
+  const htmlReport =
+    values['html-no-redact'] === true ? buildTriageReport(records, { ...shared, redact: false }) : report;
+  return { report, htmlReport };
+}
+
+/**
+ * The findings file stores the spec path heal can open from this folder.
+ * That is the same path `triage --heal` sends. The id is the hash of that
+ * stored path, the project, and the title path.
+ */
+function rewriteHealSpecPaths(document: HealFindingsDocument, roots: readonly string[], cwd: string): void {
+  for (const finding of document.findings) {
+    const file = healSpecPath(finding.file, roots, cwd);
+    const errorFile = finding.errorLocation ? healSpecPath(finding.errorLocation.file, roots, cwd) : undefined;
+    const sameFile = file === finding.file;
+    const sameError = errorFile === undefined || errorFile === finding.errorLocation?.file;
+    if (sameFile && sameError) continue;
+    finding.file = file;
+    if (finding.errorLocation && errorFile !== undefined) finding.errorLocation.file = errorFile;
+    finding.testId = makeTestId(finding.file, finding.project, finding.titlePath);
+    finding.findingId = findingIdFor(finding.file, finding.project, finding.titlePath);
+  }
+}
+
 function publishTriage(
   values: FlagValues,
   report: ReturnType<typeof buildTriageReport>,
+  htmlReport: ReturnType<typeof buildTriageReport>,
   json: string,
   markdown: string,
   findings?: string,
@@ -422,14 +472,22 @@ function publishTriage(
     if (findings === undefined) fail('The findings file was not built.');
     writeHealFindingsFile(findingsPath, findings);
   }
+  let patchError: string | undefined;
   if (values['out-dir'] !== undefined) {
-    if (values.heal === true) writeHealPatches(values['out-dir'], report);
+    if (values.heal === true) {
+      try {
+        writeHealPatches(values['out-dir'], report);
+      } catch (error) {
+        if (!(error instanceof PatchWriteError)) throw error;
+        patchError = error.message;
+      }
+    }
     writeTriagePair(values['out-dir'], json, markdown);
     if (values.html === true) {
       try {
         writeTriageHtml(
           values['out-dir'],
-          renderTriageHtml(report, {
+          renderTriageHtml(htmlReport, {
             redact: values['html-no-redact'] !== true,
             version: readVersion(),
           }),
@@ -443,6 +501,7 @@ function publishTriage(
   if (values['out-dir'] === undefined || values.json === true) {
     process.stdout.write(values.json === true ? json : markdown);
   }
+  if (patchError) fail(patchError);
   const failOn = readFailOn(values['fail-on']);
   const code = failOn === 'never' || report.entries.length === 0 ? 0 : 2;
   if (code !== 0) process.exitCode = code;
@@ -450,59 +509,8 @@ function publishTriage(
 
 function assertFindingsNotTriage(findingsPath: string | undefined, outDir: string | undefined): void {
   if (findingsPath === undefined || outDir === undefined) return;
-  const findings = canonicalPath(findingsPath);
-  const blocked = ['triage.json', 'triage.md', 'triage.html'];
-  for (const name of blocked) {
-    if (findings === canonicalPath(path.join(outDir, name))) {
-      fail('--heal-findings cannot be the same file as triage.json, triage.md, or triage.html in --out-dir.');
-    }
-  }
-}
-
-function canonicalPath(file: string): string {
-  const resolved = path.resolve(file);
-  try {
-    return fs.realpathSync(resolved);
-  } catch {
-    try {
-      const link = fs.readlinkSync(resolved);
-      return path.resolve(path.dirname(resolved), link);
-    } catch {
-      return resolved;
-    }
-  }
-}
-
-type PatchPathState = 'missing' | 'regular' | 'reject';
-
-/** lstat only. A symlink, a hard link, or any other non-regular file is rejected before it is opened. */
-function inspectPatchPath(file: string): PatchPathState {
-  try {
-    const stat = fs.lstatSync(file);
-    if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink > 1) return 'reject';
-    return 'regular';
-  } catch (error) {
-    const code = error instanceof Error && 'code' in error ? String((error as NodeJS.ErrnoException).code) : '';
-    if (code === 'ENOENT') return 'missing';
-    const detail = error instanceof Error ? error.message : 'unknown error';
-    fail(redactHomeText(`Cannot write heal patches: ${oneLine(detail)}`));
-  }
-}
-
-function rejectPatch(label: string): never {
-  fail(`Cannot write heal patches: ${label} is not a regular file.`);
-}
-
-/** Replace a regular file without following a link. `wx` fails if the name appears again. */
-function writeExclusive(dest: string, label: string, body: string): void {
-  const state = inspectPatchPath(dest);
-  if (state === 'reject') rejectPatch(label);
-  if (state === 'regular') fs.unlinkSync(dest);
-  try {
-    fs.writeFileSync(dest, body, { flag: 'wx' });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : 'unknown error';
-    fail(redactHomeText(`Cannot write heal patches: ${label}: ${oneLine(detail)}`));
+  if (findingsPathIsTriageOutput(findingsPath, outDir)) {
+    fail('--heal-findings cannot be the same file as triage.json, triage.md, or triage.html in --out-dir.');
   }
 }
 
@@ -515,49 +523,16 @@ function writeHealPatches(dir: string, report: ReturnType<typeof buildTriageRepo
     if (body.length === 0) continue;
     const relative = healPatchName(entry.id);
     const name = path.posix.basename(relative);
-    if (!/^[0-9a-f]{12}\.diff$/.test(name)) fail(`Cannot write heal patches: ${name} is not a patch name.`);
     planned.push({ name, body });
   }
-  const folder = path.join(path.resolve(dir), HEAL_PATCH_DIR);
-  let info: fs.Stats | undefined;
   try {
-    info = fs.lstatSync(folder);
-  } catch {
-    info = undefined;
-  }
-  if (info && (info.isSymbolicLink() || !info.isDirectory())) {
-    if (planned.length === 0) return;
-    fail(`Cannot write heal patches: ${HEAL_PATCH_DIR} exists and is not a directory.`);
-  }
-  const marker = path.join(folder, HEAL_PATCH_MARKER);
-  const markerState = info?.isDirectory() ? inspectPatchPath(marker) : 'missing';
-  if (markerState === 'reject') rejectPatch(HEAL_PATCH_MARKER);
-  const owned = markerState === 'regular' ? ownedPatchNames(fs.readFileSync(marker, 'utf8')) : [];
-  const removals: string[] = [];
-  for (const name of owned) {
-    const dest = path.join(folder, name);
-    const state = inspectPatchPath(dest);
-    if (state === 'reject') rejectPatch(name);
-    if (state === 'regular') removals.push(dest);
-  }
-  for (const item of planned) {
-    const state = info?.isDirectory() ? inspectPatchPath(path.join(folder, item.name)) : 'missing';
-    if (state === 'reject') rejectPatch(item.name);
-  }
-  if (planned.length === 0) {
-    for (const dest of removals) fs.unlinkSync(dest);
-    if (markerState === 'regular') fs.unlinkSync(marker);
-    return;
-  }
-  try {
-    fs.mkdirSync(folder, { recursive: true });
+    writeHealPatchFiles({ dir, planned });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : 'unknown error';
-    fail(redactHomeText(`Cannot write heal patches: ${oneLine(detail)}`));
+    if (error instanceof PatchWriteError) {
+      throw new PatchWriteError(redactHomeText(oneLine(error.message)));
+    }
+    throw error;
   }
-  for (const dest of removals) fs.unlinkSync(dest);
-  for (const item of planned) writeExclusive(path.join(folder, item.name), item.name, item.body);
-  writeExclusive(marker, HEAL_PATCH_MARKER, patchMarkerText(planned.map((item) => item.name)));
 }
 
 function writeHealFindingsFile(filePath: string, body: string): void {

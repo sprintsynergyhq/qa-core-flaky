@@ -22,6 +22,10 @@ function keepTemp(t, prefix) {
   return dir;
 }
 
+function asLibraryReport(text) {
+  return text.replaceAll("node 'dist/cli.js' rerun", 'qa-core-flaky rerun');
+}
+
 function oneLine(text) {
   const trimmed = text.replace(/\n$/, '');
   return !trimmed.includes('\n');
@@ -107,6 +111,84 @@ test('html redaction hides home usernames unless opted out', () => {
   assert.match(shown, /\/home\/alice\/proj/);
   assert.match(shown, /\/Users\/bob\/x/);
   assert.equal(source.entries[0].evidence[0].includes('alice'), true);
+});
+
+test('html hides tokens when home names stay visible', () => {
+  const source = report([
+    entry({
+      evidence: ['open /home/alice/proj/a.spec.ts Cookie: session=abcdef xoxb-1234567890abcdef'],
+    }),
+  ]);
+  const shown = renderTriageHtml(source, { version: '0.0.1', redact: false });
+  assert.match(shown, /\/home\/alice\/proj/);
+  assert.equal(shown.includes('session=abcdef'), false);
+  assert.equal(shown.includes('xoxb-'), false);
+  assert.match(shown, /Cookie: &lt;token&gt;/);
+  assert.match(shown, /&lt;token&gt;/);
+});
+
+test('triage --html-no-redact shows home names and still hides tokens', (t) => {
+  const dir = keepTemp(t, 'html-names-');
+  const reportPath = path.join(dir, 'one.json');
+  fs.writeFileSync(
+    reportPath,
+    JSON.stringify({
+      config: { rootDir: '.', version: '1.60.0', projects: [{ name: 'chromium', testDir: '.' }] },
+      suites: [
+        {
+          title: 'a.spec.ts',
+          file: 'a.spec.ts',
+          specs: [
+            {
+              title: 'names',
+              file: 'a.spec.ts',
+              line: 1,
+              tests: [
+                {
+                  expectedStatus: 'passed',
+                  status: 'unexpected',
+                  results: [
+                    {
+                      retry: 0,
+                      status: 'failed',
+                      duration: 1,
+                      errors: [
+                        {
+                          message:
+                            'open /home/alice/proj/a.spec.ts Cookie: session=abcdef xoxb-1234567890abcdef',
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const hiddenDir = path.join(dir, 'hidden');
+  const hidden = run(['triage', reportPath, '--out-dir', hiddenDir, '--html', '--fail-on', 'never']);
+  assert.equal(hidden.status, 0, hidden.stderr);
+  const hiddenHtml = fs.readFileSync(path.join(hiddenDir, 'triage.html'), 'utf8');
+  const hiddenJson = fs.readFileSync(path.join(hiddenDir, 'triage.json'), 'utf8');
+  assert.equal(hiddenHtml.includes('alice'), false);
+  assert.equal(hiddenJson.includes('alice'), false);
+  assert.equal(hiddenHtml.includes('xoxb-'), false);
+  assert.equal(hiddenJson.includes('xoxb-'), false);
+  assert.equal(hiddenHtml.includes('session=abcdef'), false);
+  const shownDir = path.join(dir, 'shown');
+  const shown = run(['triage', reportPath, '--out-dir', shownDir, '--html', '--html-no-redact', '--fail-on', 'never']);
+  assert.equal(shown.status, 0, shown.stderr);
+  const shownHtml = fs.readFileSync(path.join(shownDir, 'triage.html'), 'utf8');
+  const shownJson = fs.readFileSync(path.join(shownDir, 'triage.json'), 'utf8');
+  assert.match(shownHtml, /\/home\/alice\/proj/);
+  assert.equal(shownJson.includes('alice'), false);
+  assert.equal(shownHtml.includes('xoxb-'), false);
+  assert.equal(shownHtml.includes('session=abcdef'), false);
+  assert.match(shownHtml, /node 'dist\/cli\.js' rerun /);
+  assert.match(shownJson, /node 'dist\/cli\.js' rerun /);
 });
 
 test('html shows only counts from the report, including an empty report', () => {
@@ -291,6 +373,15 @@ test('200 entries of every heal status stay under 300 KB', () => {
       assert.equal(html.includes('baseline-not-reproduced'), false, status);
       assert.equal(html.includes('patched line 39'), false, status);
       assert.equal(html.includes('style="width:'), false, status);
+      assert.match(html, new RegExp(`>${status}(?: |<)`), status);
+      assert.equal(html.split('Proposal from qa-core-heal (dry run, not applied)').length - 1, 1, status);
+      if (status === 'proposed' || status === 'applied') {
+        assert.equal(html.includes('tests/broken'), true, status);
+      }
+      if (status === 'refused' || status === 'not-locator') {
+        assert.equal(html.includes('A person'), true, status);
+        assert.equal(html.includes('choose the element.'), false, status);
+      }
     }
   }
 });
@@ -365,8 +456,8 @@ test('triage --html writes triage.html and leaves json and markdown unchanged', 
   const dir = keepTemp(t, 'triage-html-');
   const result = run(['triage', fixture, '--out-dir', dir, '--html', '--fail-on', 'never']);
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.readFileSync(path.join(dir, 'triage.json'), 'utf8'), fs.readFileSync('fixtures/reports/golden/triage.json', 'utf8'));
-  assert.equal(fs.readFileSync(path.join(dir, 'triage.md'), 'utf8'), fs.readFileSync('fixtures/reports/golden/triage.md', 'utf8'));
+  assert.equal(asLibraryReport(fs.readFileSync(path.join(dir, 'triage.json'), 'utf8')), fs.readFileSync('fixtures/reports/golden/triage.json', 'utf8'));
+  assert.equal(asLibraryReport(fs.readFileSync(path.join(dir, 'triage.md'), 'utf8')), fs.readFileSync('fixtures/reports/golden/triage.md', 'utf8'));
   const html = fs.readFileSync(path.join(dir, 'triage.html'), 'utf8');
   assert.match(html, /always fails/);
   assert.match(html, /Content-Security-Policy/);
@@ -404,7 +495,7 @@ test('a directory named triage.html does not remove the json pair', (t) => {
   assert.equal(result.status, 1, result.stderr);
   assert.equal(oneLine(result.stderr), true);
   assert.equal(fs.statSync(path.join(dir, 'triage.html')).isDirectory(), true);
-  assert.equal(fs.readFileSync(path.join(dir, 'triage.json'), 'utf8'), fs.readFileSync('fixtures/reports/golden/triage.json', 'utf8'));
+  assert.equal(asLibraryReport(fs.readFileSync(path.join(dir, 'triage.json'), 'utf8')), fs.readFileSync('fixtures/reports/golden/triage.json', 'utf8'));
   assert.equal(fs.existsSync(path.join(dir, 'triage.md')), true);
 });
 
