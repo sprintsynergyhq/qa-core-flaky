@@ -473,6 +473,39 @@ function canonicalPath(file: string): string {
   }
 }
 
+type PatchPathState = 'missing' | 'regular' | 'reject';
+
+/** lstat only. A symlink, a hard link, or any other non-regular file is rejected before it is opened. */
+function inspectPatchPath(file: string): PatchPathState {
+  try {
+    const stat = fs.lstatSync(file);
+    if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink > 1) return 'reject';
+    return 'regular';
+  } catch (error) {
+    const code = error instanceof Error && 'code' in error ? String((error as NodeJS.ErrnoException).code) : '';
+    if (code === 'ENOENT') return 'missing';
+    const detail = error instanceof Error ? error.message : 'unknown error';
+    fail(redactHomeText(`Cannot write heal patches: ${oneLine(detail)}`));
+  }
+}
+
+function rejectPatch(label: string): never {
+  fail(`Cannot write heal patches: ${label} is not a regular file.`);
+}
+
+/** Replace a regular file without following a link. `wx` fails if the name appears again. */
+function writeExclusive(dest: string, label: string, body: string): void {
+  const state = inspectPatchPath(dest);
+  if (state === 'reject') rejectPatch(label);
+  if (state === 'regular') fs.unlinkSync(dest);
+  try {
+    fs.writeFileSync(dest, body, { flag: 'wx' });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'unknown error';
+    fail(redactHomeText(`Cannot write heal patches: ${label}: ${oneLine(detail)}`));
+  }
+}
+
 function writeHealPatches(dir: string, report: ReturnType<typeof buildTriageReport>): void {
   const planned: { name: string; body: string }[] = [];
   for (const entry of report.entries) {
@@ -482,6 +515,7 @@ function writeHealPatches(dir: string, report: ReturnType<typeof buildTriageRepo
     if (body.length === 0) continue;
     const relative = healPatchName(entry.id);
     const name = path.posix.basename(relative);
+    if (!/^[0-9a-f]{12}\.diff$/.test(name)) fail(`Cannot write heal patches: ${name} is not a patch name.`);
     planned.push({ name, body });
   }
   const folder = path.join(path.resolve(dir), HEAL_PATCH_DIR);
@@ -496,33 +530,34 @@ function writeHealPatches(dir: string, report: ReturnType<typeof buildTriageRepo
     fail(`Cannot write heal patches: ${HEAL_PATCH_DIR} exists and is not a directory.`);
   }
   const marker = path.join(folder, HEAL_PATCH_MARKER);
-  if (info?.isDirectory()) {
-    let owned: string[] = [];
-    try {
-      owned = ownedPatchNames(fs.readFileSync(marker, 'utf8'));
-    } catch {
-      owned = [];
-    }
-    for (const name of owned) {
-      try {
-        fs.unlinkSync(path.join(folder, name));
-      } catch {
-        // The diff from the earlier run is already gone.
-      }
-    }
+  const markerState = info?.isDirectory() ? inspectPatchPath(marker) : 'missing';
+  if (markerState === 'reject') rejectPatch(HEAL_PATCH_MARKER);
+  const owned = markerState === 'regular' ? ownedPatchNames(fs.readFileSync(marker, 'utf8')) : [];
+  const removals: string[] = [];
+  for (const name of owned) {
+    const dest = path.join(folder, name);
+    const state = inspectPatchPath(dest);
+    if (state === 'reject') rejectPatch(name);
+    if (state === 'regular') removals.push(dest);
+  }
+  for (const item of planned) {
+    const state = info?.isDirectory() ? inspectPatchPath(path.join(folder, item.name)) : 'missing';
+    if (state === 'reject') rejectPatch(item.name);
   }
   if (planned.length === 0) {
-    if (info?.isDirectory()) fs.rmSync(marker, { force: true });
+    for (const dest of removals) fs.unlinkSync(dest);
+    if (markerState === 'regular') fs.unlinkSync(marker);
     return;
   }
   try {
     fs.mkdirSync(folder, { recursive: true });
-    for (const item of planned) fs.writeFileSync(path.join(folder, item.name), item.body);
-    fs.writeFileSync(marker, patchMarkerText(planned.map((item) => item.name)));
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'unknown error';
-    fail(redactHomeText(`Cannot write ${HEAL_PATCH_DIR}: ${oneLine(detail)}`));
+    fail(redactHomeText(`Cannot write heal patches: ${oneLine(detail)}`));
   }
+  for (const dest of removals) fs.unlinkSync(dest);
+  for (const item of planned) writeExclusive(path.join(folder, item.name), item.name, item.body);
+  writeExclusive(marker, HEAL_PATCH_MARKER, patchMarkerText(planned.map((item) => item.name)));
 }
 
 function writeHealFindingsFile(filePath: string, body: string): void {

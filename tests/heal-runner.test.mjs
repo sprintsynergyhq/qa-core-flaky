@@ -28,11 +28,12 @@ function keepTemp(t, prefix) {
   return dir;
 }
 
-function run(args, env = {}, cwd) {
+function run(args, env = {}, cwd, timeout) {
   return spawnSync(process.execPath, [cli, ...args], {
     encoding: 'utf8',
     env: { ...process.env, ...env },
     cwd,
+    timeout,
   });
 }
 
@@ -253,6 +254,116 @@ test('a user folder named h is not deleted', (t) => {
   assert.equal(blocked.status, 1);
   assert.match(blocked.stderr, /not a directory/);
   assert.equal(fs.readFileSync(path.join(fileDir, 'h'), 'utf8'), 'keep-file\n');
+});
+
+function seededPatches(t) {
+  const dir = keepTemp(t, 'heal-link-');
+  const folder = path.join(dir, 'h');
+  const first = run(['triage', recorded, '--out-dir', dir, '--heal', '--fail-on', 'never'], healEnv(dir, 'contract'));
+  assert.equal(first.status, 0, first.stderr);
+  const marker = path.join(folder, '.qa-core-flaky');
+  const owned = fs
+    .readFileSync(marker, 'utf8')
+    .split('\n')
+    .filter((name) => /^[0-9a-f]{12}\.diff$/.test(name));
+  assert.ok(owned.length > 0);
+  return { dir, folder, marker, owned };
+}
+
+test('a symlink marker is not followed', (t) => {
+  const dir = keepTemp(t, 'heal-symlink-marker-');
+  const folder = path.join(dir, 'h');
+  fs.mkdirSync(folder);
+  const outside = path.join(dir, 'outside-marker');
+  const body = 'qa-core-flaky\n0123456789ab.diff\n';
+  fs.writeFileSync(outside, body);
+  const marker = path.join(folder, '.qa-core-flaky');
+  fs.symlinkSync(outside, marker);
+  fs.writeFileSync(path.join(folder, '0123456789ab.diff'), 'stay\n');
+  const result = run(['triage', recorded, '--out-dir', dir, '--heal', '--fail-on', 'never'], healEnv(dir, 'contract'));
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /not a regular file/);
+  assert.equal(fs.readFileSync(outside, 'utf8'), body);
+  assert.equal(fs.lstatSync(marker).isSymbolicLink(), true);
+  assert.equal(fs.readFileSync(path.join(folder, '0123456789ab.diff'), 'utf8'), 'stay\n');
+});
+
+test('a symlink diff is not followed', (t) => {
+  const { dir, folder, owned } = seededPatches(t);
+  const outside = path.join(dir, 'outside.diff');
+  fs.writeFileSync(outside, 'KEEP-DIFF\n');
+  const diff = path.join(folder, owned[0]);
+  fs.unlinkSync(diff);
+  fs.symlinkSync(outside, diff);
+  const result = run(['triage', recorded, '--out-dir', dir, '--heal', '--fail-on', 'never'], healEnv(dir, 'contract'));
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /not a regular file/);
+  assert.equal(fs.readFileSync(outside, 'utf8'), 'KEEP-DIFF\n');
+  assert.equal(fs.lstatSync(diff).isSymbolicLink(), true);
+  assert.equal(fs.readlinkSync(diff), outside);
+});
+
+test('a hard linked marker is not rewritten', (t) => {
+  const dir = keepTemp(t, 'heal-hard-marker-');
+  const folder = path.join(dir, 'h');
+  fs.mkdirSync(folder);
+  const outside = path.join(dir, 'outside-marker');
+  fs.writeFileSync(outside, 'KEEP-MARKER\n');
+  const marker = path.join(folder, '.qa-core-flaky');
+  fs.linkSync(outside, marker);
+  const result = run(['triage', recorded, '--out-dir', dir, '--heal', '--fail-on', 'never'], healEnv(dir, 'contract'));
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /not a regular file/);
+  assert.equal(fs.readFileSync(outside, 'utf8'), 'KEEP-MARKER\n');
+  assert.equal(fs.lstatSync(marker).nlink > 1, true);
+  assert.equal(fs.lstatSync(marker).ino, fs.lstatSync(outside).ino);
+});
+
+test('a hard linked diff is not rewritten', (t) => {
+  const { dir, folder, owned } = seededPatches(t);
+  const diff = path.join(folder, owned[0]);
+  const before = fs.readFileSync(diff);
+  const hard = path.join(dir, 'hard.diff');
+  fs.linkSync(diff, hard);
+  const result = run(['triage', recorded, '--out-dir', dir, '--heal', '--fail-on', 'never'], healEnv(dir, 'contract'));
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /not a regular file/);
+  assert.equal(fs.readFileSync(hard).equals(before), true);
+  assert.equal(fs.lstatSync(diff).nlink > 1, true);
+  assert.equal(fs.lstatSync(diff).ino, fs.lstatSync(hard).ino);
+});
+
+test('a fifo patch path is not opened', (t) => {
+  const markerDir = keepTemp(t, 'heal-fifo-marker-');
+  const markerFolder = path.join(markerDir, 'h');
+  fs.mkdirSync(markerFolder);
+  const marker = path.join(markerFolder, '.qa-core-flaky');
+  assert.equal(spawnSync('mkfifo', [marker]).status, 0);
+  const markerRun = run(
+    ['triage', recorded, '--out-dir', markerDir, '--heal', '--fail-on', 'never'],
+    healEnv(markerDir, 'contract'),
+    undefined,
+    8000,
+  );
+  assert.equal(markerRun.status, 1, markerRun.stderr);
+  assert.match(markerRun.stderr, /not a regular file/);
+  assert.equal(fs.lstatSync(marker).isFIFO(), true);
+
+  const { dir, folder, marker: seeded, owned } = seededPatches(t);
+  const diff = path.join(folder, owned[0]);
+  fs.unlinkSync(diff);
+  assert.equal(spawnSync('mkfifo', [diff]).status, 0);
+  const diffRun = run(
+    ['triage', recorded, '--out-dir', dir, '--heal', '--fail-on', 'never'],
+    healEnv(dir, 'contract'),
+    undefined,
+    8000,
+  );
+  assert.equal(diffRun.status, 1, diffRun.stderr);
+  assert.match(diffRun.stderr, /not a regular file/);
+  assert.equal(fs.lstatSync(diff).isFIFO(), true);
+  assert.equal(fs.lstatSync(seeded).isFile(), true);
+  assert.equal(fs.lstatSync(seeded).nlink, 1);
 });
 
 test('a refused result, an error, and a timeout stay in the proposal', (t) => {
