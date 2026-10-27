@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { classifyCauses } from './causes/index.js';
 import type { CauseFinding } from './causes/types.js';
+import { buildHealFindings, mergeProjectFacts, readReportProjectFacts, renderHealFindings } from './heal/findings.js';
 import type { ParseResult, RerunMode, TestRecord } from './model.js';
 import { detectFormat } from './parsers/detect.js';
 import { parseJunit } from './parsers/junit.js';
@@ -28,7 +29,8 @@ import { buildTriageReport, renderTriageJson } from './report/json.js';
  *   qa-core-flaky causes <report> [--format json|junit] [--json]
  *                     [--test-timeout <ms>] [--root <dir>] [--out <file>]
  *   qa-core-flaky triage <report...> [--out-dir <dir>] [--json] [--html]
- *                     [--html-no-redact] [--fail-on findings|never] [--timestamp] [--root <dir>]
+ *                     [--html-no-redact] [--heal-findings <file>]
+ *                     [--fail-on findings|never] [--timestamp] [--root <dir>]
  *   qa-core-flaky rerun --from <report.json> [--times 5] [--retries <n>]
  *                     [--modes repeat,isolated] [--config <playwright.config>]
  *                     [--only <id>] [--max-tests 20] [--commit <sha>]
@@ -71,6 +73,9 @@ Options:
                               usernames. Requires --html. Do not share that file.
   --json                      causes: print a JSON array. triage: also print JSON
   --fail-on <findings|never>  triage: exit 2 when there are entries (default findings)
+  --heal-findings <file>      triage: also write a heal findings file for qa-core-heal.
+                              This does not run heal. A likely real bug or an
+                              environment issue is handoff none.
   --timestamp                 triage: include generatedAt. Output then changes every run
   --test-timeout <ms>         Test timeout for the near-timeout rule
   --root <dir>                JUnit: project root used to make paths relative.
@@ -103,6 +108,7 @@ type FlagValues = {
   'out-dir'?: string;
   json?: boolean;
   'fail-on'?: string;
+  'heal-findings'?: string;
   timestamp?: boolean;
   'test-timeout'?: string;
   redact?: boolean;
@@ -160,6 +166,7 @@ function run(args: readonly string[]): void | Promise<void> {
         'out-dir': { type: 'string' },
         json: { type: 'boolean' },
         'fail-on': { type: 'string' },
+        'heal-findings': { type: 'string' },
         timestamp: { type: 'boolean' },
         'test-timeout': { type: 'string' },
         redact: { type: 'boolean' },
@@ -190,6 +197,9 @@ function run(args: readonly string[]): void | Promise<void> {
 
   const [command, ...rest] = positionals;
   if (command === undefined) fail('Usage: qa-core-flaky <parse|causes|triage|rerun> <report>');
+  if (values['heal-findings'] !== undefined && command !== 'triage') {
+    fail('--heal-findings is only valid for triage');
+  }
   if (command === 'rerun') return runRerun(rest, values);
   if (command === 'triage') {
     assertNoRerunFlags(values);
@@ -250,8 +260,9 @@ function runTriage(reportPaths: readonly string[], values: FlagValues): void {
     branch: values.branch,
     runId: values['run-id'],
   };
+  const loadedReports = loadUniqueReports(reportPaths);
   const records: TestRecord[] = [];
-  for (const loaded of loadUniqueReports(reportPaths)) {
+  for (const loaded of loadedReports) {
     try {
       const selected = format ?? detectFormat(loaded.text, loaded.reportPath);
       const result =
@@ -265,11 +276,26 @@ function runTriage(reportPaths: readonly string[], values: FlagValues): void {
     }
   }
 
+  const timestamp = values.timestamp === true ? new Date().toISOString() : undefined;
+  const testTimeoutMs = readTimeout(values['test-timeout']);
   const report = buildTriageReport(records, {
-    testTimeoutMs: readTimeout(values['test-timeout']),
-    timestamp: values.timestamp === true ? new Date().toISOString() : undefined,
+    testTimeoutMs,
+    timestamp,
   });
-  publishTriage(values, report, renderTriageJson(report), renderTriageMarkdown(report));
+  const findingsPath = values['heal-findings'];
+  const findings =
+    findingsPath === undefined
+      ? undefined
+      : renderHealFindings(
+          buildHealFindings(records, {
+            reports: loadedReports.map((loaded) => loaded.reportPath),
+            version: readVersion(),
+            project: mergeProjectFacts(loadedReports.map((loaded) => readReportProjectFacts(loaded.text))),
+            testTimeoutMs,
+            timestamp,
+          }),
+        );
+  publishTriage(values, report, renderTriageJson(report), renderTriageMarkdown(report), findings);
 }
 
 async function runRerun(extra: readonly string[], values: FlagValues): Promise<void> {
@@ -348,7 +374,18 @@ function assertHtmlFlags(values: FlagValues): void {
   }
 }
 
-function publishTriage(values: FlagValues, report: ReturnType<typeof buildTriageReport>, json: string, markdown: string): void {
+function publishTriage(
+  values: FlagValues,
+  report: ReturnType<typeof buildTriageReport>,
+  json: string,
+  markdown: string,
+  findings?: string,
+): void {
+  const findingsPath = values['heal-findings'];
+  if (findingsPath !== undefined) {
+    if (findings === undefined) fail('The findings file was not built.');
+    writeHealFindingsFile(findingsPath, findings);
+  }
   if (values['out-dir'] !== undefined) {
     writeTriagePair(values['out-dir'], json, markdown);
     if (values.html === true) {
@@ -372,6 +409,18 @@ function publishTriage(values: FlagValues, report: ReturnType<typeof buildTriage
   const failOn = readFailOn(values['fail-on']);
   const code = failOn === 'never' || report.entries.length === 0 ? 0 : 2;
   if (code !== 0) process.exitCode = code;
+}
+
+function writeHealFindingsFile(filePath: string, body: string): void {
+  if (filePath.trim() === '') fail('The findings path is empty.');
+  try {
+    const resolved = path.resolve(filePath);
+    fs.mkdirSync(path.dirname(resolved), { recursive: true });
+    fs.writeFileSync(resolved, body);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'unknown error';
+    fail(redactHomeText(`Cannot write ${filePath}: ${oneLine(detail)}`));
+  }
 }
 
 function assertNoRerunFlags(values: FlagValues): void {

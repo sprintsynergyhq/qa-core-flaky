@@ -1,0 +1,162 @@
+{
+  "schema": "qa-core.heal-findings",
+  "schemaVersion": 1,
+  "tool": {
+    "name": "qa-core-flaky",
+    "version": "0.0.1"
+  },
+  "project": {
+    "configPath": null,
+    "baseUrl": null,
+    "testIdAttribute": null,
+    "playwrightVersion": null
+  },
+  "source": {
+    "triageSchemaVersion": 1,
+    "reports": [
+      "demo/saucedemo/reports/recorded-seed-443.junit.xml"
+    ],
+    "commit": null
+  },
+  "redaction": {
+    "applied": true,
+    "rules": [
+      "home-user",
+      "absolute-path",
+      "url-query",
+      "token-like",
+      "email"
+    ]
+  },
+  "findings": [
+    {
+      "findingId": "c842129141c0",
+      "testId": "broken.spec.ts::chromium::typo locator never finds the backpack button",
+      "file": "broken.spec.ts",
+      "line": null,
+      "project": "chromium",
+      "titlePath": [
+        "typo locator never finds the backpack button"
+      ],
+      "verdict": "broken-test",
+      "verdictConfidence": "low",
+      "primaryRuleId": "SEL-NOTFOUND",
+      "causes": [
+        {
+          "cause": "selectors",
+          "ruleIds": [
+            "SEL-NOTFOUND",
+            "SEL-ZERO"
+          ],
+          "confidence": "medium",
+          "evidence": [
+            "    Error: element(s) not found"
+          ]
+        }
+      ],
+      "attempts": {
+        "total": 1,
+        "failed": 1,
+        "passed": 0,
+        "sameCommit": false
+      },
+      "errorSignature": "sha256:bb5a6d6ec1f7466e4f8a0c11008245cb4144439e1ab7bda92e28ea5a0fc3b7de",
+      "failingSelector": "#add-to-cart-sauce-labs-bakpack",
+      "errorLocation": null,
+      "handoff": {
+        "mode": "locator",
+        "reason": "Selector rule SEL-NOTFOUND can be handed to heal. The verdict is not a likely real bug or an environment issue, and there is no slow load signal.",
+        "gates": [
+          {
+            "name": "verdict-not-likely-real-bug",
+            "passed": true
+          },
+          {
+            "name": "verdict-not-environment-issue",
+            "passed": true
+          },
+          {
+            "name": "no-slow-load-signal",
+            "passed": true
+          },
+          {
+            "name": "rule-has-fix-strategy",
+            "passed": true
+          },
+          {
+            "name": "evidence-present",
+            "passed": true
+          }
+        ]
+      },
+      "review": {
+        "status": "Needs Review"
+      }
+    },
+    {
+      "findingId": "5414d07c3354",
+      "testId": "real-bug.spec.ts::chromium::problem user image src differs from the standard catalog",
+      "file": "real-bug.spec.ts",
+      "line": null,
+      "project": "chromium",
+      "titlePath": [
+        "problem user image src differs from the standard catalog"
+      ],
+      "verdict": "needs-more-runs",
+      "verdictConfidence": "low",
+      "primaryRuleId": "UNK-NONE",
+      "causes": [
+        {
+          "cause": "unknown",
+          "ruleIds": [
+            "UNK-NONE"
+          ],
+          "confidence": "low",
+          "evidence": [
+            "expect(received).toContain(expected) // indexOf",
+            "    Expected substring: \"sauce-backpack\"",
+            "    Received string:    \"/assets/sl-404-Cq1a9k9X.jpg\""
+          ]
+        }
+      ],
+      "attempts": {
+        "total": 1,
+        "failed": 1,
+        "passed": 0,
+        "sameCommit": false
+      },
+      "errorSignature": "sha256:533b897122b3582085ec52c069e34d73a8515cbb5f97dea403fabe2e1d9afb4d",
+      "failingSelector": null,
+      "errorLocation": null,
+      "handoff": {
+        "mode": "none",
+        "reason": "Rule UNK-NONE has no fix strategy. Heal must not change this test.",
+        "gates": [
+          {
+            "name": "verdict-not-likely-real-bug",
+            "passed": true
+          },
+          {
+            "name": "verdict-not-environment-issue",
+            "passed": true
+          },
+          {
+            "name": "no-slow-load-signal",
+            "passed": true
+          },
+          {
+            "name": "rule-has-fix-strategy",
+            "passed": false
+          },
+          {
+            "name": "evidence-present",
+            "passed": true
+          }
+        ]
+      },
+      "review": {
+        "status": "Needs Review"
+      }
+    }
+  ]
+}
