@@ -27,6 +27,18 @@ export { decideVerdict, VERDICT_ORDER } from './verdict.js';
 export type { Verdict } from './verdict.js';
 export { fixTemplates, suggestFix } from './fixes/templates.js';
 export { buildTriageReport, renderTriageJson } from './report/json.js';
+export {
+  buildHealFindings,
+  findingIdFor,
+  mergeProjectFacts,
+  readReportProjectFacts,
+  renderHealFindings,
+} from './heal/findings.js';
+export type { BuildHealFindingsOptions, HealFinding, HealFindingsDocument, HealProjectFacts } from './heal/findings.js';
+export { decideHandoff } from './heal/handoff.js';
+export type { HandoffDecision, HandoffGate, HandoffInput, HandoffMode } from './heal/handoff.js';
+export { FINDING_REDACTION_RULES, redactFindingText } from './heal/redact.js';
+export { quoteFailingSelector } from './heal/selector.js';
 export type { BuildTriageOptions } from './report/json.js';
 export { renderTriageMarkdown } from './report/markdown.js';
 export { renderTriageHtml, writeTriageHtml } from './report/html.js';
