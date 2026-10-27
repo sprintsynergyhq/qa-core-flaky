@@ -36,7 +36,7 @@ The rules did not name a cause. Compare the quoted expected and received values 
 
 ### Next Step
 
-Review the suggested fix. To see the test again, run: `qa-core-flaky rerun --from 'fixtures/reports/pw-1.60.0-outcomes.json' --only 'tests/outcomes.spec.ts::chromium::always fails' --config 'playwright.config.ts'`
+Review the suggested fix. Every attempt in this one run failed. Triage several runs with the same --commit before you rely on this verdict. To see the test again, run: `qa-core-flaky rerun --from 'fixtures/reports/pw-1.60.0-outcomes.json' --only 'tests/outcomes.spec.ts::chromium::always fails' --config 'playwright.config.ts'`
 
 Review status: Needs Review.
 
@@ -99,10 +99,10 @@ Total 3, failed 3, passed 0. Same code for a pass and a fail: no.
 
 ### Suggested Fix
 
-The locator never resolved. Check whether the element is missing or the locator is wrong. This is a candidate for qa-core-heal (PR 9).
+The locator never resolved. Check whether the element is missing or the locator is wrong. This is a candidate for qa-core-heal.
 
 ### Next Step
 
-Review the suggested fix. To see the test again, run: `qa-core-flaky rerun --from 'fixtures/reports/pw-1.60.0-outcomes.json' --only 'tests/outcomes.spec.ts::chromium::times out' --config 'playwright.config.ts'`
+Review the suggested fix. Every attempt in this one run failed. Triage several runs with the same --commit before you rely on this verdict. To see the test again, run: `qa-core-flaky rerun --from 'fixtures/reports/pw-1.60.0-outcomes.json' --only 'tests/outcomes.spec.ts::chromium::times out' --config 'playwright.config.ts'`
 
 Review status: Needs Review.

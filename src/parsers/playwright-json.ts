@@ -10,7 +10,7 @@ import type {
   TestRecord,
 } from '../model.js';
 import { stripLeadingBom } from './detect.js';
-import { normalizeSlashes, relativizeText, stripAnsi, toPortablePath } from '../report-path.js';
+import { normalizeSlashes, relativizeText, runnableConfigPath, stripAnsi, toPortablePath } from '../report-path.js';
 
 const ATTEMPT_STATUSES: readonly AttemptStatus[] = [
   'passed',
@@ -42,6 +42,7 @@ export function parsePlaywrightJson(
   text: string,
   reportPath: string,
   meta?: Partial<SourceInfo>,
+  cwd?: string,
 ): ParseResult {
   const data = parseJson(text, reportPath);
   const suites = data.suites;
@@ -53,7 +54,10 @@ export function parsePlaywrightJson(
   const warnings: string[] = [];
   const records: TestRecord[] = [];
   const rawFiles: string[] = [];
-  const source = buildSource(reportPath, meta, readGitCommit(data), readConfigFile(data));
+  // The config path is relative to the triage working directory. `rootDir`
+  // is the test directory when the config sets `testDir`, and a path
+  // relative to that directory climbs with `..`.
+  const source = buildSource(reportPath, meta, readGitCommit(data), readConfigFile(data, cwd), cwd);
 
   for (const suite of suites) {
     walkSuite(suite, [], undefined, undefined, rootDir, source, reportPath, records, rawFiles, warnings);
@@ -85,6 +89,7 @@ function buildSource(
   meta: Partial<SourceInfo> | undefined,
   gitCommit: string | undefined,
   configFile: string | undefined,
+  cwd: string | undefined,
 ): SourceInfo {
   const source: SourceInfo = {
     format: 'playwright-json',
@@ -95,19 +100,19 @@ function buildSource(
   if (commit) source.commitSha = commit;
   if (meta?.branch !== undefined) source.branch = meta.branch;
   if (meta?.createdAt !== undefined) source.createdAt = meta.createdAt;
-  if (meta?.configFile) source.configFile = meta.configFile;
-  else if (configFile) source.configFile = configFile;
+  const config = meta?.configFile ?? configFile;
+  if (config) source.configFile = runnableConfigPath(config, cwd);
   return source;
 }
 
-function readConfigFile(data: JsonObject): string | undefined {
+function readConfigFile(data: JsonObject, cwd: string | undefined): string | undefined {
   const config = data.config;
   if (!isObject(config)) return undefined;
   const file = config.configFile;
   if (typeof file !== 'string') return undefined;
   const trimmed = file.trim();
   if (trimmed === '' || trimmed === '.') return undefined;
-  return trimmed;
+  return runnableConfigPath(trimmed, cwd);
 }
 
 /** Playwright JSON stores the commit on `config.metadata.gitCommit`, or on the top-level metadata. */

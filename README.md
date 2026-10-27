@@ -33,7 +33,7 @@ The format is detected from the file contents. The root element must be `testsui
 
 `triage` writes `triage.json` and `triage.md` for each failed or flaky test. The JSON schema is [docs/report-schema.md](docs/report-schema.md). The verdict rows are [docs/verdicts.md](docs/verdicts.md). The default exit code is 2 when the report has at least one entry, and 0 when it has none. `--fail-on never` exits 0 after the files are written. A tool error exits 1. Do not point `--out-dir` at a directory under `/proc`. Creating a directory there can hang, which is a Node bug, and the command does not probe `/proc`.
 
-`rerun` runs the failing tests again with Playwright and merges the new attempts. The modes and the safety rules are in [docs/rerun.md](docs/rerun.md). Unit tests do not launch a browser.
+`rerun` runs the failing tests again with Playwright and merges the new attempts. `--retries` defaults to 0 so a retry cannot hide the first failure. `--root` is the JUnit project root. The modes and the safety rules are in [docs/rerun.md](docs/rerun.md). Unit tests do not launch a browser.
 
 ## Demo
 

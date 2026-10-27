@@ -34,6 +34,6 @@ The rules did not name a cause. Compare the quoted expected and received values 
 
 ### Next Step
 
-Review the suggested fix. To see the test again, run: `qa-core-flaky rerun --from 'fixtures/reports/junit-no-root-home.xml' --only 'missing.spec.js::chromium::reads the seed file'`
+Review the suggested fix. Every attempt in this one run failed. Triage several runs with the same --commit before you rely on this verdict. To see the test again, run: `qa-core-flaky rerun --from 'fixtures/reports/junit-no-root-home.xml' --only 'missing.spec.js::chromium::reads the seed file'`
 
 Review status: Needs Review.

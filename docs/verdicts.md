@@ -40,6 +40,8 @@ The high rows are broken test, environment issue, likely real bug, and flaky. Ne
 
 The verdict value `likely-real-bug` is a likely real bug. The report does not say confirmed.
 
+When the entry comes from one record, no attempt is a rerun, and every counted attempt failed, the next step adds one sentence: triage several runs with the same `--commit` before relying on the verdict. The verdict row does not change. A pass, a second record, or a rerun attempt leaves that sentence out.
+
 ## Examples
 
 ### Broken Test

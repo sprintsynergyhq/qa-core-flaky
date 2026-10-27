@@ -17,6 +17,7 @@ const RULE_ORDER = [
   'ENV-HTTP5XX',
   'ENV-BROWSER',
   'TIM-EXPECT-TIMEOUT',
+  'TIM-SLOW-LOAD',
   'TIM-TEST-TIMEOUT',
   'TIM-INTERCEPT',
   'TIM-NEAR-TIMEOUT',
@@ -36,6 +37,7 @@ const CAUSE_BY_RULE: Readonly<Record<string, Cause>> = {
   'ENV-HTTP5XX': 'environment',
   'ENV-BROWSER': 'environment',
   'TIM-EXPECT-TIMEOUT': 'timing',
+  'TIM-SLOW-LOAD': 'timing',
   'TIM-TEST-TIMEOUT': 'timing',
   'TIM-INTERCEPT': 'timing',
   'TIM-NEAR-TIMEOUT': 'timing',
@@ -95,19 +97,23 @@ export function classifyCauses(record: TestRecord, options: ClassifyOptions = {}
 
   const hits: Hit[] = [];
   const samples: { attemptIndex: number; key: string; receivedLine: string }[] = [];
+  // A passed attempt on this record is a retry, or another run of the same
+  // commit. Triage merges those attempts before classification.
+  const recovered = record.attempts.some((attempt) => attempt.status === 'passed');
 
   failed.forEach((attempt, attemptIndex) => {
     const errors = attempt.errors ?? [];
-    for (const error of errors) {
-      const texts = errorTexts(error).map((text) => filterCauseLines(text));
-      if (texts.every((text) => text.trim().length === 0)) continue;
-      collectErrorHits(hits, attemptIndex, texts);
+    const prepared = errors.map((error) => errorTexts(error).map((text) => filterCauseLines(text)));
+    const networkError = prepared.some((texts) => texts.some((text) => /net::ERR_[A-Z0-9_]+/.test(text)));
+    prepared.forEach((texts) => {
+      if (texts.every((text) => text.trim().length === 0)) return;
+      collectErrorHits(hits, attemptIndex, texts, recovered, networkError);
       for (const text of texts) {
         const sample = readReceived(text);
         if (sample) samples.push({ attemptIndex, key: sample.key, receivedLine: sample.receivedLine });
       }
-    }
-    if (isNearTimeout(attempt.durationMs, options.testTimeoutMs)) {
+    });
+    if (!networkError && isNearTimeout(attempt.durationMs, options.testTimeoutMs)) {
       hits.push({
         ruleId: 'TIM-NEAR-TIMEOUT',
         cause: 'timing',
@@ -172,12 +178,21 @@ function attemptHasText(attempt: Attempt): boolean {
   return (attempt.errors ?? []).some((error) => errorTexts(error).length > 0);
 }
 
-function collectErrorHits(hits: Hit[], attemptIndex: number, texts: readonly string[]): void {
+function collectErrorHits(
+  hits: Hit[],
+  attemptIndex: number,
+  texts: readonly string[],
+  recovered: boolean,
+  networkError: boolean,
+): void {
   const selectorEvidence = texts.some((text) => hasSelectorEvidence(text));
   for (const text of texts) {
     for (const match of selectorMatches(text)) pushHit(hits, attemptIndex, match);
     for (const match of environmentMatches(text, selectorEvidence)) pushHit(hits, attemptIndex, match);
-    for (const match of timingMatches(text, false)) pushHit(hits, attemptIndex, match);
+    // `net::ERR_*` is ENV-NET only. The call log on that error is not a timing finding.
+    if (!networkError) {
+      for (const match of timingMatches(text, false, recovered)) pushHit(hits, attemptIndex, match);
+    }
     const already = alreadyExistsMatch(text);
     if (already) pushHit(hits, attemptIndex, already);
   }
@@ -418,9 +433,10 @@ function findingsFromHits(hits: Hit[], failedCount: number): CauseFinding[] {
         for (const item of hit.evidence) pushEvidence(evidence, item);
       }
     }
+    const slowLoad = hits.some((hit) => hit.ruleId === 'TIM-SLOW-LOAD');
     findings.push({
       cause,
-      confidence: confidenceFor(ruleIds, causeHits, failedCount),
+      confidence: cause === 'selectors' && slowLoad ? 'low' : confidenceFor(ruleIds, causeHits, failedCount),
       evidence,
       ruleIds: [...ruleIds],
     });

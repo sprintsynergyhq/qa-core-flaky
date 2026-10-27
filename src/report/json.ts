@@ -2,7 +2,7 @@ import { classifyCauses } from '../causes/index.js';
 import type { Cause, CauseFinding } from '../causes/types.js';
 import { suggestFix } from '../fixes/templates.js';
 import type { Attempt, RerunMode, TestRecord } from '../model.js';
-import { homeMarks, redactHomeText } from '../report-path.js';
+import { homeMarks, redactHomeText, runnableConfigPath } from '../report-path.js';
 import { shellCommand } from '../rerun/plan.js';
 import { collapseRunRecords, decideVerdict, VERDICT_ORDER } from '../verdict.js';
 import type { RerunCounts, TriageAttempts, TriageEntry, TriageReport } from './schema.js';
@@ -87,7 +87,6 @@ function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefi
     base.file,
     ...rawEvidence,
     ...ordered.flatMap((finding) => finding.evidence),
-    ...(configFile ? [configFile] : []),
   ]);
   const redact = (value: string) => redactHomeText(value, marks);
   const evidence = rawEvidence.map((line) => redact(line));
@@ -118,7 +117,7 @@ function buildEntry(group: readonly TestRecord[], testTimeoutMs: number | undefi
     },
     suggestedFix: suggestFix(decision.ruleIds),
     healProposal: null,
-    nextStep: `Review the suggested fix. To see the test again, run: ${shellCommand(reportPath, id, configFile ? redact(configFile) : undefined)}`,
+    nextStep: nextStepText(reportPath, id, configFile, singleRunAllFailed(records, attempts)),
     note: decision.note,
     llm: null,
     review: {
@@ -187,6 +186,34 @@ function rerunObservation(attempts: readonly Attempt[]): string | undefined {
 
 function isFailStatus(attempt: Attempt): boolean {
   return attempt.status === 'failed' || attempt.status === 'timedOut' || attempt.status === 'interrupted';
+}
+
+const SINGLE_RUN_HINT =
+  'Every attempt in this one run failed. Triage several runs with the same --commit before you rely on this verdict. ';
+
+/**
+ * One record, no rerun attempts, and every counted attempt failed.
+ * A pass, a second report, or a rerun means the verdict already has more
+ * than this one run, so the hint stays off.
+ */
+function singleRunAllFailed(records: readonly TestRecord[], attempts: readonly Attempt[]): boolean {
+  if (records.length !== 1) return false;
+  if (attempts.some((attempt) => attempt.rerun !== undefined)) return false;
+  const counted = attempts.filter((attempt) => attempt.status !== 'unselectable');
+  const failed = counted.filter(isFailStatus).length;
+  const passed = counted.filter((attempt) => attempt.status === 'passed').length;
+  return passed === 0 && failed > 0;
+}
+
+function nextStepText(
+  reportPath: string,
+  id: string,
+  configFile: string | undefined,
+  hint: boolean,
+): string {
+  const configArg = configFile ? runnableConfigPath(configFile) : undefined;
+  const prefix = hint ? `Review the suggested fix. ${SINGLE_RUN_HINT}` : 'Review the suggested fix. ';
+  return `${prefix}To see the test again, run: ${shellCommand(reportPath, id, configArg)}`;
 }
 
 function orderCauses(findings: readonly CauseFinding[], cause: Cause | null): CauseFinding[] {

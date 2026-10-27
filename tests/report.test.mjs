@@ -76,6 +76,7 @@ test('fix templates cover the cause rules and do not only say to raise a timeout
     'ENV-HTTP5XX',
     'ENV-BROWSER',
     'TIM-EXPECT-TIMEOUT',
+    'TIM-SLOW-LOAD',
     'TIM-TEST-TIMEOUT',
     'TIM-INTERCEPT',
     'TIM-NEAR-TIMEOUT',

@@ -7,9 +7,9 @@ const TEMPLATES: Readonly<Record<string, string>> = {
   'SEL-STRICT':
     'Scope the locator to its row or container, or use a distinguishing attribute such as data-test.',
   'SEL-NOTFOUND':
-    'Check whether the app changed or the locator is wrong. This is a candidate for qa-core-heal (PR 9).',
+    'Check whether the app changed or the locator is wrong. This is a candidate for qa-core-heal.',
   'SEL-UNRESOLVED':
-    'The locator never resolved. Check whether the element is missing or the locator is wrong. This is a candidate for qa-core-heal (PR 9).',
+    'The locator never resolved. Check whether the element is missing or the locator is wrong. This is a candidate for qa-core-heal.',
   'SEL-ZERO':
     'The assertion saw zero elements. Scope the locator to the container that should hold the element, or confirm the element is rendered.',
   'ENV-NET': 'Check the network and the base URL. Keep retries only for infrastructure errors.',
@@ -19,6 +19,8 @@ const TEMPLATES: Readonly<Record<string, string>> = {
     'The browser failed to launch or the page closed. Check the browser install and whether the test closed the page early.',
   'TIM-EXPECT-TIMEOUT':
     'Replace fixed waits with web-first assertions on what the user sees, and check whether the app itself is slow.',
+  'TIM-SLOW-LOAD':
+    'The page was still loading or navigation was slow, so the element was not there yet. Wait for the page to finish loading, then assert what the user sees, and check whether the app itself is slow.',
   'TIM-TEST-TIMEOUT':
     'The test hit its time limit while waiting. Wait for what the user sees with a web-first assertion, and check whether the app itself is slow.',
   'TIM-INTERCEPT': 'Wait for the overlay to disappear and check whether real users are blocked.',

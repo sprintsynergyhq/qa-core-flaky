@@ -10,7 +10,7 @@ import type { ParseResult, RerunMode, TestRecord } from './model.js';
 import { detectFormat } from './parsers/detect.js';
 import { parseJunit } from './parsers/junit.js';
 import { parsePlaywrightJson } from './parsers/playwright-json.js';
-import { homeMarks, redactHomeText } from './report-path.js';
+import { homeMarks, redactHomeText, runnableConfigPath } from './report-path.js';
 import { redactParseResult } from './redact.js';
 import { writeReportPair } from './report/pair.js';
 import { executePlan, guardPipe, isStoppedRun } from './rerun/run.js';
@@ -22,15 +22,16 @@ import { buildTriageReport, renderTriageJson } from './report/json.js';
  * qa-core-flaky command line.
  *
  *   qa-core-flaky parse <report> [--format json|junit] [--commit <sha>]
- *                     [--branch <name>] [--run-id <id>] [--out <file>] [--redact]
+ *                     [--branch <name>] [--run-id <id>] [--root <dir>]
+ *                     [--out <file>] [--redact]
  *   qa-core-flaky causes <report> [--format json|junit] [--json]
- *                     [--test-timeout <ms>] [--out <file>]
+ *                     [--test-timeout <ms>] [--root <dir>] [--out <file>]
  *   qa-core-flaky triage <report...> [--out-dir <dir>] [--json]
- *                     [--fail-on findings|never] [--timestamp]
- *   qa-core-flaky rerun --from <report.json> [--times 5]
+ *                     [--fail-on findings|never] [--timestamp] [--root <dir>]
+ *   qa-core-flaky rerun --from <report.json> [--times 5] [--retries <n>]
  *                     [--modes repeat,isolated] [--config <playwright.config>]
  *                     [--only <id>] [--max-tests 20] [--commit <sha>]
- *                     [--out-dir <dir>]
+ *                     [--root <dir>] [--out-dir <dir>]
  *
  * parse and causes exit 0 on success and 1 on error.
  * triage exits 0 when the report has no entries, 2 when it has entries
@@ -67,11 +68,18 @@ Options:
   --fail-on <findings|never>  triage: exit 2 when there are entries (default findings)
   --timestamp                 triage: include generatedAt. Output then changes every run
   --test-timeout <ms>         Test timeout for the near-timeout rule
+  --root <dir>                JUnit: project root used to make paths relative.
+                              Playwright JSON already stores config.rootDir, so
+                              this flag is ignored for a JSON report.
   --from <report>             rerun: Playwright JSON, JUnit, or parse JSON
   --times <n>                 rerun: repeat and isolated count (default 5, from 1 to 20)
+  --retries <n>               rerun: Playwright --retries (default 0, from 0 to 10).
+                              0 keeps a first-attempt failure visible. A retry
+                              inside the rerun can hide that failure and record a pass.
   --modes <list>              rerun: repeat, isolated, in-order (default repeat,isolated).
                               A mode cannot be listed twice.
-  --config <file>             rerun: Playwright config passed to the test command
+  --config <file>             rerun: Playwright config passed to the test command.
+                              The next step prints a project-relative path.
   --only <id>                 rerun: limit to this test id. Repeat for more than one.
   --max-tests <n>             rerun: how many failing tests to keep (default 20, from 1 to 50).
                               The plan allows at most 400 commands.
@@ -93,8 +101,10 @@ type FlagValues = {
   timestamp?: boolean;
   'test-timeout'?: string;
   redact?: boolean;
+  root?: string;
   from?: string;
   times?: string;
+  retries?: string;
   modes?: string;
   config?: string;
   only?: string[];
@@ -146,8 +156,10 @@ function run(args: readonly string[]): void | Promise<void> {
         timestamp: { type: 'boolean' },
         'test-timeout': { type: 'string' },
         redact: { type: 'boolean' },
+        root: { type: 'string' },
         from: { type: 'string' },
         times: { type: 'string' },
+        retries: { type: 'string' },
         modes: { type: 'string' },
         config: { type: 'string' },
         only: { type: 'string', multiple: true },
@@ -199,7 +211,9 @@ function run(args: readonly string[]): void | Promise<void> {
   try {
     const selected = format ?? detectFormat(text, reportPath);
     const parsed =
-      selected === 'json' ? parsePlaywrightJson(text, reportPath, meta) : parseJunit(text, reportPath, meta);
+      selected === 'json'
+        ? parsePlaywrightJson(text, reportPath, meta, process.cwd())
+        : parseJunit(text, reportPath, junitMeta(values, meta));
     const result = command === 'parse' && values.redact === true ? redactParseResult(parsed) : parsed;
     body =
       command === 'parse'
@@ -229,8 +243,8 @@ function runTriage(reportPaths: readonly string[], values: FlagValues): void {
       const selected = format ?? detectFormat(loaded.text, loaded.reportPath);
       const result =
         selected === 'json'
-          ? parsePlaywrightJson(loaded.text, loaded.reportPath, meta)
-          : parseJunit(loaded.text, loaded.reportPath, meta);
+          ? parsePlaywrightJson(loaded.text, loaded.reportPath, meta, process.cwd())
+          : parseJunit(loaded.text, loaded.reportPath, junitMeta(values, meta));
       records.push(...result.records);
     } catch (error) {
       if (error instanceof ExitRequest) throw error;
@@ -274,6 +288,7 @@ async function runRerun(extra: readonly string[], values: FlagValues): Promise<v
       only: values.only,
       maxTests: readOptionalPositive(values['max-tests'], 'max-tests'),
       times: readOptionalPositive(values.times, 'times'),
+      retries: readOptionalCount(values.retries, 'retries', 10),
       modes: readModesFlag(values.modes),
       config: values.config,
     });
@@ -306,9 +321,10 @@ async function runRerun(extra: readonly string[], values: FlagValues): Promise<v
     }
   }
   if (values.config) {
+    const configFile = runnableConfigPath(values.config, process.cwd());
     merged = merged.map((record) => ({
       ...record,
-      source: { ...record.source, configFile: values.config },
+      source: { ...record.source, configFile },
     }));
   }
   const report = buildTriageReport(merged, {
@@ -330,6 +346,7 @@ function assertNoRerunFlags(values: FlagValues): void {
   if (
     values.from !== undefined ||
     values.times !== undefined ||
+    values.retries !== undefined ||
     values.modes !== undefined ||
     values.config !== undefined ||
     values.only !== undefined ||
@@ -360,7 +377,10 @@ function loadRerunSource(reportPath: string, values: FlagValues): TestRecord[] {
   }
   const format = readFormat(values.format);
   const selected = format ?? detectFormat(text, reportPath);
-  const parsed = selected === 'json' ? parsePlaywrightJson(text, reportPath, meta) : parseJunit(text, reportPath, meta);
+  const parsed =
+    selected === 'json'
+      ? parsePlaywrightJson(text, reportPath, meta, process.cwd())
+      : parseJunit(text, reportPath, junitMeta(values, meta));
   return parsed.records;
 }
 
@@ -404,6 +424,26 @@ function readModesFlag(value: string | undefined): RerunMode[] | undefined {
     picked.push(mode as RerunMode);
   }
   return picked;
+}
+
+function junitMeta(
+  values: FlagValues,
+  meta: { commitSha?: string; branch?: string; runId?: string },
+): { commitSha?: string; branch?: string; runId?: string; rootDir?: string } {
+  const root = values.root?.trim();
+  if (!root) return meta;
+  return { ...meta, rootDir: root };
+}
+
+/** A whole number from 0 to `max`, or undefined when the flag is omitted. */
+function readOptionalCount(value: string | undefined, name: string, max: number): number | undefined {
+  if (value === undefined) return undefined;
+  if (!/^(?:0|[1-9]\d*)$/.test(value)) fail(`${name} must be a whole number from 0 to ${max}. Got ${value}.`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed > max) {
+    fail(`${name} must be a whole number from 0 to ${max}. Got ${value}.`);
+  }
+  return parsed;
 }
 
 function readOptionalPositive(value: string | undefined, name: string): number | undefined {

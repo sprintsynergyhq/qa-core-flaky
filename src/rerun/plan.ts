@@ -13,6 +13,12 @@ export type PlanOptions = {
   modes?: readonly RerunMode[];
   /** Playwright config passed through as `--config`. */
   config?: string;
+  /**
+   * Playwright `--retries`. Default 0. A retry inside the rerun can hide a
+   * first-attempt failure and record a pass. Pass the CI retry count when
+   * that is what you want to measure.
+   */
+  retries?: number;
   /** Directory Playwright should use for artifacts. The caller owns cleanup. */
   outputDir?: string;
 };
@@ -40,6 +46,8 @@ export type PlannedRun = {
 export type RunCap = {
   maxTests: number;
   times: number;
+  /** Playwright `--retries` for every command. Default 0. */
+  retries: number;
   modes: RerunMode[];
   failing: number;
   selected: number;
@@ -60,6 +68,7 @@ export type RerunPlan = {
 export const RERUN_LIMITS = {
   times: 20,
   maxTests: 50,
+  retries: 10,
   commands: 400,
 } as const;
 
@@ -77,6 +86,7 @@ const MODE_NAMES: readonly RerunMode[] = ['repeat', 'isolated', 'in-order'];
 export function planReruns(records: readonly TestRecord[], options: PlanOptions = {}): RerunPlan {
   const times = readPositive(options.times, DEFAULT_TIMES, 'times', RERUN_LIMITS.times);
   const maxTests = readPositive(options.maxTests, DEFAULT_MAX_TESTS, 'max-tests', RERUN_LIMITS.maxTests);
+  const retries = readRetries(options.retries);
   const modes = readModes(options.modes);
   const known = new Map<string, TestRecord[]>();
   for (const record of records) {
@@ -103,7 +113,7 @@ export function planReruns(records: readonly TestRecord[], options: PlanOptions 
     failing.push(record);
   }
   const selected = failing.slice(0, maxTests);
-  const runs = buildRuns(records, selected, modes, times, options.config, options.outputDir);
+  const runs = buildRuns(records, selected, modes, times, retries, options.config, options.outputDir);
   if (runs.length > RERUN_LIMITS.commands) {
     throw new Error(
       `The plan has ${runs.length} commands. The limit is ${RERUN_LIMITS.commands}. Lower --times or --max-tests.`,
@@ -115,6 +125,7 @@ export function planReruns(records: readonly TestRecord[], options: PlanOptions 
     cap: {
       maxTests,
       times,
+      retries,
       modes: [...modes],
       failing: failing.length,
       selected: selected.length,
@@ -124,14 +135,14 @@ export function planReruns(records: readonly TestRecord[], options: PlanOptions 
 }
 
 export function formatCap(cap: RunCap): string {
-  return `Cap: max-tests ${cap.maxTests}, times ${cap.times}, modes ${cap.modes.join(',')}. Selected ${cap.selected} of ${cap.failing} failing tests. Commands ${cap.commands}.`;
+  return `Cap: max-tests ${cap.maxTests}, times ${cap.times}, retries ${cap.retries}, modes ${cap.modes.join(',')}. Selected ${cap.selected} of ${cap.failing} failing tests. Commands ${cap.commands}.`;
 }
 
 /**
  * One Playwright invocation.
  * Repeat uses `--repeat-each`. Isolated repeats the invocation `times` times.
  * In-order runs the file once with no title filter. Every mode uses
- * `--retries 0` and `--workers 1`. `--update-snapshots` is never set.
+ * `--retries` (default 0) and `--workers 1`. `--update-snapshots` is never set.
  * Pass `line` only when that line is unique for the file and project.
  * `file:line` then selects that location. Otherwise `-g` is a fully
  * anchored, case-sensitive pattern over the project, the file, and the
@@ -144,6 +155,8 @@ export function buildPlaywrightArgs(input: {
   line?: number;
   mode: RerunMode;
   times: number;
+  /** Playwright `--retries`. Omitted means 0. */
+  retries?: number;
   config?: string;
   project?: string;
   outputDir?: string;
@@ -154,7 +167,8 @@ export function buildPlaywrightArgs(input: {
   }
   const args: string[] = [];
   if (input.config) args.push('--config', input.config);
-  args.push('--retries', '0', '--workers', '1', '--reporter', 'json');
+  const retries = input.retries ?? 0;
+  args.push('--retries', String(retries), '--workers', '1', '--reporter', 'json');
   if (input.mode === 'repeat') args.push('--repeat-each', String(input.times));
   // Playwright 1.60.0 declares `--project <project-name...>`. One
   // `--project=name` argument keeps the following file filter positional.
@@ -254,6 +268,7 @@ function buildRuns(
   tests: readonly TestRecord[],
   modes: readonly RerunMode[],
   times: number,
+  retries: number,
   config: string | undefined,
   outputDir: string | undefined,
 ): PlannedRun[] {
@@ -278,6 +293,7 @@ function buildRuns(
             file: record.file,
             mode,
             times,
+            retries,
             config,
             project: record.project,
             outputDir,
@@ -306,6 +322,7 @@ function buildRuns(
             line,
             mode,
             times,
+            retries,
             config,
             project: record.project,
             outputDir,
@@ -359,6 +376,14 @@ function assertProject(project: string): void {
   if (project.includes('*') || project.includes('?')) {
     throw new Error(`Project name ${project} contains a wildcard. Pass the exact project name.`);
   }
+}
+
+function readRetries(value: number | undefined): number {
+  const picked = value === undefined ? 0 : value;
+  if (!Number.isSafeInteger(picked) || picked < 0 || picked > RERUN_LIMITS.retries) {
+    throw new Error(`retries must be from 0 to ${RERUN_LIMITS.retries}. Got ${String(value)}.`);
+  }
+  return picked;
 }
 
 function readPositive(value: number | undefined, fallback: number, name: string, max: number): number {
