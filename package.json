@@ -1,18 +1,39 @@
 {
   "name": "qa-core-flaky",
-  "version": "0.0.1",
-  "description": "Normalize Playwright JSON and JUnit reports so flaky tests can be triaged.",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Triage flaky Playwright tests: real bug or flaky, likely cause, and a suggested fix to review.",
   "type": "module",
   "license": "MIT",
+  "author": "SprintSynergy",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sprintsynergyhq/qa-core-flaky.git"
+  },
+  "homepage": "https://github.com/sprintsynergyhq/qa-core-flaky#readme",
+  "bugs": {
+    "url": "https://github.com/sprintsynergyhq/qa-core-flaky/issues"
+  },
+  "keywords": [
+    "playwright",
+    "flaky-tests",
+    "test-triage",
+    "qa",
+    "ci",
+    "test-automation"
+  ],
   "engines": {
     "node": ">=22.6"
   },
   "bin": {
     "qa-core-flaky": "dist/cli.js"
   },
+  "files": [
+    "dist",
+    "schemas"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --experimental-strip-types --test tests/*.test.mjs",
     "demo:live": "playwright test --config demo/saucedemo/playwright.config.ts",
@@ -21,6 +42,14 @@
     "fixtures": "node scripts/make-fixtures.mjs",
     "test:html": "npm run build && playwright test --config playwright.html.config.ts",
     "example:screenshots": "npm run build && node scripts/example-screenshots.mjs"
+  },
+  "peerDependencies": {
+    "@playwright/test": ">=1.40.0"
+  },
+  "peerDependenciesMeta": {
+    "@playwright/test": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@playwright/test": "1.60.0",

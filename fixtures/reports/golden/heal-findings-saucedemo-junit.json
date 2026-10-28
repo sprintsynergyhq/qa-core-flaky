@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "tool": {
     "name": "qa-core-flaky",
-    "version": "0.0.1"
+    "version": "0.1.0"
   },
   "project": {
     "configPath": null,
