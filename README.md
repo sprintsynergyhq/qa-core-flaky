@@ -16,7 +16,7 @@ npx qa-core-flaky --help
 npx qa-core-flaky triage <report> --out-dir out --html
 ```
 
-`rerun` needs `@playwright/test` installed in the project that contains the tests. It is an optional peer dependency of this package.
+`rerun` needs `@playwright/test` 1.60.0 or later installed in the project that contains the tests. It is an optional peer dependency of this package.
 
 The heal handoff needs `qa-core-heal` 0.4.0 or later for a re-run-verified fix. `qa-core-heal` 0.3.x gives only the older dry-run mode, which is not re-run verified. Install it in the same project when you use `--heal`.
 
@@ -29,7 +29,7 @@ npx qa-core-flaky causes <report.json>
 npx qa-core-flaky triage <report.json> --out-dir out --html
 ```
 
-`rerun` needs a Playwright browser in the project under test. This example keeps one failing test and one repeat:
+`rerun` needs a Playwright browser in the project under test. This example keeps one failing test and runs it once in each default mode:
 
 ```sh
 npx qa-core-flaky rerun --from <report.json> --config playwright.config.ts --max-tests 1 --times 1
@@ -41,7 +41,7 @@ The format is detected from the file contents. The root element must be `testsui
 
 `triage` writes `triage.json` and `triage.md` for each failed or flaky test. The JSON schema is [docs/report-schema.md](docs/report-schema.md). The verdict rows are [docs/verdicts.md](docs/verdicts.md). The default exit code is 2 when the report has at least one entry, and 0 when it has none. `--fail-on never` exits 0 after the files are written. A tool error exits 1. Do not point `--out-dir` at a directory under `/proc`. Creating a directory there can hang, which is a Node bug, and the command does not probe `/proc`.
 
-`--heal-findings <file>` writes a findings file for qa-core-heal. `--heal` asks qa-core-heal for a dry run and stores the result on `healProposal`. The program is `npx --no-install qa-core-heal`, so a missing local install is not downloaded. Without `--heal`, that field stays null. The command never passes `--apply`, `--yes`, or `--no-verify`. A re-run-verified fix needs qa-core-heal 0.4.0 or later. qa-core-heal 0.3.x gives only the older mode. The fields, the five handoff gates, and the redaction rules are in [docs/heal-contract.md](docs/heal-contract.md).
+`--heal-findings <file>` writes a findings file for qa-core-heal. `--heal` asks qa-core-heal for a dry run and stores the result on `healProposal`. The program is `npx --no-install qa-core-heal`, so a missing local install is not downloaded from the registry. A copy already in the npx cache can still run, so install qa-core-heal as a dev dependency for predictable results. Without `--heal`, that field stays null. The command never passes `--apply`, `--yes`, or `--no-verify`. The fields, the five handoff gates, and the redaction rules are in [docs/heal-contract.md](docs/heal-contract.md).
 
 ## HTML Report
 
@@ -92,7 +92,7 @@ node dist/cli.js causes fixtures/reports/pw-1.60.0-outcomes.json
 node dist/cli.js triage fixtures/reports/pw-1.60.0-outcomes.json --out-dir /tmp/qa-core-flaky-triage
 ```
 
-`node dist/cli.js --help` lists the commands. See [CONTRIBUTING.md](CONTRIBUTING.md).
+`node dist/cli.js --help` lists the commands. See [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md), and [SECURITY.md](SECURITY.md).
 
 ## Regenerating Fixtures
 

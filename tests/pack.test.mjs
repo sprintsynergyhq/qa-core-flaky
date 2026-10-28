@@ -22,6 +22,10 @@ test('package.json is publishable and the pack includes dist/cli.js', () => {
   const entry = Array.isArray(manifest) ? manifest[0] : manifest;
   const paths = entry.files.map((file) => file.path);
   assert.ok(paths.includes('dist/cli.js'), 'dist/cli.js is missing from the pack');
+  assert.ok(
+    paths.some((item) => item.startsWith('schemas/')),
+    'schemas/ is missing from the pack',
+  );
   for (const prefix of bannedPrefixes) {
     const hit = paths.find((item) => item === prefix.slice(0, -1) || item.startsWith(prefix));
     assert.equal(hit, undefined, `${prefix} is in the pack`);
