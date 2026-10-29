@@ -27,9 +27,12 @@
   "bin": {
     "qa-core-flaky": "dist/cli.js"
   },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "files": [
     "dist",
-    "schemas"
+    "schemas",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

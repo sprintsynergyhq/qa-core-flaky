@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 - 2026-10-28
+## 0.1.0 - 2026-10-29
 
 First public release.
 
@@ -13,3 +13,4 @@ First public release.
 - Write a heal findings file with `--heal-findings`.
 - Ask qa-core-heal for a dry run with `--heal` and store the proposal. qa-core-heal 0.4.0 or later can return a re-run-verified fix. qa-core-heal 0.3.x uses the older dry-run mode.
 - Include a seeded SauceDemo demo in the repository.
+- Import the parsers, cause rules, and report builders from `qa-core-flaky` in Node. The package sets `main` and `types` for this.
