@@ -2,7 +2,7 @@
 
 `classifyCauses` reads one `TestRecord` and returns the likely causes. There is no model call. Each finding quotes evidence copied from the error text, or it says Unknown.
 
-The cause list follows the categories in the project plan: selectors, timing, test data, environment, and unknown. Selector evidence follows the same boundary as qa-core-heal: a failure is a locator problem only when the error shows that the locator did not resolve to the expected elements. A locator that resolved to real elements but had the wrong value is not a locator problem. A click blocked because another element `intercepts pointer events` is a timing signal.
+The cause list is selectors, timing, test data, environment, and unknown. Selector evidence follows the same boundary as qa-core-heal: a failure is a locator problem only when the error shows that the locator did not resolve to the expected elements. A locator that resolved to real elements but had the wrong value is not a locator problem. A click blocked because another element `intercepts pointer events` is a timing signal.
 
 ## What A Finding Contains
 

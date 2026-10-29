@@ -1125,7 +1125,7 @@ test(
 );
 
 async function runSignalProbe(signal, expected) {
-  const privateTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-sigtmp-'));
+  const signalTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-sigtmp-'));
   const project = path.join(process.cwd(), `.signal-probe-${process.pid}-${signal}`);
   const stdout = [];
   const stderr = [];
@@ -1218,9 +1218,9 @@ async function runSignalProbe(signal, expected) {
         cwd: process.cwd(),
         env: {
           ...process.env,
-          TMPDIR: privateTmp,
-          TMP: privateTmp,
-          TEMP: privateTmp,
+          TMPDIR: signalTmp,
+          TMP: signalTmp,
+          TEMP: signalTmp,
           NODE_DISABLE_COMPILE_CACHE: '1',
         },
         detached: true,
@@ -1229,7 +1229,7 @@ async function runSignalProbe(signal, expected) {
     );
     child.stdout.on('data', (chunk) => stdout.push(chunk.toString('utf8')));
     child.stderr.on('data', (chunk) => stderr.push(chunk.toString('utf8')));
-    await waitFor(() => findNamed(privateTmp, 'error-context.md'), 40000);
+    await waitFor(() => findNamed(signalTmp, 'error-context.md'), 40000);
     await delayMs(200);
     process.kill(child.pid, signal);
     const status = await waitExit(child, 20000);
@@ -1239,9 +1239,9 @@ async function runSignalProbe(signal, expected) {
     assert.equal(err.includes('Playwright wrote no JSON report'), false, err);
     assert.equal(/at releaseRun|UnhandledPromiseRejection|Error: ENOTEMPTY/.test(err), false, err);
     assert.equal(stdout.join('').includes('schemaVersion'), false);
-    await waitFor(() => !fs.existsSync(`/proc/${child.pid}`) && pidsUsing(privateTmp).length === 0, 5000);
-    assert.deepEqual(fs.readdirSync(privateTmp), []);
-    assert.deepEqual(pidsUsing(privateTmp), []);
+    await waitFor(() => !fs.existsSync(`/proc/${child.pid}`) && pidsUsing(signalTmp).length === 0, 5000);
+    assert.deepEqual(fs.readdirSync(signalTmp), []);
+    assert.deepEqual(pidsUsing(signalTmp), []);
   } finally {
     if (child?.pid) {
       try {
@@ -1249,7 +1249,7 @@ async function runSignalProbe(signal, expected) {
       } catch {
         // The rerun process is already gone.
       }
-      for (const pid of pidsUsing(privateTmp)) {
+      for (const pid of pidsUsing(signalTmp)) {
         try {
           process.kill(pid, 'SIGKILL');
         } catch {
@@ -1257,7 +1257,7 @@ async function runSignalProbe(signal, expected) {
         }
       }
     }
-    fs.rmSync(privateTmp, { recursive: true, force: true, maxRetries: 5 });
+    fs.rmSync(signalTmp, { recursive: true, force: true, maxRetries: 5 });
     fs.rmSync(project, { recursive: true, force: true, maxRetries: 5 });
   }
 }

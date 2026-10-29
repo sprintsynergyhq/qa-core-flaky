@@ -81,8 +81,9 @@ test('help exits 0 and lists parse', () => {
 
 test('version exits 0 and prints the package version', () => {
   const result = run(['--version']);
+  const version = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
   assert.equal(result.status, 0);
-  assert.equal(result.stdout, '0.0.1\n');
+  assert.equal(result.stdout, `${version}\n`);
 });
 
 test('parsing the fixture twice is byte identical', () => {

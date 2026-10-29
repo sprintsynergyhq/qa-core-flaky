@@ -1,6 +1,6 @@
 # SauceDemo Demo
 
-A small Playwright suite against the public practice app at https://www.saucedemo.com. Some tests fail on purpose. A seeded helper decides which attempts fail, so the same seed repeats the same pattern. This repository is private until v0.1 review.
+A small Playwright suite against the public practice app at https://www.saucedemo.com. Some tests fail on purpose. A seeded helper decides which attempts fail, so the same seed repeats the same pattern.
 
 Unit tests and CI read the recorded reports. They do not open the live site.
 

@@ -36,7 +36,7 @@ try {
   await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
   await page.screenshot({ path: shots.print, fullPage: true, animations: 'disabled' });
 
-  const sample = renderTriageHtml(contrastReport(), { version: '0.0.1' });
+  const sample = renderTriageHtml(contrastReport(), { version: '0.1.0' });
   const samplePath = path.join(contrastDir, 'badges.html');
   fs.writeFileSync(samplePath, sample);
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce', media: 'screen' });
