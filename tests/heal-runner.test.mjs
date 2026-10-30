@@ -613,14 +613,18 @@ test('the heal timeout honours 120 seconds and clamps above it', () => {
   }
 });
 
-test('the default heal command does not install from the registry', () => {
+test('without a local install, macOS and Linux fall back to npx without installing from the registry', (t) => {
+  const dir = keepTemp(t, 'heal-no-local-');
   const saved = process.env.QA_CORE_HEAL_BIN;
   try {
     delete process.env.QA_CORE_HEAL_BIN;
-    assert.deepEqual(healCommand(['capabilities', '--json']), {
-      command: 'npx',
-      argv: ['--no-install', 'qa-core-heal', 'capabilities', '--json'],
-    });
+    for (const platform of ['linux', 'darwin']) {
+      assert.deepEqual(healCommand(['capabilities', '--json'], { cwd: dir, platform }), {
+        command: 'npx',
+        argv: ['--no-install', 'qa-core-heal', 'capabilities', '--json'],
+        source: 'npx',
+      });
+    }
   } finally {
     if (saved === undefined) delete process.env.QA_CORE_HEAL_BIN;
     else process.env.QA_CORE_HEAL_BIN = saved;

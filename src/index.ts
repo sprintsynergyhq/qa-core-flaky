@@ -50,7 +50,8 @@ export {
   unavailableProposal,
   UNAVAILABLE_LINE,
 } from './heal/proposal.js';
-export { assertHealArgsAllowed, bindHealTempDir, FORBIDDEN_HEAL_ARGS, healCommand, healTimeoutMs, installHealStopHandlers, removeHealStopHandlers, runHealCommand, runTimeoutSeconds } from './heal/run.js';
+export { assertHealArgsAllowed, bindHealTempDir, FORBIDDEN_HEAL_ARGS, findHealCli, healCommand, healTimeoutMs, installHealStopHandlers, removeHealStopHandlers, runHealCommand, runTimeoutSeconds } from './heal/run.js';
+export type { HealCommand, HealCommandResult, HealCommandSource } from './heal/run.js';
 export { decideHandoff } from './heal/handoff.js';
 export type { HandoffDecision, HandoffGate, HandoffInput, HandoffMode } from './heal/handoff.js';
 export { FINDING_REDACTION_RULES, redactFindingText } from './heal/redact.js';

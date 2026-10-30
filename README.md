@@ -4,7 +4,7 @@ qa-core-flaky triages flaky Playwright tests. It separates a likely real bug fro
 
 ## Status
 
-Version 0.1.1. The commands are `parse`, `causes`, `triage`, and `rerun`.
+Version 0.1.2. The commands are `parse`, `causes`, `triage`, and `rerun`.
 
 ## Install
 
@@ -41,7 +41,7 @@ The format is detected from the file contents. The root element must be `testsui
 
 `triage` writes `triage.json` and `triage.md` for each failed or flaky test. The JSON schema is [docs/report-schema.md](docs/report-schema.md). The verdict rows are [docs/verdicts.md](docs/verdicts.md). The default exit code is 2 when the report has at least one entry, and 0 when it has none. `--fail-on never` exits 0 after the files are written. A tool error exits 1. Do not point `--out-dir` at a directory under `/proc`. Creating a directory there can hang, which is a Node bug, and the command does not probe `/proc`.
 
-`--heal-findings <file>` writes a findings file for qa-core-heal. `--heal` asks qa-core-heal for a dry run and stores the result on `healProposal`. The program is `npx --no-install qa-core-heal`, so a missing local install is not downloaded from the registry. A copy already in the npx cache can still run, so install qa-core-heal as a dev dependency for predictable results. Without `--heal`, that field stays null. The command never passes `--apply`, `--yes`, or `--no-verify`. The fields, the five handoff gates, and the redaction rules are in [docs/heal-contract.md](docs/heal-contract.md).
+`--heal-findings <file>` writes a findings file for qa-core-heal. `--heal` asks qa-core-heal for a dry run and stores the result on `healProposal`. Install qa-core-heal as a dev dependency in the project. Flaky looks for `node_modules/qa-core-heal` in the folder where you run it, then in each parent folder, and starts heal's own script with Node. This works the same on Windows, macOS, and Linux. If heal is not installed there, macOS and Linux fall back to `npx --no-install qa-core-heal`, which never downloads from the registry. Windows has no fallback, and the status is `unavailable`. Without `--heal`, that field stays null. The command never passes `--apply`, `--yes`, or `--no-verify`. The fields, the five handoff gates, and the redaction rules are in [docs/heal-contract.md](docs/heal-contract.md).
 
 ## HTML Report
 

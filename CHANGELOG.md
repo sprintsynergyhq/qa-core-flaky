@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2 - 2026-10-30
+
+A Windows fix for `--heal`.
+
+- **Fixed:** `triage --heal` now finds qa-core-heal on Windows. It used to print `qa-core-heal is not installed. No proposal was made.` even when qa-core-heal was installed, because Windows cannot start `npx` without a shell. The tool now looks for `node_modules/qa-core-heal` in the folder where you run it and in each parent folder, and starts heal's own script with Node on every OS. On macOS and Linux, `npx --no-install qa-core-heal` is still the fallback when heal is not installed there. Reported by Abdul Rafay.
+- **Docs:** The README and the heal contract explain how heal is found and started, and what happens on Windows when it is not installed.
+- **Tests:** New tests cover the heal lookup, parent folders, the `bin` field, a `bin` that leaves the package folder, the Windows fallback, and a full `triage --heal` run that finds heal in `node_modules`. The HTML example now shows version 0.1.2.
+
 ## 0.1.1 - 2026-10-30
 
 A Windows fix for `rerun`, plus package details and docs.
