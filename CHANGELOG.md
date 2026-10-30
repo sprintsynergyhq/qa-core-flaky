@@ -4,7 +4,7 @@
 
 A Windows fix for `rerun`, plus package details and docs.
 
-- **Fixed:** `rerun` now works on Windows. It used to stop with `spawn ... node_modules/.bin/playwright ENOENT`, because Windows cannot start that file. The tool now starts Playwright's own `cli.js` with Node on every OS, and no console window opens on Windows. The file filter on Windows now matches a backslash or a forward slash in the path, and the printed command shows that filter correctly. Reported by Abdul Rafay.
+- **Fixed:** `rerun` now works on Windows. It used to stop with `spawn ... node_modules/.bin/playwright ENOENT`, because Windows cannot start that file. The tool now starts Playwright's own `cli.js` with Node on every OS. On Windows the child processes are no longer detached, so no console windows open during a rerun or a heal call, and cleanup stops the whole process tree with `taskkill /T`. The file filter on Windows now matches a backslash or a forward slash in the path, and the printed command shows that filter correctly. Reported by Abdul Rafay.
 - **Changed:** The package author is now SprintSynergy (https://sprintsynergy.com), and Muhammad Usman is listed as a contributor.
 - **Changed:** The printed rerun command now starts with `npx playwright test` when Playwright is installed in the folder where you run it.
 - **Docs:** The README now shows version 0.1.1 and ends with a line saying who builds and maintains the project. The rerun docs explain how Playwright is found and started.

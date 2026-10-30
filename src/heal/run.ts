@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { rerunChildEnv, stopChildTree } from '../rerun/run.js';
+import { DETACH_CHILDREN, rerunChildEnv, stopChildTree } from '../rerun/run.js';
 
 /** Flags this tool must never put on a heal command line. */
 export const FORBIDDEN_HEAL_ARGS = ['--apply', '--yes', '--no-verify'] as const;
@@ -142,8 +142,9 @@ export function runHealCommand(args: readonly string[], timeoutMs: number = heal
       shell: false,
       windowsHide: true,
       env: rerunChildEnv(tempRoot),
-      // A new process group so the timeout can kill grandchildren.
-      detached: true,
+      // A new process group so the timeout can kill grandchildren. Not on
+      // Windows, where it opens a console window and taskkill /T is used.
+      detached: DETACH_CHILDREN,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     bindHealChild(child);

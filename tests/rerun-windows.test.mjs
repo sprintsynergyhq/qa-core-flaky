@@ -189,8 +189,19 @@ test('the default runner starts cli.js with this Node, and prints npx playwright
   }
 });
 
-test('detached rerun children are started with windowsHide', () => {
+test('rerun children are not detached on Windows and are started with windowsHide', () => {
   const source = fs.readFileSync('dist/rerun/run.js', 'utf8');
-  assert.equal(source.match(/detached: true,\s+windowsHide: true,/g)?.length, 2);
+  assert.equal(source.match(/detached: DETACH_CHILDREN,\s+windowsHide: true,/g)?.length, 2);
+  assert.equal(source.includes('detached: true'), false);
+  assert.equal(source.includes("export const DETACH_CHILDREN = process.platform !== 'win32';"), true);
   assert.equal(source.includes("'.bin'"), false);
+  const heal = fs.readFileSync('dist/heal/run.js', 'utf8');
+  assert.equal(heal.includes('detached: DETACH_CHILDREN,'), true);
+  assert.equal(heal.includes('detached: true'), false);
+});
+
+test('Windows cleanup waits for taskkill on the whole tree', () => {
+  const source = fs.readFileSync('dist/rerun/run.js', 'utf8');
+  assert.equal(source.match(/await taskkillTree\(pid\)/g)?.length, 2);
+  assert.equal(source.includes("['/T', '/F', '/PID', String(pid)]"), true);
 });

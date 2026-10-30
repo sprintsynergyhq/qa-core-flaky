@@ -9,6 +9,12 @@ import { commitFor, mergeRerunRecords, tagRerunAttempts } from './merge.js';
 import { exactFileArg, formatPrintedCommand, type PlannedRun, type RerunPlan } from './plan.js';
 import { shellQuote } from './quote.js';
 
+/**
+ * Children get their own process group on macOS and Linux only. On Windows,
+ * a detached child opens a new console window.
+ */
+export const DETACH_CHILDREN = process.platform !== 'win32';
+
 /** Signals that stop a rerun. The child process group is killed before the temp directory is removed. */
 export const STOP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
 
@@ -125,6 +131,10 @@ export async function onStopSignal(
 }
 
 export async function killProcessGroup(pid: number, child?: ChildProcess): Promise<void> {
+  if (process.platform === 'win32') {
+    await taskkillTree(pid);
+    return;
+  }
   const tracked = signalTree(pid, 'SIGTERM', child);
   const gone = await waitUntilGone(pid, SIGNAL_WAIT_MS, child, tracked);
   if (!gone) {
@@ -134,9 +144,12 @@ export async function killProcessGroup(pid: number, child?: ChildProcess): Promi
 }
 
 /**
- * Spawn a detached child with temp env inside `dir`.
+ * Spawn a child with temp env inside `dir`.
  * The caller owns stdout piping and cleanup.
- * `windowsHide` keeps a detached child from opening a console window on Windows.
+ * On macOS and Linux the child gets its own process group, so cleanup can stop
+ * its descendants. On Windows a detached child gets a new console window, and
+ * `windowsHide` does not stop the windows its own children open, so the child
+ * stays attached and cleanup uses `taskkill /T` instead.
  */
 export function launchRerunChild(input: {
   command: string;
@@ -148,7 +161,7 @@ export function launchRerunChild(input: {
   return spawn(input.command, input.args, {
     cwd: input.cwd,
     env: rerunChildEnv(input.dir),
-    detached: true,
+    detached: DETACH_CHILDREN,
     windowsHide: true,
     stdio: ['ignore', input.stdout ?? 'pipe', 'pipe'],
   });
@@ -415,7 +428,7 @@ function readRootDirFromChild(configFile: string, cacheDir: string): Promise<str
       // parents. That is the config folder, not the triage folder, so a kit
       // that holds node_modules still loads when triage ran in the parent.
       cwd: path.dirname(configFile),
-      detached: true,
+      detached: DETACH_CHILDREN,
       windowsHide: true,
       env: {
         ...process.env,
@@ -698,7 +711,7 @@ export async function stopChildTree(child: ChildProcess): Promise<void> {
   const pid = child.pid;
   if (pid === undefined || pid <= 1) return;
   if (process.platform === 'win32') {
-    spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
+    await taskkillTree(pid);
     return;
   }
   let tracked = signalTree(pid, 'SIGKILL', child);
@@ -707,6 +720,23 @@ export async function stopChildTree(child: ChildProcess): Promise<void> {
     tracked = [...new Set([...tracked, ...signalTree(pid, 'SIGKILL', child)])];
     await waitUntilGone(pid, SIGNAL_WAIT_MS, child, tracked);
   }
+}
+
+/**
+ * Stop a process and every descendant on Windows, and wait for taskkill to
+ * finish so the temp folder is no longer in use when it is removed.
+ */
+function taskkillTree(pid: number): Promise<void> {
+  if (!Number.isInteger(pid) || pid <= 1) return Promise.resolve();
+  return new Promise((resolve) => {
+    try {
+      const killer = spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
+      killer.once('error', () => resolve());
+      killer.once('close', () => resolve());
+    } catch {
+      resolve();
+    }
+  });
 }
 
 function signalPid(pid: number, signal: NodeJS.Signals): void {
