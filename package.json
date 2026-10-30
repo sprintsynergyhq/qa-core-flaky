@@ -1,10 +1,19 @@
 {
   "name": "qa-core-flaky",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Triage flaky Playwright tests: real bug or flaky, likely cause, and a suggested fix to review.",
   "type": "module",
   "license": "MIT",
-  "author": "SprintSynergy",
+  "author": {
+    "name": "SprintSynergy",
+    "url": "https://sprintsynergy.com"
+  },
+  "contributors": [
+    {
+      "name": "Muhammad Usman",
+      "url": "https://linkedin.com/in/sdet-muhammadusman"
+    }
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sprintsynergyhq/qa-core-flaky.git"

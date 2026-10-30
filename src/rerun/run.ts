@@ -7,6 +7,7 @@ import { parsePlaywrightJson } from '../parsers/playwright-json.js';
 import { redactHomeText } from '../report-path.js';
 import { commitFor, mergeRerunRecords, tagRerunAttempts } from './merge.js';
 import { exactFileArg, formatPrintedCommand, type PlannedRun, type RerunPlan } from './plan.js';
+import { shellQuote } from './quote.js';
 
 /** Signals that stop a rerun. The child process group is killed before the temp directory is removed. */
 export const STOP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
@@ -135,6 +136,7 @@ export async function killProcessGroup(pid: number, child?: ChildProcess): Promi
 /**
  * Spawn a detached child with temp env inside `dir`.
  * The caller owns stdout piping and cleanup.
+ * `windowsHide` keeps a detached child from opening a console window on Windows.
  */
 export function launchRerunChild(input: {
   command: string;
@@ -147,6 +149,7 @@ export function launchRerunChild(input: {
     cwd: input.cwd,
     env: rerunChildEnv(input.dir),
     detached: true,
+    windowsHide: true,
     stdio: ['ignore', input.stdout ?? 'pipe', 'pipe'],
   });
 }
@@ -207,9 +210,10 @@ export async function executePlan(input: {
       const record =
         input.records.find((item) => item.id === run.testId) ??
         input.records.find((item) => item.file === run.file && item.project === run.project);
+      const shown = formatPrintedCommand(args, record);
       safePrint(
         input.print,
-        formatPrintedCommand(args, record, input.runner ? [] : launcherPrefix(input.cwd, flagValue(args, '--config'))),
+        input.runner ? shown : `${printedLauncher(input.cwd, flagValue(args, '--config'))} ${shown}`,
       );
       if (state.stopping) break;
       let result: CommandResult;
@@ -322,7 +326,7 @@ async function prepareArgs(
   const config = flagValue(copy, '--config');
   // A spec under testDir is not in the working directory. Check the local
   // binary before that lookup, so a missing install is reported as itself.
-  if (requireFile && !config) playwrightBin(cwd);
+  if (requireFile && !config) playwrightCli(cwd);
   const absolute = await resolveProjectFile(run.file, cwd, config, path.join(rerunDir, 'tmp'));
   if (!absolute) {
     if (requireFile) {
@@ -361,7 +365,7 @@ export async function resolveProjectFile(
     // The spec is under testDir, which is not the folder where triage ran.
     // Playwright has to load before that root is known. A missing install
     // is not a missing test file.
-    if (!findPlaywrightBin(configDir)) throw missingPlaywrightError(configDir);
+    if (!findPlaywrightCli(configDir)) throw missingPlaywrightError(configDir);
     const loaded = await loadRootDir(resolvedConfig, cacheRoot);
     if (loaded) roots.push(loaded);
     roots.push(configDir);
@@ -412,6 +416,7 @@ function readRootDirFromChild(configFile: string, cacheDir: string): Promise<str
       // that holds node_modules still loads when triage ran in the parent.
       cwd: path.dirname(configFile),
       detached: true,
+      windowsHide: true,
       env: {
         ...process.env,
         QA_CORE_FLAKY_CONFIG: configFile,
@@ -536,19 +541,40 @@ function withOutput(args: readonly string[], outputDir: string): string[] {
   return copy;
 }
 
-function launcherPrefix(cwd: string, config?: string): string[] {
-  return [playwrightBin(cwd, config), 'test'];
+/**
+ * Playwright's own JavaScript entry points, in lookup order. The rerun runs
+ * them with the Node that runs this tool. It does not start the
+ * `node_modules/.bin/playwright` shim, because that file is a shell script
+ * on Windows, and Node refuses to start `playwright.cmd` without a shell.
+ * A shell would read `^`, `$`, and `|` in the filters.
+ */
+export const PLAYWRIGHT_CLI_PATHS: readonly (readonly string[])[] = [
+  ['playwright', 'cli.js'],
+  ['@playwright/test', 'cli.js'],
+];
+
+function cliInFolder(dir: string): string | undefined {
+  for (const parts of PLAYWRIGHT_CLI_PATHS) {
+    const file = path.join(dir, 'node_modules', ...parts);
+    try {
+      if (fs.statSync(file).isFile()) return file;
+    } catch {
+      // Not installed in this folder.
+    }
+  }
+  return undefined;
 }
 
 /**
- * `node_modules/.bin/playwright` in `startDir`, then each parent, the same
- * way Node resolves a package. Stops at the filesystem root.
+ * Playwright's `cli.js` in `startDir`, then each parent, the same way Node
+ * resolves a package. `playwright/cli.js` is checked before
+ * `@playwright/test/cli.js` in each folder. Stops at the filesystem root.
  */
-function findPlaywrightBin(startDir: string): string | undefined {
+export function findPlaywrightCli(startDir: string): string | undefined {
   let dir = path.resolve(startDir);
   for (;;) {
-    const bin = path.join(dir, 'node_modules', '.bin', 'playwright');
-    if (fs.existsSync(bin)) return bin;
+    const cli = cliInFolder(dir);
+    if (cli) return cli;
     const parent = path.dirname(dir);
     if (parent === dir) return undefined;
     dir = parent;
@@ -556,9 +582,11 @@ function findPlaywrightBin(startDir: string): string | undefined {
 }
 
 function missingPlaywrightError(start: string): Error {
-  const bin = path.join(start, 'node_modules', '.bin', 'playwright');
+  const modules = path.join(start, 'node_modules');
   return new Error(
-    redactHomeText(`Local Playwright was not found at ${bin}. Install playwright in this project before rerun.`),
+    redactHomeText(
+      `Local Playwright was not found in ${modules}. The rerun looks for playwright/cli.js and @playwright/test/cli.js. Install @playwright/test in this project before rerun.`,
+    ),
   );
 }
 
@@ -566,17 +594,38 @@ function missingPlaywrightError(start: string): Error {
  * With `--config`, start at the config folder and walk parents, the same way
  * Node resolves a package. Without `--config`, look only in the working directory.
  */
-function playwrightBin(cwd: string, config?: string): string {
+export function playwrightCli(cwd: string, config?: string): string {
   if (!config) {
     const start = path.resolve(cwd);
-    const bin = path.join(start, 'node_modules', '.bin', 'playwright');
-    if (!fs.existsSync(bin)) throw missingPlaywrightError(start);
-    return bin;
+    const cli = cliInFolder(start);
+    if (!cli) throw missingPlaywrightError(start);
+    return cli;
   }
   const start = path.dirname(path.resolve(cwd, config));
-  const bin = findPlaywrightBin(start);
-  if (!bin) throw missingPlaywrightError(start);
-  return bin;
+  const cli = findPlaywrightCli(start);
+  if (!cli) throw missingPlaywrightError(start);
+  return cli;
+}
+
+/**
+ * The launcher a person reads in front of each printed command.
+ * `npx playwright test` when Playwright is installed in the working
+ * directory, because `npx` finds it there on every OS. Otherwise `node` and
+ * the path to Playwright's `cli.js`, relative to the working directory, so a
+ * kit that keeps `node_modules` in a subfolder still has a command that runs.
+ * The process itself is started with the same Node and `cli.js` either way.
+ */
+export function printedLauncher(cwd: string, config?: string): string {
+  let cli: string;
+  try {
+    cli = playwrightCli(cwd, config);
+  } catch {
+    return 'npx playwright test';
+  }
+  const local = path.join(path.resolve(cwd), 'node_modules') + path.sep;
+  if (cli.startsWith(local)) return 'npx playwright test';
+  const relative = path.relative(path.resolve(cwd), cli).split(path.sep).join('/');
+  return `node ${shellQuote(redactHomeText(relative))} test`;
 }
 
 function defaultRunner(
@@ -588,14 +637,15 @@ function defaultRunner(
   state: ReleaseState,
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
-    let bin: string;
+    let cli: string;
     try {
-      bin = playwrightBin(cwd, flagValue(args, '--config'));
+      cli = playwrightCli(cwd, flagValue(args, '--config'));
     } catch (error) {
       reject(error instanceof Error ? error : new Error('Local Playwright was not found.'));
       return;
     }
-    const child = launchRerunChild({ command: bin, args: ['test', ...args], cwd, dir });
+    // Node runs Playwright's cli.js directly on every OS. No shell and no shim.
+    const child = launchRerunChild({ command: process.execPath, args: [cli, 'test', ...args], cwd, dir });
     state.child = child;
     if (child.pid !== undefined) setPid(child.pid);
     const stdout = fs.createWriteStream(stdoutFile);

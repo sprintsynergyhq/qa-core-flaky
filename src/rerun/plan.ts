@@ -217,9 +217,24 @@ export function fileFilterArg(file: string, line?: number): string {
   return exactFileArg(file.replaceAll('\\', '/'), line);
 }
 
-/** Exact path, anchored, with an optional `:line`. Slashes are escaped inside `/.../`. */
+/** One path separator in a Windows file filter: a backslash or a forward slash. */
+export const WINDOWS_SEPARATOR = '[\\\\/]';
+
+/** A drive path (`C:\` or `C:/`), or a UNC or extended path (`\\server`, `\\?\`). */
+const WINDOWS_ABSOLUTE = /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/])/;
+
+/**
+ * Exact path, anchored, with an optional `:line`. Slashes are escaped inside `/.../`.
+ * A Windows path matches each separator with `[\\/]`. Playwright 1.60.0 tests
+ * the file filter against the native path, which uses backslashes on Windows,
+ * and then against its `file:///` URL. `[\\/]` matches the native path with
+ * either separator.
+ */
 export function exactFileArg(filePath: string, line?: number): string {
-  const wrapped = `/^${escapeSlash(filePath)}$/`;
+  const body = WINDOWS_ABSOLUTE.test(filePath)
+    ? filePath.split(/[\\/]/).map(escapeSlash).join(WINDOWS_SEPARATOR)
+    : escapeSlash(filePath);
+  const wrapped = `/^${body}$/`;
   if (line === undefined) return wrapped;
   return `${wrapped}:${line}`;
 }
@@ -245,7 +260,13 @@ export function formatPrintedCommand(
   const visibleTitle = title?.replaceAll('\\/', '/');
   const titleChanged = visibleTitle !== undefined && redact(visibleTitle) !== visibleTitle;
   const kept = titleChanged ? args.filter((part, index) => part !== '-g' && args[index - 1] !== '-g') : args;
-  const shown = [...prefix, ...kept].map((part) => shellQuote(redact(part))).join(' ');
+  const fileAt = kept.lastIndexOf('--') + 1;
+  const shown = [...prefix, ...kept]
+    .map((part, index) =>
+      index === prefix.length + fileAt && fileAt > 0 ? redactFileFilter(part, redact) : redact(part),
+    )
+    .map(shellQuote)
+    .join(' ');
   if (!titleChanged) return shown;
   return `${shown} (the title was redacted, so -g is omitted here)`;
 }
@@ -285,6 +306,25 @@ export function splitRerunSentence(nextStep: string): { lead: string; command: s
   const command = nextStep.slice(at + marker.length);
   if (!command.includes(' rerun ')) return { lead: nextStep, command: nextStep };
   return { lead: nextStep.slice(0, at + marker.length), command };
+}
+
+/**
+ * Redact a Windows file filter for printing. The native path is rebuilt from
+ * the filter, redacted the same way as any Windows path, and escaped again
+ * with `[\\/]` separators. The printed filter keeps the escapes and the
+ * separators the process received. Only the home becomes `<home>`.
+ * Any other argument is redacted as written.
+ */
+function redactFileFilter(part: string, redact: (value: string) => string): string {
+  const match = /^\/\^(.*)\$\/(:\d+)?$/s.exec(part);
+  const body = match?.[1];
+  if (body === undefined || !part.includes(WINDOWS_SEPARATOR)) return redact(part);
+  const native = body
+    .split(WINDOWS_SEPARATOR)
+    .map((segment) => segment.replace(/\\(n|.)/gs, (_all, char: string) => (char === 'n' ? '\n' : char)))
+    .join('\\');
+  const shown = redact(native).split(/[\\/]/).map(escapeSlash).join(WINDOWS_SEPARATOR);
+  return `/^${shown}$/${match?.[2] ?? ''}`;
 }
 
 function escapeSlash(value: string): string {

@@ -867,7 +867,7 @@ test('a missing Playwright beside the config is not a missing test file', async 
   }
 });
 
-test('a nested spec with no config and no Playwright names the missing binary', async () => {
+test('a nested spec with no config and no Playwright names the missing Playwright CLI', async () => {
   const kit = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-nopw-nested-'));
   fs.mkdirSync(path.join(kit, 'tests'), { recursive: true });
   fs.writeFileSync(path.join(kit, 'tests', 'flaky-slow-user.spec.ts'), 'test\n');
@@ -885,7 +885,8 @@ test('a nested spec with no config and no Playwright names the missing binary', 
       }),
       (error) => {
         assert.match(error.message, /Local Playwright was not found/);
-        assert.match(error.message, /node_modules[/\\]\.bin[/\\]playwright/);
+        assert.match(error.message, /not found in \S*node_modules\./);
+        assert.match(error.message, /playwright\/cli\.js and @playwright\/test\/cli\.js/);
         assert.equal(error.message.includes('Cannot find test file'), false);
         return true;
       },
