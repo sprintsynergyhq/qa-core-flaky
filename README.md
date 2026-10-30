@@ -4,7 +4,7 @@ qa-core-flaky triages flaky Playwright tests. It separates a likely real bug fro
 
 ## Status
 
-Version 0.1.0. The commands are `parse`, `causes`, `triage`, and `rerun`.
+Version 0.1.1. The commands are `parse`, `causes`, `triage`, and `rerun`.
 
 ## Install
 
@@ -103,3 +103,5 @@ Tests and CI use the committed report. They do not install browsers and they do 
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+Built by [SprintSynergy](https://sprintsynergy.com) and maintained by [Muhammad Usman](https://linkedin.com/in/sdet-muhammadusman).
