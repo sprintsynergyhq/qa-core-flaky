@@ -8,9 +8,12 @@ import test from 'node:test';
 import Ajv from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 import {
+  DEFAULT_HEAL_TIMEOUT_MS,
+  MAX_HEAL_TIMEOUT_MS,
   findingIdFor,
   findingsPathIsTriageOutput,
   healCommand,
+  healExitReserveMs,
   healTimeoutMs,
   installHealStopHandlers,
   proposalFromCompatRow,
@@ -596,21 +599,80 @@ test('an applied dry-run row becomes an error', () => {
   assert.equal(proposal.changes.length, 0);
 });
 
-test('the heal timeout honours 120 seconds and clamps above it', () => {
+test('the heal timeout defaults to 180 seconds and clamps above 10 minutes', () => {
   const saved = process.env.QA_CORE_HEAL_TIMEOUT_MS;
   try {
-    process.env.QA_CORE_HEAL_TIMEOUT_MS = '120000';
-    assert.equal(healTimeoutMs(), 120_000);
+    assert.equal(DEFAULT_HEAL_TIMEOUT_MS, 180_000);
+    assert.equal(MAX_HEAL_TIMEOUT_MS, 600_000);
+    delete process.env.QA_CORE_HEAL_TIMEOUT_MS;
+    assert.equal(healTimeoutMs(), 180_000);
+    for (const bad of ['', '   ', '0', '-5', '12.5', '60s', '1e5', '007', 'abc', '99999999999999999999']) {
+      process.env.QA_CORE_HEAL_TIMEOUT_MS = bad;
+      assert.equal(healTimeoutMs(), 180_000, bad);
+    }
+    process.env.QA_CORE_HEAL_TIMEOUT_MS = ' 300000 ';
+    assert.equal(healTimeoutMs(), 300_000);
     process.env.QA_CORE_HEAL_TIMEOUT_MS = '130000';
-    assert.equal(healTimeoutMs(), 120_000);
+    assert.equal(healTimeoutMs(), 130_000);
+    process.env.QA_CORE_HEAL_TIMEOUT_MS = '600000';
+    assert.equal(healTimeoutMs(), 600_000);
+    process.env.QA_CORE_HEAL_TIMEOUT_MS = '600001';
+    assert.equal(healTimeoutMs(), 600_000);
+    process.env.QA_CORE_HEAL_TIMEOUT_MS = '60000';
+    assert.equal(healTimeoutMs(), 60_000);
     process.env.QA_CORE_HEAL_TIMEOUT_MS = '5000';
     assert.equal(healTimeoutMs(), 5000);
-    process.env.QA_CORE_HEAL_TIMEOUT_MS = '0';
-    assert.equal(healTimeoutMs(), 60_000);
   } finally {
     if (saved === undefined) delete process.env.QA_CORE_HEAL_TIMEOUT_MS;
     else process.env.QA_CORE_HEAL_TIMEOUT_MS = saved;
   }
+});
+
+test('heal gets --run-timeout under the flaky wait, with an exit reserve that scales', () => {
+  assert.equal(healExitReserveMs(1_500), 1_000);
+  assert.equal(healExitReserveMs(10_000), 1_000);
+  assert.equal(healExitReserveMs(60_000), 6_000);
+  assert.equal(healExitReserveMs(150_000), 15_000);
+  assert.equal(healExitReserveMs(180_000), 15_000);
+  assert.equal(healExitReserveMs(600_000), 15_000);
+  assert.equal(runTimeoutSeconds(180_000), 165);
+  assert.equal(runTimeoutSeconds(178_500), 163);
+  assert.equal(runTimeoutSeconds(600_000), 585);
+  assert.equal(runTimeoutSeconds(60_000), 54);
+  assert.equal(runTimeoutSeconds(5_000), 4);
+  assert.equal(runTimeoutSeconds(2_000), 1);
+  assert.equal(runTimeoutSeconds(1_999), null);
+  assert.equal(runTimeoutSeconds(0), null);
+  assert.equal(runTimeoutSeconds(-1), null);
+  assert.equal(runTimeoutSeconds(Number.NaN), null);
+  assert.equal(runTimeoutSeconds(Number.POSITIVE_INFINITY), null);
+  for (let ms = 2_000; ms <= 600_000; ms += 997) {
+    const seconds = runTimeoutSeconds(ms);
+    assert.ok(seconds !== null && seconds >= 1, String(ms));
+    assert.ok(seconds * 1000 + 1000 <= ms, `${ms} gives ${seconds}`);
+    assert.ok(seconds * 1000 + 16_000 > ms, `${ms} gives ${seconds}`);
+  }
+});
+
+test('triage --heal without QA_CORE_HEAL_TIMEOUT_MS gives heal about 165 seconds', (t) => {
+  const dir = keepTemp(t, 'heal-default-wait-');
+  const caps = JSON.parse(fs.readFileSync('fixtures/heal/heal-0.4.0-capabilities.json', 'utf8'));
+  caps.features.runTimeout = true;
+  const capsPath = path.join(dir, 'caps.json');
+  fs.writeFileSync(capsPath, JSON.stringify(caps));
+  const env = { ...process.env, ...healEnv(dir, 'contract', { FAKE_HEAL_CAPABILITIES: capsPath }) };
+  delete env.QA_CORE_HEAL_TIMEOUT_MS;
+  const result = spawnSync(process.execPath, [cli, 'triage', recorded, '--out-dir', dir, '--heal', '--fail-on', 'never'], {
+    encoding: 'utf8',
+    env,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const contract = argvLog(dir).find((args) => args.includes('--findings'));
+  assert.ok(contract);
+  const at = contract.indexOf('--run-timeout');
+  assert.ok(at > 0);
+  const seconds = Number(contract[at + 1]);
+  assert.ok(Number.isInteger(seconds) && seconds >= 150 && seconds <= 165, String(seconds));
 });
 
 test('without a local install, macOS and Linux fall back to npx without installing from the registry', (t) => {

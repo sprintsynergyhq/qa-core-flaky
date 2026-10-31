@@ -7,7 +7,16 @@ import { DETACH_CHILDREN, rerunChildEnv, stopChildTree } from '../rerun/run.js';
 /** Flags this tool must never put on a heal command line. */
 export const FORBIDDEN_HEAL_ARGS = ['--apply', '--yes', '--no-verify'] as const;
 
-const DEFAULT_TIMEOUT_MS = 60_000;
+/**
+ * The default wait for the whole heal step: the capabilities probe and the
+ * findings command share it. In a Windows test with qa-core-heal 0.7.2 and
+ * one locator finding, heal alone took about 47 seconds and the heal step
+ * about 57 seconds, so the old 60 second default sometimes timed out.
+ */
+export const DEFAULT_HEAL_TIMEOUT_MS = 180_000;
+
+/** The largest wait `QA_CORE_HEAL_TIMEOUT_MS` can set: 10 minutes, the same as heal's own default. */
+export const MAX_HEAL_TIMEOUT_MS = 600_000;
 
 export type HealCommandResult = {
   /** Arguments after the heal program name. `node`, the heal script, and `npx` are not included. */
@@ -134,22 +143,41 @@ export function assertHealArgsAllowed(args: readonly string[]): void {
   }
 }
 
+/**
+ * The wait for the whole heal step, in milliseconds.
+ * `QA_CORE_HEAL_TIMEOUT_MS` sets it. A value that is not a positive whole
+ * number gives the default. A value above the maximum is clamped to it.
+ */
 export function healTimeoutMs(): number {
   const raw = process.env.QA_CORE_HEAL_TIMEOUT_MS?.trim();
-  if (!raw || !/^[1-9]\d*$/.test(raw)) return DEFAULT_TIMEOUT_MS;
+  if (!raw || !/^[1-9]\d*$/.test(raw)) return DEFAULT_HEAL_TIMEOUT_MS;
   const parsed = Number(raw);
-  if (!Number.isSafeInteger(parsed)) return DEFAULT_TIMEOUT_MS;
-  if (parsed > 120_000) return 120_000;
+  if (!Number.isSafeInteger(parsed)) return DEFAULT_HEAL_TIMEOUT_MS;
+  if (parsed > MAX_HEAL_TIMEOUT_MS) return MAX_HEAL_TIMEOUT_MS;
   return parsed;
 }
 
 /**
- * Whole seconds for heal's `--run-timeout`, one second under the flaky wait.
- * A wait under two seconds cannot be expressed as a positive whole number
- * that is still shorter, so the flag is omitted.
+ * Time kept back from heal's `--run-timeout` so heal can stop its last
+ * Playwright run, write its results file, and exit before flaky stops it.
+ * Heal's budget covers its child Playwright runs. Starting Node, the work
+ * heal does in its own process, and stopping a process tree with
+ * `taskkill /T` on Windows come on top. The reserve is 10 percent of the wait, at least 1 second and at most
+ * 15 seconds.
+ */
+export function healExitReserveMs(timeoutMs: number): number {
+  return Math.min(15_000, Math.max(1_000, Math.floor(timeoutMs / 10)));
+}
+
+/**
+ * Whole seconds for heal's `--run-timeout`: the time left in the flaky wait,
+ * less the exit reserve, rounded down. With the 180 second default this is
+ * about 165 seconds. A wait under two seconds leaves no positive whole number
+ * of seconds, so the flag is omitted.
  */
 export function runTimeoutSeconds(timeoutMs: number): number | null {
-  const seconds = Math.floor(timeoutMs / 1000) - 1;
+  if (!Number.isFinite(timeoutMs)) return null;
+  const seconds = Math.floor((timeoutMs - healExitReserveMs(timeoutMs)) / 1000);
   if (!Number.isSafeInteger(seconds) || seconds < 1) return null;
   return seconds;
 }
