@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.2 - 2026-10-30
+
+Windows fixes for `--heal`.
+
+- **Fixed:** `triage --heal` now finds qa-core-heal on Windows. It used to print `qa-core-heal is not installed. No proposal was made.` even when qa-core-heal was installed, because Windows cannot start `npx` without a shell. The tool now looks for `node_modules/qa-core-heal` in the folder where you run it and in each parent folder, and starts heal's own script with Node on every OS. On macOS and Linux, `npx --no-install qa-core-heal` is still the fallback when heal is not installed there. Reported by Abdul Rafay.
+- **Changed:** The default wait for the heal step is now 180 seconds instead of 60 seconds. On Windows one locator finding took about 57 seconds with qa-core-heal 0.7.2, so `triage --heal` sometimes refused it with `timeout` and `The re-run in the copy timed out.` `QA_CORE_HEAL_TIMEOUT_MS` can now set up to 600000 (10 minutes) instead of 120000. Reported by Abdul Rafay.
+- **Changed:** Heal's `--run-timeout` now keeps back 10 percent of the time left, at least 1 second and at most 15 seconds, instead of 1 second. This gives heal time to stop its last run and write its results before flaky stops it. With the default wait, heal gets about 165 seconds.
+- **Docs:** The README and the heal contract explain how heal is found and started, and what happens on Windows when it is not installed. The README now documents `QA_CORE_HEAL_TIMEOUT_MS`, with a Windows example.
+- **Tests:** New tests cover the heal lookup, parent folders, the `bin` field, a `bin` that leaves the package folder, the Windows fallback, and a full `triage --heal` run that finds heal in `node_modules`. New tests cover the 180 second default, the 10 minute limit, the `--run-timeout` reserve, and the value sent to heal when `QA_CORE_HEAL_TIMEOUT_MS` is not set. The HTML example now shows version 0.1.2.
+
 ## 0.1.1 - 2026-10-30
 
 A Windows fix for `rerun`, plus package details and docs.

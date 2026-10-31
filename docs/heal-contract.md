@@ -18,17 +18,25 @@ The user's `--heal-findings` file is written before `triage.json` and `triage.md
 
 `--heal` is valid for `triage` only. It asks qa-core-heal for a dry run and stores one `healProposal` on every triage entry. The command never passes `--apply`, `--yes`, or `--no-verify`. A person can still read `applyCommand` and run that later. This tool does not run it.
 
-The program is `npx --no-install qa-core-heal`. A missing local install is status `unavailable`. The registry copy is not fetched. A copy of qa-core-heal already in the npx cache can still run. Install qa-core-heal as a dev dependency for predictable results. `QA_CORE_HEAL_BIN` selects another program. A path that ends in `.js` or `.mjs` is run with `node`. The default wait is 60 seconds. `QA_CORE_HEAL_TIMEOUT_MS` can set another wait. A value above 120 seconds is clamped to 120 seconds. The wait stops the heal process and its descendants, including a descendant that is in another process group. A grandchild that still holds a pipe does not keep the run open. `SIGINT` and `SIGTERM` do the same. Heal is started with `TMPDIR`, `TMP`, and `TEMP` set to a folder inside the temporary findings folder, so heal's own output is removed with that folder after those processes are gone. Those handlers are removed when the heal run ends.
+Flaky finds heal in this order. Nothing is started from a shell.
+
+1. `QA_CORE_HEAL_BIN`, when it is set. A path that ends in `.js` or `.mjs` is run with the same Node that runs flaky. Any other path is started as a program. On Windows a path that ends in `.cmd` or `.bat` is not started, because Node does not start those files without a shell, and the status is `unavailable`. Point it at the `.js` file instead. Running a `.cmd` file is not supported.
+2. A local install. Flaky looks for `node_modules/qa-core-heal/package.json` in the working directory, then in each parent folder up to the filesystem root, the same way Node resolves a package. The first one found is used. Its `bin` field names the script: either a string, or the `qa-core-heal` key of an object. The package name must be `qa-core-heal`, and the script must be a file inside the package folder. Flaky runs that script with the same Node that runs flaky, on every OS. It does not start the `node_modules/.bin/qa-core-heal` shim, because on Windows that is a `.cmd` file that Node does not start without a shell.
+3. On macOS and Linux only, `npx --no-install qa-core-heal`. The registry copy is not fetched, so a missing install is status `unavailable`. A copy of qa-core-heal already in the npx cache can still run. On Windows `npx` is a `.cmd` file, so this step is skipped and the status is `unavailable`.
+
+Install qa-core-heal as a dev dependency for predictable results.
+
+The default wait is 180 seconds. `QA_CORE_HEAL_TIMEOUT_MS` can set another wait in milliseconds. It must be a positive whole number. Any other value gives the default. A value above 600000 (10 minutes) is clamped to 10 minutes. Before 0.1.2 the default was 60 seconds and the largest value was 120 seconds. On Windows one locator finding took about 57 seconds in a test with qa-core-heal 0.7.2, so 60 seconds was too tight. The wait stops the heal process and its descendants, including a descendant that is in another process group. A grandchild that still holds a pipe does not keep the run open. `SIGINT` and `SIGTERM` do the same. Heal is started with `TMPDIR`, `TMP`, and `TEMP` set to a folder inside the temporary findings folder, so heal's own output is removed with that folder after those processes are gone. Those handlers are removed when the heal run ends.
 
 The capabilities check, the version check, and every spec command share that one wait. A later command gets only the time that is left. When no time is left, the remaining rows are `error` with refusal code `timeout`, and heal is not started for them.
 
 A re-run-verified fix needs qa-core-heal 0.4.0 or later. qa-core-heal 0.3.x uses the older Compat Mode below.
 
-When `capabilities --json` reports `features.runTimeout` as true, the findings command also gets `--run-timeout`. The value is a whole number of seconds, one second under the time left in the flaky wait. A wait under two seconds does not get the flag, because no positive whole number of seconds is still shorter. The qa-core-heal 0.4.0 build recorded from git `2bc0407` on 2026-10-27 does not set `features.runTimeout`. Its features are `findings`, `targetedRun`, `ruleSuggestions`, and `ai`. The flag is not sent to that build. Flaky sends the flag to any qa-core-heal build that reports `features.runTimeout` as true. qa-core-heal 0.4.2 reports it. Compat mode never sends it.
+When `capabilities --json` reports `features.runTimeout` as true, the findings command also gets `--run-timeout`. The value is a whole number of seconds: the time left in the flaky wait, less a reserve, rounded down. The reserve is 10 percent of the time left, at least 1 second and at most 15 seconds. It gives heal time to stop its last Playwright run, write the results file, and exit before flaky stops it, because heal's own limit covers only its child Playwright runs. With the default wait, heal gets about 165 seconds. When heal's limit runs out first, heal itself refuses the finding it could not finish, with refusal code `timeout`. A wait under two seconds does not get the flag, because no positive whole number of seconds is left. The qa-core-heal 0.4.0 build recorded from git `2bc0407` on 2026-10-27 does not set `features.runTimeout`. Its features are `findings`, `targetedRun`, `ruleSuggestions`, and `ai`. The flag is not sent to that build. Flaky sends the flag to any qa-core-heal build that reports `features.runTimeout` as true. qa-core-heal 0.4.2 reports it. Compat mode never sends it.
 
 ### Contract Mode
 
-`npx --no-install qa-core-heal capabilities --json` selects this mode when the JSON reports findings contract 1 and results contract 1. These shapes count:
+`qa-core-heal capabilities --json` selects this mode when the JSON reports findings contract 1 and results contract 1. These shapes count:
 
 | Field | Contract 1 |
 | --- | --- |
@@ -39,7 +47,7 @@ When `capabilities --json` reports `features.runTimeout` as true, the findings c
 
 qa-core-heal 0.4.0 or later reports `contracts.findings` and `contracts.results` as arrays, for example `[1]`.
 
-The dry run is one command: `npx --no-install qa-core-heal --findings <file> --results <file> --dry-run`. Test titles are not passed on the command line. Heal reads each test from the findings file. A title of `--apply` therefore cannot be read as a flag. Heal writes the results file. Flaky reads it and does not keep it.
+The dry run is one command: `qa-core-heal --findings <file> --results <file> --dry-run`. Test titles are not passed on the command line. Heal reads each test from the findings file. A title of `--apply` therefore cannot be read as a flag. Heal writes the results file. Flaky reads it and does not keep it.
 
 The file heal reads is a temporary copy. A spec path that is relative to the Playwright `testDir` is rewritten to a path that exists from the working folder. `config.rootDir` is tried the same way. The user's `--heal-findings` file stores that same path, so `qa-core-heal --findings` on that file can open the spec. The finding id is the hash of the stored path, the project, and the title path. An unnamed Playwright project is stored as `default` in that file. The temporary copy writes an empty project string, so heal is not asked for a project named `default`. The id is not recomputed for that empty string.
 
@@ -47,13 +55,13 @@ A handoff of `none` stays `skipped-by-gate` even if heal also returns a row. The
 
 ### Compat Mode
 
-qa-core-heal 0.3.x has no `capabilities` command. When `capabilities` is missing, flaky runs `npx --no-install qa-core-heal --version`, and for each spec file `npx --no-install qa-core-heal <spec> --dry-run --json`. The spec path is resolved the same way as in contract mode. Rows are the `verdicts` array. Heal ran that one spec, so the rows join on `testTitle` only. The title may be the full title path or only the last segment. `spec` on a verdict is the file that holds the locator. A page object is a different file from the spec that was run, and that path is the change file, not a join key. Two verdicts in one run with the same title are not guessed: both proposals are `error`. Heal 0.3.x output has no test id, so nothing better is possible. A locator verdict with `after` set and `healApplied` false becomes `proposed`. The line comes from the matching `locators` row (`file` and `old` equal to `before`). The change file is `verdicts[].spec`, or the locator file when spec is empty. A refused locator becomes `refused` with its `reason`. `classification` `non-locator` becomes `not-locator`. `healApplied` true becomes `error`, because this command only asks for a dry run.
+qa-core-heal 0.3.x has no `capabilities` command. When `capabilities` is missing, flaky runs `qa-core-heal --version`, and for each spec file `qa-core-heal <spec> --dry-run --json`. The spec path is resolved the same way as in contract mode. Rows are the `verdicts` array. Heal ran that one spec, so the rows join on `testTitle` only. The title may be the full title path or only the last segment. `spec` on a verdict is the file that holds the locator. A page object is a different file from the spec that was run, and that path is the change file, not a join key. Two verdicts in one run with the same title are not guessed: both proposals are `error`. Heal 0.3.x output has no test id, so nothing better is possible. A locator verdict with `after` set and `healApplied` false becomes `proposed`. The line comes from the matching `locators` row (`file` and `old` equal to `before`). The change file is `verdicts[].spec`, or the locator file when spec is empty. A refused locator becomes `refused` with its `reason`. `classification` `non-locator` becomes `not-locator`. `healApplied` true becomes `error`, because this command only asks for a dry run.
 
 The label is `Heal 0.3.x dry run, not re-run verified`. A handoff of `none` uses that same label. `verification.performed` is false. That proposal is not a re-run result. The results schema's re-run rule is not applied to this older output. The proposal schema still accepts it.
 
 ### Missing Heal
 
-When the program cannot be started, every entry gets status `unavailable` and this one line is printed:
+When heal is not found or cannot be started, every entry gets status `unavailable` and this one line is printed:
 
 `qa-core-heal is not installed. No proposal was made.`
 

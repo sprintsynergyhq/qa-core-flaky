@@ -4,7 +4,7 @@ qa-core-flaky triages flaky Playwright tests. It separates a likely real bug fro
 
 ## Status
 
-Version 0.1.1. The commands are `parse`, `causes`, `triage`, and `rerun`.
+Version 0.1.2. The commands are `parse`, `causes`, `triage`, and `rerun`.
 
 ## Install
 
@@ -41,7 +41,19 @@ The format is detected from the file contents. The root element must be `testsui
 
 `triage` writes `triage.json` and `triage.md` for each failed or flaky test. The JSON schema is [docs/report-schema.md](docs/report-schema.md). The verdict rows are [docs/verdicts.md](docs/verdicts.md). The default exit code is 2 when the report has at least one entry, and 0 when it has none. `--fail-on never` exits 0 after the files are written. A tool error exits 1. Do not point `--out-dir` at a directory under `/proc`. Creating a directory there can hang, which is a Node bug, and the command does not probe `/proc`.
 
-`--heal-findings <file>` writes a findings file for qa-core-heal. `--heal` asks qa-core-heal for a dry run and stores the result on `healProposal`. The program is `npx --no-install qa-core-heal`, so a missing local install is not downloaded from the registry. A copy already in the npx cache can still run, so install qa-core-heal as a dev dependency for predictable results. Without `--heal`, that field stays null. The command never passes `--apply`, `--yes`, or `--no-verify`. The fields, the five handoff gates, and the redaction rules are in [docs/heal-contract.md](docs/heal-contract.md).
+`--heal-findings <file>` writes a findings file for qa-core-heal. `--heal` asks qa-core-heal for a dry run and stores the result on `healProposal`. Install qa-core-heal as a dev dependency in the project. Flaky looks for `node_modules/qa-core-heal` in the folder where you run it, then in each parent folder, and starts heal's own script with Node. This works the same on Windows, macOS, and Linux. If heal is not installed there, macOS and Linux fall back to `npx --no-install qa-core-heal`, which never downloads from the registry. Windows has no fallback, and the status is `unavailable`. Without `--heal`, that field stays null. The command never passes `--apply`, `--yes`, or `--no-verify`. The fields, the five handoff gates, and the redaction rules are in [docs/heal-contract.md](docs/heal-contract.md).
+
+Flaky waits up to 180 seconds for the whole heal step. Each locator finding that heal verifies runs Playwright several times, so the step takes longer with more locator findings and on slower machines. Set `QA_CORE_HEAL_TIMEOUT_MS` to change the wait, in milliseconds, up to 600000 (10 minutes). When heal runs out of time, it refuses that finding with refusal code `timeout`, for example with the message `The re-run in the copy timed out.` If heal does not finish inside the wait, flaky stops it, prints `qa-core-heal timed out.`, and every finding handed to heal gets status `error` with refusal code `timeout`.
+
+On Windows heal is slower. In a test with qa-core-heal 0.7.2 and one locator finding, the heal step took about 57 seconds on Windows. If you see `timeout` refusals, raise the wait:
+
+```powershell
+$env:QA_CORE_HEAL_TIMEOUT_MS = "300000"
+npx qa-core-flaky triage <report.json> --out-dir out --heal
+Remove-Item Env:QA_CORE_HEAL_TIMEOUT_MS
+```
+
+On macOS and Linux: `QA_CORE_HEAL_TIMEOUT_MS=300000 npx qa-core-flaky triage <report.json> --out-dir out --heal`.
 
 ## HTML Report
 
