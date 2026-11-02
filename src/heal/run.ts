@@ -281,8 +281,9 @@ export async function stopHealRun(signal: NodeJS.Signals, deps: HealStopDeps = {
 
 function withinMs(job: Promise<void>, ms: number): Promise<void> {
   return new Promise((resolve, reject) => {
+    // Keep this timer referenced. If stopping the tree hangs, the stop must
+    // still finish and exit with the right code.
     const timer = setTimeout(resolve, ms);
-    timer.unref?.();
     job.then(
       () => {
         clearTimeout(timer);
