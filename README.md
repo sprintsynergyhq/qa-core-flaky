@@ -45,7 +45,7 @@ The format is detected from the file contents. The root element must be `testsui
 
 Flaky waits up to 180 seconds for the whole heal step. Each locator finding that heal verifies runs Playwright several times, so the step takes longer with more locator findings and on slower machines. Set `QA_CORE_HEAL_TIMEOUT_MS` to change the wait, in milliseconds, up to 600000 (10 minutes). When heal runs out of time, it refuses that finding with refusal code `timeout`, for example with the message `The re-run in the copy timed out.` If heal does not finish inside the wait, flaky stops it, prints `qa-core-heal timed out.`, and every finding handed to heal gets status `error` with refusal code `timeout`.
 
-On Windows heal is slower. In a test with qa-core-heal 0.7.2 and one locator finding, the heal step took about 57 seconds on Windows. If you see `timeout` refusals, raise the wait:
+On Windows heal is slower. In a Windows test with qa-core-heal 0.7.2 and one locator finding, the whole `triage --heal` command took about 57 seconds, and heal run directly took about 47 seconds. If you see `timeout` refusals, raise the wait:
 
 ```powershell
 $env:QA_CORE_HEAL_TIMEOUT_MS = "300000"
@@ -54,6 +54,8 @@ Remove-Item Env:QA_CORE_HEAL_TIMEOUT_MS
 ```
 
 On macOS and Linux: `QA_CORE_HEAL_TIMEOUT_MS=300000 npx qa-core-flaky triage <report.json> --out-dir out --heal`.
+
+If you press Ctrl+C during `triage --heal`, flaky stops heal and the browsers it started, removes its `qa-core-flaky-heal-*` folder in the temp directory, does not write the triage report, and exits 130. Ctrl+Break on Windows does the same. On Windows PowerShell, `npx` runs through `npx.ps1`, and after Ctrl+C `$LASTEXITCODE` shows 1 instead of 130. Run `node node_modules/qa-core-flaky/dist/cli.js` directly to see 130. The cleanup is the same either way.
 
 ## HTML Report
 

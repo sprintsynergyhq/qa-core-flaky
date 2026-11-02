@@ -10,8 +10,9 @@ export const FORBIDDEN_HEAL_ARGS = ['--apply', '--yes', '--no-verify'] as const;
 /**
  * The default wait for the whole heal step: the capabilities probe and the
  * findings command share it. In a Windows test with qa-core-heal 0.7.2 and
- * one locator finding, heal alone took about 47 seconds and the heal step
- * about 57 seconds, so the old 60 second default sometimes timed out.
+ * one locator finding, heal run directly took about 47 seconds and the whole
+ * `triage --heal` command about 57 seconds, so the old 60 second default
+ * sometimes timed out.
  */
 export const DEFAULT_HEAL_TIMEOUT_MS = 180_000;
 
