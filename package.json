@@ -1,6 +1,6 @@
 {
   "name": "qa-core-flaky",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Triage flaky Playwright tests: real bug or flaky, likely cause, and a suggested fix to review.",
   "type": "module",
   "license": "MIT",

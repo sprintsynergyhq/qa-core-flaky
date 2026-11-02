@@ -41,6 +41,9 @@ if (mode === 'grandchild') {
 } else if (mode === 'orphan' && args.includes('--findings')) {
   startDetachedLeak('47');
   holding = true;
+} else if (mode === 'slow-browser' && args.includes('--findings')) {
+  startSlowBrowser();
+  holding = true;
 } else if (args[0] === 'capabilities') {
   if (mode === 'compat' || mode === 'compat-hang') {
     process.stderr.write('unknown command capabilities\n');
@@ -280,6 +283,42 @@ function startDetachedLeak(seconds) {
     const findingsPath = args.includes('--findings') ? valueAfter('--findings') : '';
     const flakyDir = findingsPath ? path.dirname(findingsPath) : '';
     fs.writeFileSync(note, `${flakyDir}\n${out}\n${child.pid ?? ''}\n`);
+  }
+}
+
+/**
+ * Acts like heal in the middle of a Playwright run: a browser profile and a
+ * heal output folder with a trace, both where TMPDIR/TMP/TEMP point, and a
+ * child in the same process group that keeps writing to the profile.
+ * FAKE_HEAL_SIGINT=exit makes this process exit 130 on SIGINT, like heal on a
+ * Windows console where Ctrl+C reaches every process. Otherwise SIGINT is ignored.
+ */
+function startSlowBrowser() {
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'playwright_chromiumdev_profile-'));
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-heal-out-'));
+  const traceDir = path.join(out, 'first', 'cart-spec-chromium');
+  fs.mkdirSync(traceDir, { recursive: true });
+  fs.writeFileSync(path.join(traceDir, 'trace.zip'), Buffer.alloc(4096, 1));
+  fs.writeFileSync(path.join(traceDir, 'error-context.md'), 'stand-in\n');
+  const writer = spawn(
+    process.execPath,
+    [
+      '-e',
+      'const fs=require("node:fs");const path=require("node:path");const dir=process.argv[1];let n=0;setInterval(()=>{try{fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,"Cache-"+(n++%20)),String(Date.now()));}catch{}},10);',
+      profile,
+    ],
+    { stdio: 'ignore' },
+  );
+  process.on('SIGINT', () => {
+    if (process.env.FAKE_HEAL_SIGINT === 'exit') {
+      try { writer.kill('SIGKILL'); } catch {}
+      process.exit(130);
+    }
+  });
+  const note = process.env.FAKE_HEAL_TEMP_NOTE;
+  if (note) {
+    const flakyDir = path.dirname(valueAfter('--findings'));
+    fs.writeFileSync(note, `${flakyDir}\n${out}\n${writer.pid ?? ''}\n${profile}\n${process.pid}\n`);
   }
 }
 
