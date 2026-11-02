@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -182,29 +182,158 @@ export function runTimeoutSeconds(timeoutMs: number): number | null {
   return seconds;
 }
 
+/** Every temporary heal folder this tool makes starts with this name. Cleanup removes nothing else. */
+export const HEAL_TEMP_PREFIX = 'qa-core-flaky-heal-';
+
+/**
+ * Signals that stop a heal run. Ctrl+C is SIGINT on every OS. On Windows,
+ * Ctrl+Break is SIGBREAK and closing the console window is SIGHUP.
+ * Node can listen for SIGBREAK on macOS and Linux too, but nothing sends it there.
+ */
+export const HEAL_STOP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] as const;
+
+/** Exit status after a stop signal. Ctrl+C and Ctrl+Break both exit 130. */
+export function healStopExitCode(signal: NodeJS.Signals): number {
+  if (signal === 'SIGTERM') return 143;
+  if (signal === 'SIGHUP') return 129;
+  return 130;
+}
+
+/** The longest wait for the child tree to stop after a stop signal, before the folder is removed anyway. */
+export const HEAL_STOP_KILL_WAIT_MS = 10_000;
+
+/**
+ * Retries for removing the temporary heal folder. On Windows a browser or
+ * Playwright process that was just stopped can hold files open for a moment,
+ * so the first delete can fail with EBUSY or EPERM. Node waits 100 ms more on
+ * each try, about 5.5 seconds in total.
+ */
+const REMOVE_RETRIES = { maxRetries: 10, retryDelay: 100 } as const;
+
+/** How long to wait for this process's own stop signal after heal exits as if interrupted. */
+export const INTERRUPTED_CHILD_WAIT_MS = 1_000;
+
+/** Windows reports a process ended by Ctrl+C with STATUS_CONTROL_C_EXIT. */
+const WINDOWS_CTRL_C_EXIT = 0xc000013a;
+
+/**
+ * True when heal ended the way a stop signal ends it: exit code 130, 143,
+ * or 129 (heal's own signal handler), the Windows Ctrl+C status, or a
+ * SIGINT, SIGTERM, SIGHUP, or SIGBREAK signal.
+ */
+export function stoppedBySignal(exitCode: number | null, signal: NodeJS.Signals | null): boolean {
+  if (signal !== null) return (HEAL_STOP_SIGNALS as readonly string[]).includes(signal);
+  return exitCode === 130 || exitCode === 143 || exitCode === 129 || exitCode === WINDOWS_CTRL_C_EXIT;
+}
+
 const healStop = {
   child: null as ChildProcess | null,
   tempDir: null as string | null,
 };
 let healStopHandlersOn = false;
 let healStopInProgress = false;
+let healExitHandlerOn = false;
+/** Folders a delete could not remove yet. The exit handler tries them again. */
+const leftoverHealTemps = new Set<string>();
 
 function onHealStop(signal: NodeJS.Signals): void {
-  if (healStopInProgress) return;
+  void stopHealRun(signal);
+}
+
+export type HealStopDeps = {
+  /** Stops the child and its descendants. The default is `stopChildTree`. */
+  stopTree?: (child: ChildProcess) => Promise<void>;
+  /** Ends the process. The default is `process.exit`. */
+  exit?: (code: number) => void;
+  /** The longest wait for `stopTree`. */
+  killWaitMs?: number;
+};
+
+/**
+ * What a stop signal does during a heal run: stop the heal child and every
+ * descendant (`taskkill /T /F` on Windows, the process groups elsewhere),
+ * then remove the temporary heal folder synchronously, with retries for
+ * Windows file locks, then exit 130 for Ctrl+C. Only a folder whose name
+ * starts with `qa-core-flaky-heal-` is removed, so test files and reports
+ * are never touched. A second signal while this runs does nothing.
+ * Resolves with the exit code, or null when a stop was already running.
+ */
+export async function stopHealRun(signal: NodeJS.Signals, deps: HealStopDeps = {}): Promise<number | null> {
+  if (healStopInProgress) return null;
   healStopInProgress = true;
   const child = healStop.child;
   const dir = healStop.tempDir;
-  void (async () => {
-    if (child) {
-      try {
-        await stopChildTree(child);
-      } catch {
-        // The folder is still removed.
-      }
+  const stopTree = deps.stopTree ?? stopChildTree;
+  if (child) {
+    try {
+      await withinMs(stopTree(child), deps.killWaitMs ?? HEAL_STOP_KILL_WAIT_MS);
+    } catch {
+      // The folder is still removed.
     }
-    removeHealTemp(dir);
-    process.exit(signal === 'SIGTERM' ? 143 : 130);
-  })();
+    // The tree is stopped. The exit handler must not kill this pid again.
+    if (healStop.child === child) bindHealChild(null);
+  }
+  removeHealTemp(dir);
+  const code = healStopExitCode(signal);
+  (deps.exit ?? ((value: number) => process.exit(value)))(code);
+  return code;
+}
+
+function withinMs(job: Promise<void>, ms: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+    job.then(
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
+
+/**
+ * Last cleanup when the process exits for any reason, for example an
+ * uncaught error or a `process.exit` elsewhere. Only synchronous work runs
+ * here: a child that is still running is stopped with `taskkill /T /F` on
+ * Windows or SIGKILL to its process group elsewhere, then the bound folder
+ * and any folder an earlier delete could not remove are removed.
+ */
+export function onHealProcessExit(): void {
+  const child = healStop.child;
+  if (child && child.exitCode === null && child.signalCode === null) killTreeSync(child);
+  const dirs = new Set(leftoverHealTemps);
+  if (healStop.tempDir) dirs.add(healStop.tempDir);
+  for (const dir of dirs) removeHealTemp(dir);
+}
+
+function killTreeSync(child: ChildProcess): void {
+  const pid = child.pid;
+  if (pid === undefined || !Number.isInteger(pid) || pid <= 1) return;
+  if (process.platform === 'win32') {
+    try {
+      spawnSync('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true, timeout: 5_000 });
+    } catch {
+      // The process has already exited.
+    }
+    return;
+  }
+  if (DETACH_CHILDREN) {
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      // The group has already exited.
+    }
+  }
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    // The process has already exited.
+  }
 }
 
 /** Remember the heal child so a later interrupt can kill its process group. */
@@ -217,20 +346,26 @@ export function bindHealTempDir(dir: string | null): void {
   healStop.tempDir = dir;
 }
 
-/** Handle SIGINT and SIGTERM for the current heal run. A second call does nothing. */
+/**
+ * Handle SIGINT, SIGTERM, SIGHUP, and SIGBREAK for the current heal run, and
+ * add a one-time exit handler for leftovers. A second call does nothing.
+ */
 export function installHealStopHandlers(): void {
+  if (!healExitHandlerOn) {
+    process.on('exit', onHealProcessExit);
+    healExitHandlerOn = true;
+  }
   if (healStopHandlersOn) return;
-  process.on('SIGINT', onHealStop);
-  process.on('SIGTERM', onHealStop);
+  for (const signal of HEAL_STOP_SIGNALS) process.on(signal, onHealStop);
   healStopHandlersOn = true;
 }
 
 /** Drop the interrupt handlers. Later commands are not tied to this heal run. */
 export function removeHealStopHandlers(): void {
-  if (!healStopHandlersOn) return;
-  process.off('SIGINT', onHealStop);
-  process.off('SIGTERM', onHealStop);
-  healStopHandlersOn = false;
+  if (healStopHandlersOn) {
+    for (const signal of HEAL_STOP_SIGNALS) process.off(signal, onHealStop);
+    healStopHandlersOn = false;
+  }
   healStop.child = null;
   healStop.tempDir = null;
   healStopInProgress = false;
@@ -253,7 +388,7 @@ export function runHealCommand(args: readonly string[], timeoutMs: number = heal
     let stdout = '';
     let stderr = '';
     let timedOut = false;
-    const ownedTemp = healStop.tempDir ? null : fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-heal-'));
+    const ownedTemp = healStop.tempDir ? null : fs.mkdtempSync(path.join(os.tmpdir(), HEAL_TEMP_PREFIX));
     if (ownedTemp) bindHealTempDir(ownedTemp);
     const tempRoot = healStop.tempDir ?? os.tmpdir();
     let child: ChildProcess;
@@ -288,6 +423,7 @@ export function runHealCommand(args: readonly string[], timeoutMs: number = heal
       timedOut = true;
       void (async () => {
         await stopChildTree(child);
+        if (healStop.child === child) bindHealChild(null);
         child.stdout?.destroy();
         child.stderr?.destroy();
         child.unref();
@@ -320,25 +456,50 @@ export function runHealCommand(args: readonly string[], timeoutMs: number = heal
         spawnError: error.code ?? error.message,
       });
     });
-    child.on('close', (exitCode) => {
+    child.on('close', (exitCode, signal) => {
       clearTimeout(timer);
       // A timeout or a stop signal owns the kill and the folder removal.
       // Walking after a clean exit would miss a descendant that was already reparented.
       if (timedOut || healStopInProgress) return;
       if (healStop.child === child) bindHealChild(null);
-      releaseOwned();
-      finish({ args, argv, command, exitCode, stdout, stderr, timedOut });
+      const done = () => {
+        if (healStopInProgress) return;
+        releaseOwned();
+        finish({ args, argv, command, exitCode, stdout, stderr, timedOut });
+      };
+      // On a Windows console, Ctrl+C reaches heal too, and heal can exit
+      // before this process sees its own SIGINT. Wait a moment for that
+      // signal so the stop handler, not the report, decides what happens.
+      if (stoppedBySignal(exitCode, signal)) setTimeout(done, INTERRUPTED_CHILD_WAIT_MS);
+      else done();
     });
   });
 }
 
-function removeHealTemp(dir: string | null): void {
-  if (!dir) return;
+/**
+ * Remove a temporary heal folder synchronously, with retries for Windows file
+ * locks. Only an absolute path whose last part starts with
+ * `qa-core-flaky-heal-` is removed. Anything else is left alone. Never throws.
+ * Returns true when the folder is gone. A folder that is still there is
+ * tried again when the process exits.
+ */
+export function removeHealTemp(dir: string | null, rm: typeof fs.rmSync = fs.rmSync): boolean {
+  if (!dir) return true;
+  if (!path.isAbsolute(dir) || !path.basename(dir).startsWith(HEAL_TEMP_PREFIX)) return false;
   try {
-    fs.rmSync(dir, { recursive: true, force: true });
+    rm(dir, { recursive: true, force: true, ...REMOVE_RETRIES });
   } catch {
-    // The folder is already gone.
+    // Checked below.
   }
+  let gone: boolean;
+  try {
+    gone = !fs.existsSync(dir);
+  } catch {
+    gone = false;
+  }
+  if (gone) leftoverHealTemps.delete(dir);
+  else leftoverHealTemps.add(dir);
+  return gone;
 }
 
 function isForbidden(arg: string): boolean {

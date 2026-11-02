@@ -15,9 +15,11 @@ import {
 } from './proposal.js';
 import {
   bindHealTempDir,
+  HEAL_TEMP_PREFIX,
   healTimeoutMs,
   installHealStopHandlers,
   removeHealStopHandlers,
+  removeHealTemp,
   runHealCommand,
   runTimeoutSeconds,
   type HealCommandResult,
@@ -114,7 +116,7 @@ async function runContract(
   left: () => number,
   passRunTimeout: boolean,
 ): Promise<HealSession> {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-core-flaky-heal-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), HEAL_TEMP_PREFIX));
   bindHealTempDir(dir);
   try {
     const findingsPath = path.join(dir, 'heal-findings.json');
@@ -149,7 +151,8 @@ async function runContract(
     }
     return { proposals };
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    // Retries Windows file locks and never throws, so an error here cannot skip the outer cleanup.
+    removeHealTemp(dir);
   }
 }
 
