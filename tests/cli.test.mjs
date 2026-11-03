@@ -269,7 +269,7 @@ test('parse --redact hides a home username and the default leaves it', (t) => {
 
 /** A small Playwright JSON report with a Windows kit inside the home folder. */
 function windowsHomeReport(rootDir) {
-  const home = 'C:\\Users\\zrafay';
+  const home = 'C:\\Users\\zbob';
   const message = `Error: ENOENT: no such file or directory, open '${home}\\qa-private\\settings.json'`;
   const config = { version: '1.60.0', projects: [{ name: 'chromium' }] };
   if (rootDir) config.rootDir = rootDir;
@@ -296,12 +296,12 @@ function windowsHomeReport(rootDir) {
 test('parse on a Windows kit inside the home folder already prints a relative path, so --redact matches (C03)', (t) => {
   const dir = keepTemp(t, 'qa-core-flaky-c03-');
   const report = path.join(dir, 'rules.json');
-  fs.writeFileSync(report, windowsHomeReport('C:\\Users\\zrafay\\Desktop\\qa-core-testing\\saucedemo-flaky-kit\\rules'));
+  fs.writeFileSync(report, windowsHomeReport('C:\\Users\\zbob\\Desktop\\qa-core-testing\\saucedemo-flaky-kit\\rules'));
   const raw = run(['parse', report]);
   assert.equal(raw.status, 0, raw.stderr);
   const hidden = run(['parse', report, '--redact']);
   assert.equal(hidden.status, 0, hidden.stderr);
-  assert.equal(raw.stdout.includes('zrafay'), false);
+  assert.equal(raw.stdout.includes('zbob'), false);
   assert.match(raw.stdout, /\.\.\/\.\.\/\.\.\/\.\.\/qa-private\/settings\.json/);
   assert.match(raw.stdout, /File path is outside the report root and was rewritten to a relative path/);
   assert.equal(hidden.stdout, raw.stdout);
@@ -313,10 +313,10 @@ test('parse on a Windows report with no root keeps the home path and --redact hi
   fs.writeFileSync(report, windowsHomeReport(undefined));
   const raw = run(['parse', report]);
   assert.equal(raw.status, 0, raw.stderr);
-  assert.match(raw.stdout, /C:\\\\Users\\\\zrafay\\\\qa-private\\\\settings\.json/);
+  assert.match(raw.stdout, /C:\\\\Users\\\\zbob\\\\qa-private\\\\settings\.json/);
   const hidden = run(['parse', report, '--redact']);
   assert.equal(hidden.status, 0, hidden.stderr);
-  assert.equal(hidden.stdout.includes('zrafay'), false);
+  assert.equal(hidden.stdout.includes('zbob'), false);
   assert.match(hidden.stdout, /<home>\/qa-private\/settings\.json/);
 });
 

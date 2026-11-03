@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.2 - 2026-11-02
+## 0.1.2 - 2026-11-03
 
 Windows fixes for `--heal`.
 
