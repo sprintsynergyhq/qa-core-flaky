@@ -25,6 +25,14 @@ function run(args) {
   });
 }
 
+/** Run the CLI from another folder, so a test can pass a report path relative to that folder. */
+function runIn(cwd, args) {
+  return spawnSync(process.execPath, [path.resolve(cli), ...args], {
+    cwd,
+    encoding: 'utf8',
+  });
+}
+
 function oneLine(text) {
   const trimmed = text.replace(/\n$/, '');
   return !trimmed.includes('\n');
@@ -294,14 +302,17 @@ function windowsHomeReport(rootDir) {
 }
 
 test('parse on a Windows kit inside the home folder already prints a relative path, so --redact matches (C03)', (t) => {
+  // The temp folder is inside the home folder on Windows, so the report is
+  // passed as a relative path from its own folder, like a kit run. Otherwise
+  // the report path itself would show the home folder without --redact.
   const dir = keepTemp(t, 'qa-core-flaky-c03-');
-  const report = path.join(dir, 'rules.json');
-  fs.writeFileSync(report, windowsHomeReport('C:\\Users\\zbob\\Desktop\\qa-core-testing\\saucedemo-flaky-kit\\rules'));
-  const raw = run(['parse', report]);
+  fs.writeFileSync(path.join(dir, 'rules.json'), windowsHomeReport('C:\\Users\\zbob\\Desktop\\qa-core-testing\\saucedemo-flaky-kit\\rules'));
+  const raw = runIn(dir, ['parse', 'rules.json']);
   assert.equal(raw.status, 0, raw.stderr);
-  const hidden = run(['parse', report, '--redact']);
+  const hidden = runIn(dir, ['parse', 'rules.json', '--redact']);
   assert.equal(hidden.status, 0, hidden.stderr);
   assert.equal(raw.stdout.includes('zbob'), false);
+  assert.equal(raw.stdout.includes(path.basename(dir)), false);
   assert.match(raw.stdout, /\.\.\/\.\.\/\.\.\/\.\.\/qa-private\/settings\.json/);
   assert.match(raw.stdout, /File path is outside the report root and was rewritten to a relative path/);
   assert.equal(hidden.stdout, raw.stdout);
