@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.2 - 2026-11-02
+## 0.1.2 - 2026-11-03
 
 Windows fixes for `--heal`.
 
@@ -9,6 +9,7 @@ Windows fixes for `--heal`.
 - **Changed:** Heal's `--run-timeout` now keeps back 10 percent of the time left, at least 1 second and at most 15 seconds, instead of 1 second. This gives heal time to stop its last run and write its results before flaky stops it. With the default wait, heal gets about 165 seconds.
 - **Fixed:** Pressing Ctrl+C during `triage --heal` on Windows no longer leaves a `qa-core-flaky-heal-*` folder in `%TEMP%`. That folder could hold a browser profile and a heal trace from the test run. The tool now stops the heal process tree, then removes the folder with retries while Windows releases the browser's files, then exits 130. Ctrl+Break and a closed console window are handled the same way. On Windows PowerShell, `npx` runs through `npx.ps1`, so `$LASTEXITCODE` shows 1 after Ctrl+C. Node itself exits 130. When Ctrl+C stops heal before the tool sees it, the tool no longer writes a triage report with heal errors. Only a folder whose name starts with `qa-core-flaky-heal-` is removed, so test files and reports are never touched. Reported by Abdul Rafay.
 - **Docs:** The README and the heal contract explain how heal is found and started, and what happens on Windows when it is not installed. The README now documents `QA_CORE_HEAL_TIMEOUT_MS`, with a Windows example, and what Ctrl+C does during `triage --heal`.
+- **Docs:** The README and the model docs explain that `parse` already rewrites a path in the same home folder as the report root to a relative path, so `parse` and `parse --redact` can print the same output for a project inside the home folder. Reported by Abdul Rafay.
 - **Tests:** New tests cover the stop handler for Ctrl+C, Ctrl+Break, `SIGTERM`, and `SIGHUP`, the retries for a locked folder, the cleanup when the process exits, a guard that removes only `qa-core-flaky-heal-*` folders, and a `triage --heal` run that is stopped while a slow stand-in heal holds a browser profile and a trace.
 - **Tests:** New tests cover the heal lookup, parent folders, the `bin` field, a `bin` that leaves the package folder, the Windows fallback, and a full `triage --heal` run that finds heal in `node_modules`. New tests cover the 180 second default, the 10 minute limit, the `--run-timeout` reserve, and the value sent to heal when `QA_CORE_HEAL_TIMEOUT_MS` is not set. The HTML example now shows version 0.1.2.
 

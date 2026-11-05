@@ -148,7 +148,7 @@ With no separator after the username, every following token that starts with a l
 
 A quoted mark that the text already contains, such as `Expected: "<home~2>"`, is tagged `<text:home~2>` before numbering. That tag and a generated `<home~2>` are not the same text.
 
-`parse` and the library return the original error text, including usernames. That is the text cause rules read. `parse --redact`, and `redactParseResult`, hide the username in the printed records. The default is still the raw text.
+`parse` and the library return the original error text, including usernames. That is the text cause rules read. `parse --redact`, and `redactParseResult`, hide the username in the printed records. The default is still the raw text. A path in the error text that is in the same home folder as the report root is the exception: it is already relative, as described above, so it has no username to hide. For a project inside the home folder, `parse` and `parse --redact` can then print the same records. That is expected.
 
 A structured file path with no report root is still stored as `<home>/...`. When one report has two files that redact to the same `<home>` path, the first id stays `<home>` and the later ones become `<file~2>`, `<file~3>`, in the order the parser saw them. `<home~2>` is only the second username inside one triage entry. The mark is not the username. Triage also keeps entries whose ids differed only by a username: the first redacted id is unchanged, and the next ones gain ` (2)`, ` (3)`.
 

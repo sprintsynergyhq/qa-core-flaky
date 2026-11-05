@@ -25,6 +25,14 @@ function run(args) {
   });
 }
 
+/** Run the CLI from another folder, so a test can pass a report path relative to that folder. */
+function runIn(cwd, args) {
+  return spawnSync(process.execPath, [path.resolve(cli), ...args], {
+    cwd,
+    encoding: 'utf8',
+  });
+}
+
 function oneLine(text) {
   const trimmed = text.replace(/\n$/, '');
   return !trimmed.includes('\n');
@@ -265,6 +273,62 @@ test('parse --redact hides a home username and the default leaves it', (t) => {
   assert.equal(hidden.status, 0, hidden.stderr);
   assert.equal(hidden.stdout.includes('alice'), false);
   assert.match(hidden.stdout, /<home>\/a\.json/);
+});
+
+/** A small Playwright JSON report with a Windows kit inside the home folder. */
+function windowsHomeReport(rootDir) {
+  const home = 'C:\\Users\\zbob';
+  const message = `Error: ENOENT: no such file or directory, open '${home}\\qa-private\\settings.json'`;
+  const config = { version: '1.60.0', projects: [{ name: 'chromium' }] };
+  if (rootDir) config.rootDir = rootDir;
+  return JSON.stringify({
+    config,
+    suites: [{
+      title: 'simulated-errors.spec.ts',
+      file: 'simulated-errors.spec.ts',
+      specs: [{
+        title: 'missing settings file',
+        file: 'simulated-errors.spec.ts',
+        line: 3,
+        column: 1,
+        tests: [{
+          projectName: 'chromium',
+          results: [{ status: 'failed', retry: 0, duration: 10, errors: [{ message }], error: { message } }],
+          status: 'unexpected',
+        }],
+      }],
+    }],
+  });
+}
+
+test('parse on a Windows kit inside the home folder already prints a relative path, so --redact matches (C03)', (t) => {
+  // The temp folder is inside the home folder on Windows, so the report is
+  // passed as a relative path from its own folder, like a kit run. Otherwise
+  // the report path itself would show the home folder without --redact.
+  const dir = keepTemp(t, 'qa-core-flaky-c03-');
+  fs.writeFileSync(path.join(dir, 'rules.json'), windowsHomeReport('C:\\Users\\zbob\\Desktop\\qa-core-testing\\saucedemo-flaky-kit\\rules'));
+  const raw = runIn(dir, ['parse', 'rules.json']);
+  assert.equal(raw.status, 0, raw.stderr);
+  const hidden = runIn(dir, ['parse', 'rules.json', '--redact']);
+  assert.equal(hidden.status, 0, hidden.stderr);
+  assert.equal(raw.stdout.includes('zbob'), false);
+  assert.equal(raw.stdout.includes(path.basename(dir)), false);
+  assert.match(raw.stdout, /\.\.\/\.\.\/\.\.\/\.\.\/qa-private\/settings\.json/);
+  assert.match(raw.stdout, /File path is outside the report root and was rewritten to a relative path/);
+  assert.equal(hidden.stdout, raw.stdout);
+});
+
+test('parse on a Windows report with no root keeps the home path and --redact hides it (C03)', (t) => {
+  const dir = keepTemp(t, 'qa-core-flaky-c03-noroot-');
+  const report = path.join(dir, 'rules-noroot.json');
+  fs.writeFileSync(report, windowsHomeReport(undefined));
+  const raw = run(['parse', report]);
+  assert.equal(raw.status, 0, raw.stderr);
+  assert.match(raw.stdout, /C:\\\\Users\\\\zbob\\\\qa-private\\\\settings\.json/);
+  const hidden = run(['parse', report, '--redact']);
+  assert.equal(hidden.status, 0, hidden.stderr);
+  assert.equal(hidden.stdout.includes('zbob'), false);
+  assert.match(hidden.stdout, /<home>\/qa-private\/settings\.json/);
 });
 
 test('triage exit 2 leaves the full stdout report intact', () => {
